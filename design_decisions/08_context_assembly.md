@@ -54,6 +54,32 @@ An intent pre-check runs before the main LLM call:
 
 Adds ~100ms but keeps context clean when episodic memory isn't needed.
 
+## LangChain retrieval for Layer 3
+
+```python
+from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_openai import OpenAIEmbeddings
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+retriever = MongoDBAtlasVectorSearch(
+    collection=sessions_collection,
+    embedding=embeddings,
+    index_name="session_embedding_index",
+).as_retriever(
+    search_kwargs={
+        "k": 5,
+        "pre_filter": {"topic_category": current_topic_category},
+    }
+)
+
+# Only called when intent check returns "yes"
+relevant_docs = retriever.invoke(user_message)
+```
+
+Metadata pre-filter prevents topic bleed (e.g. "graph databases" vs "graph algorithms").
+The retrieved chunks are injected as Layer 3 in the context assembly order.
+
 ## Conversation history
 Rolling window of last 6 turns. For long sessions (10+ turns),
 mid-session compression kicks in: LLM summarizes older turns and

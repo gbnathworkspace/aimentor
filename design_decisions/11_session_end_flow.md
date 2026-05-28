@@ -35,10 +35,10 @@ LLM returns JSON
   ├── narrative_summary
   │       │
   │       ▼
-  │   embed with text-embedding model
+  │   embed with OpenAIEmbeddings (LangChain)
   │       │
   │       ▼
-  │   upsert into Vector DB
+  │   upsert via MongoDBAtlasVectorSearch.add_texts() (LangChain)
   │   (stored with metadata: topic, date, category, type)
   │
   └── skill_update

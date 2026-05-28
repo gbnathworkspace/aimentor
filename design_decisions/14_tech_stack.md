@@ -3,21 +3,22 @@
 ## Final Stack
 
 ```
-Layer              Tech                      Notes
-──────────────────────────────────────────────────────────────────
-Frontend           Next.js (App Router)      Chat UI, streaming
-UI Library         shadcn/ui                 Composable, own the code
-Auth               Clerk                     Drop-in Next.js auth
-Backend            FastAPI (Python)          Ingestion + LLM orchestration
-LLM (main)         Claude Sonnet 4.6         Reasoning + responses
-LLM (lightweight)  Claude Haiku 4.5          Intent check, titles, drift
-Embeddings         OpenAI text-embedding-3-small  Quality/cost balance
-Database           MongoDB Atlas             Structured + vector (one DB)
-Email              Gmail SMTP (Nodemailer)    Free, single user v1
-Cron               Railway Cron              Daily alert trigger
-File processing    PyMuPDF + pandas          PDF extraction + CSV parsing
-Hosting (FE)       Vercel                    Zero config, free tier
-Hosting (BE)       Railway                   FastAPI, $5/month, no cold starts
+Layer              Tech                          Notes
+──────────────────────────────────────────────────────────────────────
+Frontend           Next.js (App Router)          Chat UI, streaming
+UI Library         shadcn/ui                     Composable, own the code
+Auth               Clerk                         Drop-in Next.js auth
+Backend            FastAPI (Python)              Ingestion + LLM orchestration
+LLM Orchestration  LangChain (Python)            Chains, loaders, splitters, retrieval
+LLM (main)         Claude Sonnet 4.6             Reasoning + responses
+LLM (lightweight)  Claude Haiku 4.5              Intent check, titles, drift
+Embeddings         OpenAI text-embedding-3-small Quality/cost balance
+Database           MongoDB Atlas                 Structured + vector (one DB)
+Email              Gmail SMTP (Nodemailer)        Free, single user v1
+Cron               Railway Cron                  Daily alert trigger
+File processing    PyMuPDF + pandas              PDF extraction + CSV parsing
+Hosting (FE)       Vercel                        Zero config, free tier
+Hosting (BE)       Railway                       FastAPI, $5/month, no cold starts
 ```
 
 ---
@@ -60,9 +61,10 @@ Keeps cost low without compromising response quality.
 
 ### FastAPI over Next.js API routes
 Python is the right language for the ingestion pipeline:
-- PyMuPDF for PDF extraction
-- pandas for CSV parsing
-- LangChain / direct Anthropic SDK for LLM orchestration
+- PyMuPDF for PDF extraction (via LangChain's PyMuPDFLoader)
+- pandas for CSV parsing (via LangChain's CSVLoader)
+- LangChain for document loading, chunking, embedding, and retrieval chains
+- Direct Anthropic SDK for LLM calls where a full chain isn't needed
 - Cleaner separation of concerns as complexity grows
 
 Next.js handles the UI and thin session management layer.

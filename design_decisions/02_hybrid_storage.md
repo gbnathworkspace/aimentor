@@ -33,3 +33,10 @@ Free-form, needs semantic search?                       →  Vector DB
 At session end, two writes happen from one LLM call:
 - Narrative summary → embedded → Vector DB
 - Structured update (score, gap, weak_areas) → upserted → MongoDB
+
+## LangChain as the Vector DB interface layer
+`MongoDBAtlasVectorSearch` (from `langchain-mongodb`) is the interface
+between FastAPI and MongoDB Atlas Vector Search.
+It handles embedding generation, document storage, and retrieval in one abstraction.
+Direct MongoDB queries are still used for all Layer 1 and Layer 2 reads/writes —
+LangChain is only involved where vectors are stored or searched.

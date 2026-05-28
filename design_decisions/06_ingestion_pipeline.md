@@ -49,3 +49,31 @@ Two-pass processing:
 ## Embedding model
 Embedding model: OpenAI text-embedding-3-small.
 Decided in 14_tech_stack.md — best quality/cost ratio, 1536 dimensions.
+
+## LangChain components used
+
+```python
+# Document loaders
+from langchain_community.document_loaders import PyMuPDFLoader, CSVLoader
+
+loader = PyMuPDFLoader("resume.pdf")       # resume
+loader = CSVLoader("leetcode_export.csv")  # LeetCode history
+
+# Text splitting
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
+chunks = splitter.split_documents(docs)
+
+# Embeddings
+from langchain_openai import OpenAIEmbeddings
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+# Vector store — store chunks into MongoDB Atlas
+from langchain_mongodb import MongoDBAtlasVectorSearch
+
+vector_store = MongoDBAtlasVectorSearch.from_documents(
+    chunks, embeddings, collection=collection, index_name="session_embedding_index"
+)
+```

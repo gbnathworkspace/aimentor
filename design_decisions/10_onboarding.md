@@ -18,8 +18,8 @@ Phase 2 — Current State (3 turns)
 
 Phase 3 — File Upload (1 turn)
   "Drop your resume and LeetCode export if you have them."
-  resume.pdf  → extract → parse → enriches L1 + L2
-  leetcode.csv → parse → updates skill graph signals
+  resume.pdf   → PyMuPDFLoader (LangChain) → extract → parse → enriches L1 + L2
+  leetcode.csv → CSVLoader (LangChain)     → parse → updates skill graph signals
   (optional — onboarding works without uploads)
 
 Phase 4 — Availability (1 turn)

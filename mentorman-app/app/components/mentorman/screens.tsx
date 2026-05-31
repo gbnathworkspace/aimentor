@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from './icons';
 import { Brand, Bubble, VerdictMsg, Typing, GapBar, fmt } from './ui';
 import { SEEDS, EVAL_SEED, EVAL_DONE_EXTRA, MODES, mentorSystemPrompt, type MessageItem, type ToneId } from './data';
+import type { CoreProfile } from '@/lib/mentorman-api';
 
 // ---------- Onboarding (full screen, guided) ----------------
 const ONB_STEPS = [
@@ -14,6 +15,10 @@ const ONB_STEPS = [
       "Switch from backend to ML engineering",
       "Pass my system design interview",
     ],
+  },
+  {
+    q: "When do you need to be ready?",
+    replies: ["3 months", "6 months", "August 2026"],
   },
   {
     q: "Got it. Drop your resume and LeetCode export and I'll calibrate from there — or skip it.",
@@ -46,15 +51,32 @@ export function Onboarding({ onFinish }: { onFinish: () => void }) {
         setThread(prev => [...prev, { who: 'mentor', text: ONB_STEPS[nextStep].q, _id: 'q' + nextStep }]);
         setStep(nextStep);
       } else {
-        setThread(prev => [...prev, { who: 'mentor', text: "That gives us ~18 hrs/week. I've built your plan around it — we adjust as we go.", _id: 'qf' }]);
         const goal = answers.current[0] ?? 'FAANG-level SWE role';
-        const availability = answers.current[2] ?? '2 hrs/day';
+        const deadlineRaw = answers.current[1] ?? '3 months';
+        const availability = answers.current[3] ?? '2 hrs/day';
+
+        // Resolve deadline: if it looks like "N months", compute date; otherwise use as-is
+        let deadline = deadlineRaw;
+        const monthsMatch = deadlineRaw.match(/^(\d+)\s*months?$/i);
+        if (monthsMatch) {
+          const d = new Date();
+          d.setMonth(d.getMonth() + parseInt(monthsMatch[1]));
+          deadline = d.toISOString().slice(0, 10);
+        } else {
+          // Try to parse as a date
+          const parsed = new Date(deadlineRaw);
+          if (!isNaN(parsed.getTime())) {
+            deadline = parsed.toISOString().slice(0, 10);
+          }
+        }
+
+        setThread(prev => [...prev, { who: 'mentor', text: "That gives me everything I need — I've built your plan. Let's get started.", _id: 'qf' }]);
         fetch('/api/profile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             goal,
-            deadline: 'Aug 2026',
+            deadline,
             overall_level: 'beginner',
             daily_availability: availability,
             email: '',
@@ -76,7 +98,7 @@ export function Onboarding({ onFinish }: { onFinish: () => void }) {
         <div className="onb-progress">
           <span>setup</span>
           <div className="onb-steps">
-            {[0,1,2,3].map(i => (
+            {[0,1,2,3,4].map(i => (
               <div key={i} className={`s ${i < step || done ? 'done' : i === step ? 'curr' : ''}`} />
             ))}
           </div>
@@ -129,12 +151,11 @@ export function Onboarding({ onFinish }: { onFinish: () => void }) {
           {done && (
             <div className="setup-card">
               <div className="badge"><span className="dot" /> Setup complete</div>
-              <h3>You&apos;re all set, Arjun.</h3>
+              <h3>You&apos;re all set.</h3>
               <div className="setup-lines">
-                <div className="setup-line"><span className="k">goal</span><span className="v">20 LPA by Aug 2026</span></div>
-                <div className="setup-line"><span className="k">availability</span><span className="v">18 hrs / week</span></div>
-                <div className="setup-line"><span className="k">biggest gap</span><span className="v">Graphs (40%) · DP (45%)</span></div>
-                <div className="setup-line"><span className="k">indexed</span><span className="v">184 LeetCode problems</span></div>
+                <div className="setup-line"><span className="k">goal</span><span className="v">{answers.current[0] ?? '—'}</span></div>
+                <div className="setup-line"><span className="k">deadline</span><span className="v">{answers.current[1] ?? '—'}</span></div>
+                <div className="setup-line"><span className="k">availability</span><span className="v">{answers.current[3] ?? '—'}</span></div>
               </div>
               <button className="btn btn-accent" style={{ width: '100%', height: 42 }} onClick={onFinish}>
                 Start your first session <Icon name="arrowR" size={15} />
@@ -286,33 +307,12 @@ export function SessionEnd({ onFollow, onBack }: { onFollow: () => void; onBack:
           <div className="se-top">
             <div className="label">Session summary</div>
             <h2 className="title-lg">BFS/DFS revision</h2>
-            <div className="meta">today · 11:42 → 12:18 · 36 min · 8 messages</div>
+            <div className="meta">today · 36 min · session ended</div>
           </div>
           <div className="se-summary">
             <div className="label">Summary</div>
             <div className="body">
-              You revisited BFS layer semantics and got crisp on the queue invariant. We worked a grid-shortest-path warmup, then a variant with zero-cost edges where you hit the wall — you correctly spotted that plain BFS breaks but reached for the wrong fix. We named 0-1 BFS as the right tool and queued it for next session. You stayed on topic the whole way.
-            </div>
-          </div>
-          <div className="se-cards">
-            <div className="se-card">
-              <div className="h">Skill update</div>
-              <div className="skill-line">graphs <span className="arrow">·</span> medium <span className="arrow">→</span> <span className="new">medium+</span></div>
-              <div style={{ marginTop: 4 }}>
-                <GapBar cur={58} req={85} animate />
-                <div className="gapbar-labels" style={{ marginTop: 5, marginBottom: 0 }}>
-                  <span>was 45%</span><span className="arrow">+13 this session</span><span>req 85%</span>
-                </div>
-              </div>
-            </div>
-            <div className="se-card">
-              <div className="h">Weak areas to revisit</div>
-              <div className="area-tags" style={{ marginTop: 2 }}>
-                <span className="area-tag warn">0-1 BFS</span>
-                <span className="area-tag warn">negative cycles</span>
-                <span className="area-tag warn">Dijkstra heap</span>
-              </div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginTop: 'auto' }}>3 topics flagged</div>
+              Session saved. Your skill graph has been updated based on this conversation.
             </div>
           </div>
           <div className="se-actions">
@@ -326,62 +326,161 @@ export function SessionEnd({ onFollow, onBack }: { onFollow: () => void; onBack:
 }
 
 // ---------- Settings ----------------------------------------
-export function Settings({ onReset }: { onReset: () => void }) {
+export function Settings({ profile, onReset, onSaved }: {
+  profile: CoreProfile | null;
+  onReset: () => void;
+  onSaved: () => void;
+}) {
+  const [editGoal, setEditGoal] = useState(false);
+  const [editDeadline, setEditDeadline] = useState(false);
   const [editAvail, setEditAvail] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const [goalVal, setGoalVal] = useState(profile?.goal ?? '');
+  const [deadlineVal, setDeadlineVal] = useState(profile?.deadline ?? '');
+  const [availVal, setAvailVal] = useState(profile?.daily_availability ?? '');
+  const [saving, setSaving] = useState(false);
+
+  // Sync form values when profile loads / changes
+  useEffect(() => {
+    setGoalVal(profile?.goal ?? '');
+    setDeadlineVal(profile?.deadline ?? '');
+    setAvailVal(profile?.daily_availability ?? '');
+  }, [profile]);
+
+  const save = async (field: Record<string, string>) => {
+    setSaving(true);
+    try {
+      await fetch('/api/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(field),
+      });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setSaving(true);
+    try {
+      await fetch('/api/profile', { method: 'DELETE' });
+    } finally {
+      setSaving(false);
+    }
+    onReset();
+  };
+
+  const deadlineDisplay = profile?.deadline
+    ? new Date(profile.deadline).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    : '—';
+
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="ph-left"><div className="ph-title">Settings</div><div className="ph-sub">goal · availability · data</div></div>
+        <div className="ph-left"><div className="ph-title">Profile &amp; Settings</div><div className="ph-sub">goal · availability · data</div></div>
       </div>
       <div className="set-body">
         <div className="set-inner">
+
           <div className="set-section">
             <div className="set-label">Goal</div>
-            <div className="set-row"><div className="k">Goal</div><div className="v">20 LPA SWE role</div><button className="btn btn-sm btn-ghost">Edit</button></div>
-            <div className="set-row"><div className="k">Target date</div><div className="v">Aug 2026</div><button className="btn btn-sm btn-ghost">Edit</button></div>
+
+            <div className="set-row">
+              <div className="k">Goal</div>
+              {editGoal ? (
+                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="num-input" style={{ flex: 1 }}
+                    value={goalVal}
+                    onChange={e => setGoalVal(e.target.value)}
+                  />
+                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditGoal(false); setGoalVal(profile?.goal ?? ''); }}>Cancel</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { await save({ goal: goalVal }); setEditGoal(false); }}>Save</button>
+                </div>
+              ) : (
+                <>
+                  <div className="v">{profile?.goal ?? '—'}</div>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setEditGoal(true)}>Edit</button>
+                </>
+              )}
+            </div>
+
+            <div className="set-row">
+              <div className="k">Target date</div>
+              {editDeadline ? (
+                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="num-input" type="date" style={{ flex: 1 }}
+                    value={deadlineVal}
+                    onChange={e => setDeadlineVal(e.target.value)}
+                  />
+                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditDeadline(false); setDeadlineVal(profile?.deadline ?? ''); }}>Cancel</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { await save({ deadline: deadlineVal }); setEditDeadline(false); }}>Save</button>
+                </div>
+              ) : (
+                <>
+                  <div className="v">{deadlineDisplay}</div>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setEditDeadline(true)}>Edit</button>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="set-section">
             <div className="set-label">Availability</div>
             <div className="avail-card">
               <div className="avail-top">
-                <div className="main">18 <span className="unit">hrs / week</span></div>
-                <span className="avail-breakdown">2 hrs weekdays · 4 hrs weekends</span>
+                <div className="main">{profile?.daily_availability ?? '—'}</div>
               </div>
-              {editAvail && (
+              {editAvail ? (
                 <div className="avail-form">
-                  <div className="avail-field"><label>Weekday hrs</label><input className="num-input" type="number" defaultValue={2} /></div>
-                  <div className="avail-field"><label>Weekend hrs</label><input className="num-input" type="number" defaultValue={4} /></div>
-                  <div style={{ flex: 1 }} />
-                  <button className="btn btn-sm btn-ghost" onClick={() => setEditAvail(false)}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" onClick={() => setEditAvail(false)}>Save</button>
+                  <div className="avail-field" style={{ flex: 1 }}>
+                    <label>Daily availability</label>
+                    <input
+                      className="num-input" style={{ width: '100%' }}
+                      value={availVal}
+                      placeholder="e.g. 2 hrs weekdays, 4 on weekends"
+                      onChange={e => setAvailVal(e.target.value)}
+                    />
+                  </div>
+                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditAvail(false); setAvailVal(profile?.daily_availability ?? ''); }}>Cancel</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { await save({ daily_availability: availVal }); setEditAvail(false); }}>Save</button>
                 </div>
+              ) : (
+                <button className="btn btn-sm btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setEditAvail(true)}>Edit</button>
               )}
-              {!editAvail && <button className="btn btn-sm btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setEditAvail(true)}>Adjust hours</button>}
             </div>
           </div>
 
           <div className="set-section">
             <div className="set-label">Data sources</div>
-            <div className="data-row">
-              <div className="file-ico">PDF</div>
-              <div className="info"><div className="fname">resume.pdf <span className="ok">active</span></div><div className="fmeta">uploaded May 2026 · goal calibration</div></div>
-              <button className="btn btn-sm btn-ghost">Re-upload</button>
-            </div>
-            <div className="data-row">
-              <div className="file-ico">CSV</div>
-              <div className="info"><div className="fname">leetcode_export.csv <span className="ok">active</span></div><div className="fmeta">uploaded May 2026 · 184 problems indexed</div></div>
-              <button className="btn btn-sm btn-ghost">Re-upload</button>
+            <div style={{ color: 'var(--muted)', fontSize: 12, padding: '8px 0' }}>
+              File ingestion is not yet active. Resume and LeetCode uploads coming soon.
             </div>
           </div>
 
           <div className="set-section">
             <div className="set-label danger">Danger zone</div>
             <div className="danger-card">
-              <button className="danger-btn" onClick={onReset}>Reset goal and skill graph</button>
-              <div className="danger-note">This clears your skill graph and restarts onboarding.</div>
+              {confirmReset ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>This will delete your profile and restart onboarding. Are you sure?</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="danger-btn" disabled={saving} onClick={handleReset}>Yes, reset everything</button>
+                    <button className="btn btn-sm btn-ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button className="danger-btn" onClick={() => setConfirmReset(true)}>Reset goal and skill graph</button>
+                  <div className="danger-note">This clears your profile and restarts onboarding.</div>
+                </>
+              )}
             </div>
           </div>
+
         </div>
       </div>
     </div>

@@ -7,7 +7,8 @@ import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
 import { Onboarding, EvalPanel, SessionEnd, Settings, MobileChat } from './screens';
 import { TweaksPanel, TweakSection, TweakRadio, TweakColor, useTweaks } from './tweaks';
-import { SESSIONS, ACCENTS, catToMode, type ModeId, type ToneId, type DensityId } from './data';
+import { SESSIONS, ACCENTS, catToMode, type ModeId, type ToneId, type Topic } from './data';
+import type { CoreProfile } from '@/lib/mentorman-api';
 
 type View = 'chat' | 'dashboard' | 'evaluation' | 'summary' | 'settings' | 'onboarding';
 
@@ -56,12 +57,39 @@ export function MentorManApp() {
   const [activeSession, setActiveSession] = useState('s1');
   const [mode, setMode] = useState<ModeId>('topic');
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [profile, setProfile] = useState<{ goal?: string; deadline?: string } | null>(null);
+  const [profile, setProfile] = useState<CoreProfile | null>(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [topics, setTopics] = useState<Topic[]>([]);
 
+  // Fetch user name from Clerk via /api/me
+  useEffect(() => {
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.name) setUserName(data.name); })
+      .catch(() => {});
+  }, []);
+
+  // Fetch profile — auto-route to onboarding if none exists
   useEffect(() => {
     fetch('/api/profile')
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setProfile(data); })
+      .then(data => {
+        if (data) {
+          setProfile(data);
+        } else {
+          setView('onboarding');
+        }
+        setProfileLoaded(true);
+      })
+      .catch(() => { setProfileLoaded(true); });
+  }, []);
+
+  // Fetch skills for alert derivation in ChatPanel
+  useEffect(() => {
+    fetch('/api/skills')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setTopics(data); })
       .catch(() => {});
   }, []);
 
@@ -83,6 +111,13 @@ export function MentorManApp() {
     document.addEventListener('animationend', onEnd, true);
     return () => document.removeEventListener('animationend', onEnd, true);
   }, []);
+
+  const refreshProfile = () => {
+    fetch('/api/profile')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setProfile(data); })
+      .catch(() => {});
+  };
 
   const pickSession = (id: string, type?: string) => {
     setActiveSession(id);
@@ -106,12 +141,20 @@ export function MentorManApp() {
     setView(target as View);
   };
 
+  // Don't render until we know whether to show onboarding or the app
+  if (!profileLoaded) return null;
+
   const fullScreen = view === 'onboarding';
 
   return (
     <div className={`app ${fullScreen ? 'full' : ''} density-${t.density}`}>
       {fullScreen ? (
-        <Onboarding onFinish={() => { setView('chat'); setActiveSession('s1'); setMode('topic'); }} />
+        <Onboarding onFinish={() => {
+          refreshProfile();
+          setView('chat');
+          setActiveSession('s1');
+          setMode('topic');
+        }} />
       ) : (
         <>
           <Sidebar
@@ -121,14 +164,37 @@ export function MentorManApp() {
             onNav={(v) => { setMobileOpen(false); setView(v as View); }}
             onNew={() => { setActiveSession('new'); setMode('planning'); setView('chat'); }}
             profile={profile}
+            userName={userName}
           />
           {view === 'chat' && (
-            <ChatPanel sessionId={activeSession} mode={mode} setMode={setMode} tone={t.tone as ToneId} onNav={(v) => setView(v as View)} />
+            <ChatPanel
+              sessionId={activeSession}
+              mode={mode}
+              setMode={setMode}
+              tone={t.tone as ToneId}
+              onNav={(v) => setView(v as View)}
+              topics={topics}
+            />
           )}
-          {view === 'dashboard' && <Dashboard onStartTopic={startTopic} />}
-          {view === 'evaluation' && <EvalPanel onComplete={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }} />}
-          {view === 'summary' && <SessionEnd onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }} onBack={() => { setActiveSession('s1'); setView('chat'); }} />}
-          {view === 'settings' && <Settings onReset={() => setView('onboarding')} />}
+          {view === 'dashboard' && (
+            <Dashboard onStartTopic={startTopic} profile={profile} />
+          )}
+          {view === 'evaluation' && (
+            <EvalPanel onComplete={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }} />
+          )}
+          {view === 'summary' && (
+            <SessionEnd
+              onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }}
+              onBack={() => { setActiveSession('s1'); setView('chat'); }}
+            />
+          )}
+          {view === 'settings' && (
+            <Settings
+              profile={profile}
+              onReset={() => { setProfile(null); setView('onboarding'); }}
+              onSaved={refreshProfile}
+            />
+          )}
         </>
       )}
 

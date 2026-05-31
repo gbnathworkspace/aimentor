@@ -2,8 +2,8 @@
 
 import React, { Fragment, useState, useEffect } from 'react';
 import { Icon } from './icons';
-import { SESSIONS, MODES, type Session } from './data';
-import type { SessionRecord } from '@/lib/mentorman-api';
+import { MODES, type Session } from './data';
+import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
 
 // ---- tiny inline markdown: **bold**, `code`, \n ------------
 export function fmt(text: string | null | undefined): React.ReactNode {
@@ -126,31 +126,61 @@ export function GapBar({ cur, req, animate }: { cur: number; req: number; animat
   );
 }
 
+function daysLeft(deadline: string | undefined): number | null {
+  if (!deadline) return null;
+  const diff = new Date(deadline).getTime() - Date.now();
+  return Math.max(0, Math.round(diff / 86_400_000));
+}
+
 function apiSessionToSession(r: SessionRecord): Session {
   return { id: r.session_id, title: r.title, cat: r.type, date: r.date };
 }
 
+// ---- Session skeleton (loading placeholder) ----------------
+function SessionSkeleton() {
+  return (
+    <div className="session" style={{ pointerEvents: 'none', opacity: 0.45 }}>
+      <div className="s-row1">
+        <span className="s-title" style={{ background: 'var(--card-3)', borderRadius: 4, color: 'transparent', userSelect: 'none' }}>Loading session title...</span>
+      </div>
+      <div className="s-row2">
+        <span className="tag" style={{ background: 'var(--card-3)', color: 'transparent', userSelect: 'none' }}>Topic</span>
+      </div>
+    </div>
+  );
+}
+
 // ---- Sidebar -----------------------------------------------
-export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, profile }: {
+export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, profile, userName }: {
   view: string;
   activeSession: string;
   onPickSession: (id: string, type?: string) => void;
   onNav: (v: string) => void;
   onNew: () => void;
-  profile?: { goal?: string; deadline?: string } | null;
+  profile?: CoreProfile | null;
+  userName?: string;
 }) {
-  const [sessions, setSessions] = useState<Session[]>(SESSIONS);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     fetch('/api/sessions?limit=30')
       .then(r => r.json())
       .then((data: SessionRecord[]) => {
         if (Array.isArray(data) && data.length > 0) {
           setSessions(data.map(apiSessionToSession));
+        } else {
+          setSessions([]);
         }
       })
-      .catch(() => {});
+      .catch(() => { setSessions([]); })
+      .finally(() => setLoading(false));
   }, []);
+
+  const days = daysLeft(profile?.deadline);
+  const displayName = userName || profile?.email?.split('@')[0] || 'You';
+  const initial = displayName[0]?.toUpperCase() ?? 'Y';
 
   return (
     <div className="sidebar">
@@ -172,32 +202,58 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
         </button>
       </div>
 
-      <div className="sb-section"><span>Sessions</span><span className="count">{sessions.length}</span></div>
+      <div className="sb-section"><span>Sessions</span><span className="count">{loading ? '…' : sessions.length}</span></div>
       <div className="session-list">
-        {sessions.map(s => {
-          const isActive = (view === 'chat' || view === 'evaluation' || view === 'summary') && activeSession === s.id;
-          return (
-            <div key={s.id} className={`session ${isActive ? 'active' : ''}`} onClick={() => onPickSession(s.id, s.cat)}>
-              <div className="s-row1">
-                <span className="s-title">{s.title}</span>
-                <span className="s-date">{s.date}</span>
-              </div>
-              <div className="s-row2">
-                <span className="tag">{s.cat}</span>
-                {s.live && <span className="pill ok" style={{ height: 18, padding: '0 7px', fontSize: 9 }}><span className="ind" /> live</span>}
-              </div>
+        {loading ? (
+          <>
+            <SessionSkeleton />
+            <SessionSkeleton />
+            <SessionSkeleton />
+          </>
+        ) : sessions.length === 0 ? (
+          <div style={{ padding: '20px 12px', textAlign: 'center' }}>
+            <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.5, marginBottom: 12 }}>
+              No sessions yet.<br />Start your first conversation.
             </div>
-          );
-        })}
+            <button className="btn btn-sm btn-ghost" onClick={onNew} style={{ width: '100%' }}>
+              <Icon name="plus" size={13} /> New Session
+            </button>
+          </div>
+        ) : (
+          sessions.map(s => {
+            const isActive = (view === 'chat' || view === 'evaluation' || view === 'summary') && activeSession === s.id;
+            return (
+              <div key={s.id} className={`session ${isActive ? 'active' : ''}`} onClick={() => onPickSession(s.id, s.cat)}>
+                <div className="s-row1">
+                  <span className="s-title">{s.title}</span>
+                  <span className="s-date">{s.date}</span>
+                </div>
+                <div className="s-row2">
+                  <span className="tag">{s.cat}</span>
+                  {s.live && <span className="pill ok" style={{ height: 18, padding: '0 7px', fontSize: 9 }}><span className="ind" /> live</span>}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
-      <div className="sb-foot">
-        <div className="avatar">AK</div>
+      {/* Clickable footer → Profile / Settings */}
+      <button
+        className="sb-foot"
+        onClick={() => onNav('settings')}
+        title="View profile & settings"
+        style={{ cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left' }}
+      >
+        <div className="avatar">{initial}</div>
         <div>
-          <div className="who">Arjun K.</div>
-          <div className="sub">{profile?.goal ?? '20 LPA'} · {profile?.deadline ?? '70 days left'}</div>
+          <div className="who">{displayName}</div>
+          <div className="sub">
+            {profile?.goal ?? '—'}
+            {days !== null ? ` · ${days} days left` : ''}
+          </div>
         </div>
-      </div>
+      </button>
     </div>
   );
 }

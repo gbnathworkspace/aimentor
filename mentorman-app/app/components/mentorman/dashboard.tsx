@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from './icons';
 import { GapBar } from './ui';
 import { TOPICS, type Topic } from './data';
-import type { SkillNode } from '@/lib/mentorman-api';
+import type { SkillNode, CoreProfile } from '@/lib/mentorman-api';
 
 function skillToTopic(s: SkillNode): Topic {
   const sig = (s.signals ?? {}) as Record<string, unknown>;
@@ -19,6 +19,17 @@ function skillToTopic(s: SkillNode): Topic {
     strong: (sig.strong as string[]) ?? [],
     weak: (sig.weak as string[]) ?? [],
   };
+}
+
+function daysLeft(deadline: string | undefined): number | null {
+  if (!deadline) return null;
+  const diff = new Date(deadline).getTime() - Date.now();
+  return Math.max(0, Math.round(diff / 86_400_000));
+}
+
+function weeksLeft(deadline: string | undefined): number | null {
+  const d = daysLeft(deadline);
+  return d === null ? null : Math.ceil(d / 7);
 }
 
 const gapClass = (g: number) => g >= 40 ? 'hi' : g >= 20 ? 'mid' : 'lo';
@@ -94,13 +105,18 @@ function TopicCard({ t, onStart, animate }: { t: Topic; onStart: (t: Topic) => v
   );
 }
 
-export function Dashboard({ onStartTopic }: { onStartTopic: (t: Topic) => void }) {
+export function Dashboard({ onStartTopic, profile }: {
+  onStartTopic: (t: Topic) => void;
+  profile: CoreProfile | null;
+}) {
   const [animate, setAnimate] = useState(false);
   const [topics, setTopics] = useState<Topic[]>(TOPICS);
+  const [loadingSkills, setLoadingSkills] = useState(true);
 
   useEffect(() => { const t = setTimeout(() => setAnimate(true), 60); return () => clearTimeout(t); }, []);
 
   useEffect(() => {
+    setLoadingSkills(true);
     fetch('/api/skills')
       .then(r => r.json())
       .then((data: SkillNode[]) => {
@@ -108,7 +124,8 @@ export function Dashboard({ onStartTopic }: { onStartTopic: (t: Topic) => void }
           setTopics(data.map(skillToTopic));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingSkills(false));
   }, []);
 
   const readiness = topics.length
@@ -119,6 +136,14 @@ export function Dashboard({ onStartTopic }: { onStartTopic: (t: Topic) => void }
     ? Math.round(topics.reduce((a, t) => a + t.gap, 0) / topics.length)
     : 0;
 
+  const days = daysLeft(profile?.deadline);
+  const weeks = weeksLeft(profile?.deadline);
+  const goalText = profile?.goal ?? '—';
+  const deadlineText = profile?.deadline
+    ? new Date(profile.deadline).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+    : '—';
+  const availText = profile?.daily_availability ?? '—';
+
   return (
     <div className="dash">
       <div className="panel-head">
@@ -127,49 +152,80 @@ export function Dashboard({ onStartTopic }: { onStartTopic: (t: Topic) => void }
           <div className="ph-sub">skill graph · updated today</div>
         </div>
         <div className="ph-right">
-          <div className="countdown"><span className="ind" /> on track · <span className="strong">70 days</span></div>
+          {days !== null && (
+            <div className="countdown">
+              <span className="ind" /> on track · <span className="strong">{days} days</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="dash-body">
         <div className="dash-hero">
           <div style={{ flex: 1, minWidth: 220 }}>
-            <h2 className="h">20 LPA SWE role</h2>
-            <div className="sub"><b>Aug 2026</b> &nbsp;·&nbsp; 10 weeks left &nbsp;·&nbsp; 18 hrs/week</div>
+            <h2 className="h">{goalText}</h2>
+            <div className="sub">
+              <b>{deadlineText}</b>
+              {weeks !== null && <> &nbsp;·&nbsp; {weeks} weeks left</>}
+              {availText !== '—' && <> &nbsp;·&nbsp; {availText}</>}
+            </div>
           </div>
         </div>
 
         <div className="readiness">
-          <Ring pct={readiness} animate={animate} />
+          {loadingSkills ? (
+            <div className="ring-wrap" style={{ opacity: 0.3 }}>
+              <svg width="132" height="132" viewBox="0 0 132 132">
+                <circle cx="66" cy="66" r="56" fill="none" stroke="var(--card-3)" strokeWidth="10" />
+              </svg>
+              <div className="pct"><div className="num">—</div><div className="lbl">loading</div></div>
+            </div>
+          ) : (
+            <Ring pct={readiness} animate={animate} />
+          )}
           <div className="r-info">
             <div className="t">You&apos;re {readiness}% interview-ready</div>
-            <div className="d">Graphs and Dynamic Programming are dragging the number down. Close those two and readiness jumps to an estimated <strong style={{ color: 'var(--accent)' }}>71%</strong>.</div>
+            <div className="d">
+              {sortedGaps.length > 0
+                ? `${sortedGaps[0]?.name} and ${sortedGaps[1]?.name ?? 'other topics'} are dragging the number down. Close those and readiness jumps significantly.`
+                : 'Keep studying — your skill graph will update after each session.'}
+            </div>
             <div className="r-stats">
               <div className="r-stat"><div className="v">{avgGap}%</div><div className="l">avg gap</div></div>
               <div className="r-stat"><div className="v">{topics.length}</div><div className="l">topics tracked</div></div>
-              <div className="r-stat"><div className="v" style={{ color: 'var(--accent)' }}>+13</div><div className="l">this week</div></div>
+              <div className="r-stat"><div className="v" style={{ color: 'var(--accent)' }}>+0</div><div className="l">this week</div></div>
             </div>
           </div>
         </div>
 
-        <div className="dash-label"><span>Topic coverage</span><span className="meta">{topics.length} topics</span></div>
-        <div className="topic-grid">
-          {topics.map(t => <TopicCard key={t.name} t={t} onStart={onStartTopic} animate={animate} />)}
-        </div>
-
-        <div className="divider" />
-
-        <div className="dash-label"><span>Biggest gaps — click to start a Topic session</span></div>
-        <div className="gap-pills">
-          {sortedGaps.map((t, i) => (
-            <div key={t.name} className="gap-pill" onClick={() => onStartTopic(t)}>
-              <span className="rank">#{i + 1}</span>
-              <span className="gname">{t.name}</span>
-              <span className="gpct">{t.gap}%</span>
-              <span className="arrow"><Icon name="arrowR" size={13} /></span>
+        {topics.length > 0 && (
+          <>
+            <div className="dash-label"><span>Topic coverage</span><span className="meta">{topics.length} topics</span></div>
+            <div className="topic-grid">
+              {topics.map(t => <TopicCard key={t.name} t={t} onStart={onStartTopic} animate={animate} />)}
             </div>
-          ))}
-        </div>
+
+            <div className="divider" />
+
+            <div className="dash-label"><span>Biggest gaps — click to start a Topic session</span></div>
+            <div className="gap-pills">
+              {sortedGaps.map((t, i) => (
+                <div key={t.name} className="gap-pill" onClick={() => onStartTopic(t)}>
+                  <span className="rank">#{i + 1}</span>
+                  <span className="gname">{t.name}</span>
+                  <span className="gpct">{t.gap}%</span>
+                  <span className="arrow"><Icon name="arrowR" size={13} /></span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {!loadingSkills && topics.length === 0 && (
+          <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            No skills tracked yet. Complete a session and your skill graph will populate.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
-import { SESSIONS, SEEDS, MODES, mentorSystemPrompt, type MessageItem, type ModeId, type ToneId } from './data';
+import { SESSIONS, SEEDS, MODES, mentorSystemPrompt, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
+import type { SkillNode } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
   return (
@@ -71,17 +72,30 @@ function Composer({ mode, tone, onSend, busy }: {
   );
 }
 
-const S1_ALERTS = [
-  { id: 'a1', kind: 'warn', type: 'Pace deviation', text: "You're 30% behind this week's target — 5 topics left before your deadline.", cta: 'Review plan' },
-  { id: 'a2', kind: 'good', type: 'Milestone', text: 'You closed the Arrays gap this week. Nice work.' },
-];
+type Alert = { id: string; kind: 'warn' | 'good'; type: string; text: string; cta?: string };
 
-function AlertStack({ onReview }: { onReview: () => void }) {
-  const [alerts, setAlerts] = useState(S1_ALERTS);
-  if (!alerts.length) return null;
+function deriveAlerts(topics: Topic[]): Alert[] {
+  const alerts: Alert[] = [];
+  const worst = [...topics].sort((a, b) => b.gap - a.gap)[0];
+  if (worst && worst.gap >= 40) {
+    alerts.push({
+      id: 'gap-' + worst.name,
+      kind: 'warn',
+      type: 'Biggest gap',
+      text: `${worst.name} has a ${worst.gap}% gap — it's your highest priority right now.`,
+      cta: 'Review plan',
+    });
+  }
+  return alerts;
+}
+
+function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => void }) {
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const all = deriveAlerts(topics).filter(a => !dismissed.has(a.id));
+  if (!all.length) return null;
   return (
     <div className="alert-stack">
-      {alerts.map(a => (
+      {all.map(a => (
         <div key={a.id} className={`alert ${a.kind}`}>
           <div className="a-ico"><Icon name={a.kind === 'warn' ? 'warn' : 'check'} /></div>
           <div className="a-body">
@@ -90,7 +104,7 @@ function AlertStack({ onReview }: { onReview: () => void }) {
           </div>
           <div className="a-actions">
             {a.cta && <button className="btn btn-sm btn-ghost" onClick={onReview}>{a.cta}</button>}
-            <button className="a-dismiss" title="Dismiss" onClick={() => setAlerts(al => al.filter(x => x.id !== a.id))}>
+            <button className="a-dismiss" title="Dismiss" onClick={() => setDismissed(s => new Set(s).add(a.id))}>
               <Icon name="x" size={13} />
             </button>
           </div>
@@ -100,12 +114,13 @@ function AlertStack({ onReview }: { onReview: () => void }) {
   );
 }
 
-export function ChatPanel({ sessionId, mode, setMode, tone, onNav }: {
+export function ChatPanel({ sessionId, mode, setMode, tone, onNav, topics = [] }: {
   sessionId: string;
   mode: ModeId;
   setMode: (m: ModeId) => void;
   tone: ToneId;
   onNav: (v: string) => void;
+  topics?: Topic[];
 }) {
   const session = SESSIONS.find(s => s.id === sessionId) || { id: 'new', title: 'New session', cat: 'Topic', date: 'now' };
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
@@ -187,7 +202,7 @@ export function ChatPanel({ sessionId, mode, setMode, tone, onNav }: {
         </div>
       </div>
 
-      {sessionId === 's1' && <AlertStack onReview={() => onNav('dashboard')} />}
+      <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
 
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">

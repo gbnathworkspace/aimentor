@@ -72,3 +72,22 @@ only operates in the current active session.
 
 Each mode assembles context slightly differently and has
 different session end behaviour.
+
+## Mode detection — auto, not user-selected
+
+Modes are a backend concept, not a UI choice.
+The user just types naturally — the LLM detects the mode
+from the first message and assembles context accordingly.
+
+```
+"what should I work on today?"  →  Planning  (L2-heavy context)
+"let's do graphs"               →  Topic     (topic-filtered L2 + L3)
+"I'm confused about IAM"        →  Doubt     (L3 semantic search)
+"test me on AWS"                →  Evaluation (structured Q&A flow)
+```
+
+No tabs, no dropdowns. The user never picks a mode explicitly.
+
+Current mode surfaces as a subtle read-only status indicator
+in the input bar (e.g. a small tag: "mode: topic") — visible
+but not interactive. This is for transparency, not control.

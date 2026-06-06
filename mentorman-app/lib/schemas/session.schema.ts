@@ -49,6 +49,7 @@ export const SessionListItemSchema = SessionSchema.pick({
   topic: true,
   status: true,
   tags: true,
+  summary: true,
   createdAt: true,
   durationMinutes: true,
 })

@@ -3,21 +3,29 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from './icons';
 import { GapBar } from './ui';
-import { TOPICS, type Topic } from './data';
+import type { Topic } from './data';
 import type { SkillNode, CoreProfile } from '@/lib/mentorman-api';
+
+const LEVEL_PCT: Record<string, number> = {
+  novice: 15, beginner: 25, easy: 35, intermediate: 55, medium: 65, advanced: 75, hard: 85, expert: 95,
+};
+const lvl = (s: string) => LEVEL_PCT[s?.toLowerCase()] ?? 50;
 
 function skillToTopic(s: SkillNode): Topic {
   const sig = (s.signals ?? {}) as Record<string, unknown>;
+  const cur = lvl(s.current_level);
+  const req = lvl(s.required_level);
+  const gap = typeof s.gap === 'number' ? s.gap : parseInt(String(s.gap)) || Math.max(0, req - cur);
   return {
     name: s.topic,
     cat: (sig.cat as string) ?? 'General',
-    cur: Number(s.current_level) || 0,
-    req: Number(s.required_level) || 100,
-    last: (sig.last as string) ?? '–',
-    gap: Number(s.gap) || 0,
-    level: (sig.level as string) ?? s.current_level,
-    strong: (sig.strong as string[]) ?? [],
-    weak: (sig.weak as string[]) ?? [],
+    cur,
+    req,
+    last: (sig.last_studied as string) ?? (sig.last as string) ?? '–',
+    gap,
+    level: `${s.current_level} → ${s.required_level}`,
+    strong: (sig.strong_areas as string[]) ?? (sig.strong as string[]) ?? [],
+    weak: (sig.weak_areas as string[]) ?? (sig.weak as string[]) ?? [],
   };
 }
 
@@ -110,7 +118,7 @@ export function Dashboard({ onStartTopic, profile }: {
   profile: CoreProfile | null;
 }) {
   const [animate, setAnimate] = useState(false);
-  const [topics, setTopics] = useState<Topic[]>(TOPICS);
+  const [topics, setTopics] = useState<Topic[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(true);
 
   useEffect(() => { const t = setTimeout(() => setAnimate(true), 60); return () => clearTimeout(t); }, []);

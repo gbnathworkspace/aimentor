@@ -1,6 +1,7 @@
 'use client';
 
 import React, { Fragment, useState, useEffect } from 'react';
+import { useClerk } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { MODES, type Session } from './data';
 import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
@@ -132,8 +133,18 @@ function daysLeft(deadline: string | undefined): number | null {
   return Math.max(0, Math.round(diff / 86_400_000));
 }
 
+function relativeDate(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / 86_400_000);
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7)  return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return new Date(iso).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+}
+
 function apiSessionToSession(r: SessionRecord): Session {
-  return { id: r.session_id, title: r.title, cat: r.type, date: r.date };
+  return { id: r.session_id, title: r.title, cat: r.type, date: relativeDate(r.date) };
 }
 
 // ---- Session skeleton (loading placeholder) ----------------
@@ -151,14 +162,15 @@ function SessionSkeleton() {
 }
 
 // ---- Sidebar -----------------------------------------------
-export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, profile, userName }: {
+export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, profile, userName, refreshKey }: {
   view: string;
   activeSession: string;
-  onPickSession: (id: string, type?: string) => void;
+  onPickSession: (id: string, type?: string, title?: string) => void;
   onNav: (v: string) => void;
   onNew: () => void;
   profile?: CoreProfile | null;
   userName?: string;
+  refreshKey?: number;
 }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,8 +188,9 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
       })
       .catch(() => { setSessions([]); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshKey]);
 
+  const { signOut } = useClerk();
   const days = daysLeft(profile?.deadline);
   const displayName = userName || profile?.email?.split('@')[0] || 'You';
   const initial = displayName[0]?.toUpperCase() ?? 'Y';
@@ -223,7 +236,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
           sessions.map(s => {
             const isActive = (view === 'chat' || view === 'evaluation' || view === 'summary') && activeSession === s.id;
             return (
-              <div key={s.id} className={`session ${isActive ? 'active' : ''}`} onClick={() => onPickSession(s.id, s.cat)}>
+              <div key={s.id} className={`session ${isActive ? 'active' : ''}`} onClick={() => onPickSession(s.id, s.cat, s.title)}>
                 <div className="s-row1">
                   <span className="s-title">{s.title}</span>
                   <span className="s-date">{s.date}</span>
@@ -239,21 +252,30 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
       </div>
 
       {/* Clickable footer → Profile / Settings */}
-      <button
-        className="sb-foot"
-        onClick={() => onNav('settings')}
-        title="View profile & settings"
-        style={{ cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left' }}
-      >
-        <div className="avatar">{initial}</div>
-        <div>
-          <div className="who">{displayName}</div>
-          <div className="sub">
-            {profile?.goal ?? '—'}
-            {days !== null ? ` · ${days} days left` : ''}
+      <div className="sb-foot" style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+        <button
+          onClick={() => onNav('settings')}
+          title="View profile & settings"
+          style={{ cursor: 'pointer', background: 'none', border: 'none', flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: 0, minWidth: 0 }}
+        >
+          <div className="avatar">{initial}</div>
+          <div style={{ minWidth: 0 }}>
+            <div className="who">{displayName}</div>
+            <div className="sub">
+              {profile?.goal ?? '—'}
+              {days !== null ? ` · ${days} days left` : ''}
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+        <button
+          className="icon-btn"
+          title="Sign out"
+          onClick={() => signOut({ redirectUrl: '/sign-in' })}
+          style={{ flexShrink: 0 }}
+        >
+          <Icon name="logout" />
+        </button>
+      </div>
     </div>
   );
 }

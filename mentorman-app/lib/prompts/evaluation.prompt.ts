@@ -8,10 +8,10 @@ function formatTopicContext(node: SkillGraphNode): string {
   ]
   if (node.weak_areas.length > 0) lines.push(`Previously weak: ${node.weak_areas.join(', ')}`)
   if (node.strong_areas.length > 0) lines.push(`Previously strong: ${node.strong_areas.join(', ')}`)
-  const lc = node.signals.leetcode_solved
+  const lc = node.signals?.leetcode_solved
   if (lc) lines.push(`LC solved: Easy ${lc.easy} · Medium ${lc.medium} · Hard ${lc.hard}`)
-  if (node.signals.mentor_eval_count > 0) {
-    lines.push(`Prior evals: ${node.signals.mentor_eval_count} | Last score: ${node.signals.mentor_eval_score ?? 'n/a'}`)
+  if ((node.signals?.mentor_eval_count ?? 0) > 0) {
+    lines.push(`Prior evals: ${node.signals!.mentor_eval_count} | Last score: ${node.signals?.mentor_eval_score ?? 'n/a'}`)
   }
   return lines.join('\n')
 }

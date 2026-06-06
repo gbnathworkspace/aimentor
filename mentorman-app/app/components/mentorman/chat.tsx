@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
-import { SESSIONS, SEEDS, MODES, mentorSystemPrompt, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
+import { SESSIONS, SEEDS, MODES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
 import type { SkillNode } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
@@ -114,21 +114,46 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
   );
 }
 
-export function ChatPanel({ sessionId, mode, setMode, tone, onNav, topics = [] }: {
+const DRAFT_KEY = 'mentorman_draft';
+
+export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, topics = [] }: {
   sessionId: string;
+  sessionTitle?: string;
   mode: ModeId;
   setMode: (m: ModeId) => void;
   tone: ToneId;
   onNav: (v: string) => void;
+  onSessionSaved?: () => void;
   topics?: Topic[];
 }) {
-  const session = SESSIONS.find(s => s.id === sessionId) || { id: 'new', title: 'New session', cat: 'Topic', date: 'now' };
+  const fallback = SESSIONS.find(s => s.id === sessionId) || { id: 'new', title: 'New session', cat: 'Topic', date: 'now' };
+  const session = sessionTitle ? { ...fallback, title: sessionTitle } : fallback;
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  const greetedRef = useRef(false);
+
   useEffect(() => {
+    greetedRef.current = false;
     const seed = SEEDS[sessionId] || [];
+
+    // Restore from localStorage if resuming an unsaved session after a crash/reload
+    if (sessionId === 'new' && seed.length === 0) {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (raw) {
+          const draft = JSON.parse(raw) as { msgs: MessageItem[] };
+          if (draft.msgs?.length > 0) {
+            setMsgs(draft.msgs);
+            greetedRef.current = true; // skip greeting — conversation already started
+            return;
+          }
+        }
+      } catch {}
+    }
+
     setMsgs([]);
     const timers: ReturnType<typeof setTimeout>[] = [];
     seed.forEach((m, i) => {
@@ -139,23 +164,74 @@ export function ChatPanel({ sessionId, mode, setMode, tone, onNav, topics = [] }
     return () => timers.forEach(clearTimeout);
   }, [sessionId]);
 
+  // Auto-greet: when starting a fresh session with no seeds, get the first mentor message
+  useEffect(() => {
+    const seed = SEEDS[sessionId] || [];
+    if (seed.length > 0 || greetedRef.current) return;
+    greetedRef.current = true;
+    setBusy(true);
+    fetch('/api/mentor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: session.title,
+        mode,
+        tone,
+        messages: [{ role: 'user', content: '[session_start] Open the session with a short, sharp first message based on my profile and goal. Do not repeat what I said in onboarding — just get started.' }],
+      }),
+    })
+      .then(r => r.json())
+      .then(({ text: reply }) => {
+        setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        // Create active session in MongoDB now that we have a confirmed title and mode
+        return fetch('/api/sessions', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ title: session.title, mode, topic: session.title, topic_category: session.cat }),
+        }).then(r => r.ok ? r.json() : null)
+          .then(data => { if (data?.sessionId) setBackendSessionId(data.sessionId); })
+          .catch(() => {});
+      })
+      .catch(() => {
+        setMsgs([{ who: 'mentor', text: "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+      })
+      .finally(() => setBusy(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs, busy]);
+
+  // Persist active session to localStorage after every exchange so it survives a crash or reload
+  useEffect(() => {
+    if (sessionId !== 'new' || msgs.length === 0) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        title: session.title,
+        cat: session.cat,
+        msgs,
+        savedAt: new Date().toISOString(),
+      }));
+    } catch {}
+  }, [msgs, sessionId, session.title, session.cat]);
 
   const send = useCallback(async (text: string) => {
     const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now() };
     setMsgs(prev => [...prev, userMsg]);
     setBusy(true);
     try {
-      const history = [...msgs, userMsg]
+      const allHistory = [...msgs, userMsg]
         .filter(m => m.who === 'mentor' || m.who === 'user')
         .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
+      // Anthropic requires the first message to be from 'user' — drop any leading assistant turns
+      const firstUser = allHistory.findIndex(m => m.role === 'user');
+      const history = firstUser > 0 ? allHistory.slice(firstUser) : allHistory;
       const res = await fetch('/api/mentor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system: mentorSystemPrompt(mode, tone, session.title), messages: history }),
+        body: JSON.stringify({ topic: session.title, mode, tone, messages: history }),
       });
       const { text: reply } = await res.json();
       setMsgs(prev => [...prev, { who: 'mentor', text: (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?", _id: 'm' + Date.now() }]);
@@ -167,26 +243,32 @@ export function ChatPanel({ sessionId, mode, setMode, tone, onNav, topics = [] }
   }, [msgs, mode, tone, session.title]);
 
   const endSession = useCallback(async () => {
+    localStorage.removeItem(DRAFT_KEY);
     if (msgs.length < 2) { onNav('summary'); return; }
-    const summary = msgs
+
+    const apiMessages = msgs
       .filter(m => m.who === 'mentor' || m.who === 'user')
-      .slice(-6)
-      .map(m => `${m.who === 'mentor' ? 'Mentor' : 'You'}: ${m.text}`)
-      .join('\n');
-    await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        topic: session.title,
-        topic_category: session.cat,
-        type: session.cat,
-        date: new Date().toISOString().slice(0, 10),
-        title: session.title,
-        summary,
-      }),
-    }).catch(() => {});
+      .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
+
+    if (backendSessionId) {
+      // Full save — messages + Haiku summary + skill_update extraction
+      const ok = await fetch(`/api/sessions/${backendSessionId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ messages: apiMessages, mode, topic: session.title }),
+      }).then(r => r.ok).catch(() => false);
+      if (ok) onSessionSaved?.();
+    } else {
+      // Fallback: no backendSessionId (session create failed) — create a minimal record
+      const ok = await fetch('/api/sessions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ title: session.title, mode, topic: session.title, topic_category: session.cat }),
+      }).then(r => r.ok).catch(() => false);
+      if (ok) onSessionSaved?.();
+    }
     onNav('summary');
-  }, [msgs, session, onNav]);
+  }, [msgs, session, mode, onNav, onSessionSaved, backendSessionId]);
 
   return (
     <div className="panel">

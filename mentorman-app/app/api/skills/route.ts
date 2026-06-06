@@ -1,15 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as api from '@/lib/mentorman-api';
-
-const userId = () => process.env.DEMO_USER_ID ?? 'demo_user';
+import { SkillGraphRepo } from '@/lib/db/repositories/skill-graph.repo';
+import { requireUserId } from '@/lib/auth';
 
 export async function GET() {
-  const data = await api.getAllSkills(userId());
-  return NextResponse.json(data);
+  const uid = await requireUserId();
+  const nodes = await SkillGraphRepo.getAllForUser(uid);
+  return NextResponse.json(nodes);
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const ok = await api.createSkill(userId(), body);
-  return NextResponse.json({ ok }, { status: ok ? 201 : 500 });
+  try {
+    const uid = await requireUserId();
+    const body = await req.json();
+    const node = await SkillGraphRepo.upsert({
+      userId:         uid,
+      topic:          body.topic,
+      category:       body.category,
+      required_level: body.required_level ?? 'medium',
+      current_level:  body.current_level  ?? 'easy',
+      gap:            typeof body.gap === 'number' ? body.gap : 50,
+      signals:        body.signals,
+      strong_areas:   body.strong_areas ?? [],
+      weak_areas:     body.weak_areas   ?? [],
+    });
+    return NextResponse.json(node, { status: 201 });
+  } catch (err) {
+    console.error('POST /api/skills error:', err);
+    return NextResponse.json({ error: 'Invalid skill data' }, { status: 400 });
+  }
 }

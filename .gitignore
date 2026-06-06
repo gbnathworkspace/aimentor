@@ -2,3 +2,9 @@
 .env.local
 node_modules/
 .next/
+.vscode/
+*.log
+mentorman-app/C*Users*AppData*
+__pycache__/
+*.pyc
+*.pyo

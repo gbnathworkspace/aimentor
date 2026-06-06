@@ -29,7 +29,7 @@ export const SessionRepo = {
       .find({ userId })
       .sort({ createdAt: -1 })
       .limit(limit)
-      .select('-messages -summary')   // exclude heavy fields for sidebar
+      .select('-messages')   // keep summary for context assembly; skip messages (heavy)
       .lean()
     return docs.map(doc => SessionListItemSchema.parse(toPlain(doc)))
   },
@@ -91,6 +91,11 @@ export const SessionRepo = {
   async exists(sessionId: string): Promise<boolean> {
     await connectDB()
     return SessionModel.exists({ sessionId }) !== null
+  },
+
+  async delete(sessionId: string): Promise<void> {
+    await connectDB()
+    await SessionModel.deleteOne({ sessionId })
   },
 }
 

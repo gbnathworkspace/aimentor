@@ -8,9 +8,9 @@ function formatTopicNode(node: SkillGraphNode): string {
   ]
   if (node.strong_areas.length > 0) lines.push(`Strong: ${node.strong_areas.join(', ')}`)
   if (node.weak_areas.length > 0) lines.push(`Weak: ${node.weak_areas.join(', ')}`)
-  const lc = node.signals.leetcode_solved
+  const lc = node.signals?.leetcode_solved
   if (lc) lines.push(`LC solved: Easy ${lc.easy} · Medium ${lc.medium} · Hard ${lc.hard}`)
-  if (node.signals.mentor_eval_score) lines.push(`Last eval score: ${node.signals.mentor_eval_score}`)
+  if (node.signals?.mentor_eval_score) lines.push(`Last eval score: ${node.signals.mentor_eval_score}`)
   return lines.join('\n')
 }
 
@@ -28,7 +28,7 @@ export const build: PromptBuilder = ({ coreProfile: p, skillGraphNodes, episodes
   return `You are an invested technical mentor. The user wants to study ${currentTopic ?? 'a topic'} today.
 
 ## User Goal
-${p.goal} — ${Math.max(0, Math.floor((new Date(p.targetDate).getTime() - Date.now()) / 86_400_000))} days remaining
+${p.goal} — ${Math.max(0, Math.floor((new Date(p.deadline).getTime() - Date.now()) / 86_400_000))} days remaining
 
 ## Topic Profile
 ${topicNode ? formatTopicNode(topicNode) : '(no prior data for this topic — treat as first session)'}${otherNodes.length > 0 ? `\n\n## Related topics in scope\n${otherNodes.map(n => `• ${n.topic} — gap: ${n.gap}%`).join('\n')}` : ''}

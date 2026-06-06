@@ -1,23 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as api from '@/lib/mentorman-api';
-
-const userId = () => process.env.DEMO_USER_ID ?? 'demo_user';
+import { SkillGraphRepo } from '@/lib/db/repositories/skill-graph.repo';
+import { requireUserId } from '@/lib/auth';
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ topic: string }> },
 ) {
+  const uid = await requireUserId();
   const { topic } = await params;
   const body = await req.json();
-  const ok = await api.updateSkill(userId(), decodeURIComponent(topic), body);
-  return NextResponse.json({ ok });
+  const updated = await SkillGraphRepo.patch(uid, decodeURIComponent(topic), body);
+  return NextResponse.json({ ok: !!updated });
 }
 
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ topic: string }> },
 ) {
+  const uid = await requireUserId();
   const { topic } = await params;
-  const ok = await api.deleteSkill(userId(), decodeURIComponent(topic));
-  return NextResponse.json({ ok });
+  await SkillGraphRepo.delete(uid, decodeURIComponent(topic));
+  return NextResponse.json({ ok: true });
 }

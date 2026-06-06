@@ -1,15 +1,6 @@
 import connectDB from '../mongoose'
 import { CoreProfileModel } from '../models/core-profile.model'
-import {
-  CoreProfile,
-  CoreProfileSchema,
-  CoreProfileUpdate,
-  CoreProfileUpdateSchema,
-} from '@/lib/schemas'
-
-// ─── CoreProfileRepo ──────────────────────────────────────────────────────────
-// All reads Zod-validate before returning — if the DB shape drifts from the
-// schema, it fails loud here rather than silently corrupting downstream.
+import { CoreProfile, CoreProfileSchema, CoreProfileUpdate } from '@/lib/schemas'
 
 export const CoreProfileRepo = {
 
@@ -22,7 +13,6 @@ export const CoreProfileRepo = {
 
   async upsert(data: CoreProfile): Promise<CoreProfile> {
     await connectDB()
-    // Validate input before write — schema is the contract
     const validated = CoreProfileSchema.parse(data)
     const doc = await CoreProfileModel.findOneAndUpdate(
       { userId: validated.userId },
@@ -34,28 +24,25 @@ export const CoreProfileRepo = {
 
   async update(userId: string, patch: CoreProfileUpdate): Promise<CoreProfile | null> {
     await connectDB()
-    const validated = CoreProfileUpdateSchema.parse(patch)
     const doc = await CoreProfileModel.findOneAndUpdate(
       { userId },
-      { $set: validated },
+      { $set: patch },
       { new: true, lean: true }
     )
     if (!doc) return null
     return CoreProfileSchema.parse(toPlain(doc))
   },
 
-  async exists(userId: string): Promise<boolean> {
+  async delete(userId: string): Promise<void> {
     await connectDB()
-    return CoreProfileModel.exists({ userId }) !== null
+    await CoreProfileModel.deleteOne({ userId })
   },
 }
 
-// ─── Util: strip Mongoose internals before Zod parse ─────────────────────────
 function toPlain(doc: unknown): unknown {
   if (!doc) return doc
   const obj = doc as Record<string, unknown>
-  const { _id, __v, ...rest } = obj
-  void _id; void __v  // unused, just stripping
-  // Convert Date → ISO string to match Zod z.string().datetime()
-  return JSON.parse(JSON.stringify(rest))
+  const { _id, __v, createdAt, updatedAt, ...rest } = obj
+  void _id; void __v; void createdAt; void updatedAt
+  return rest
 }

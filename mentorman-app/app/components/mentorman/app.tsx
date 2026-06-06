@@ -7,7 +7,7 @@ import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
 import { Onboarding, EvalPanel, SessionEnd, Settings, MobileChat } from './screens';
 import { TweaksPanel, TweakSection, TweakRadio, TweakColor, useTweaks } from './tweaks';
-import { SESSIONS, ACCENTS, catToMode, type ModeId, type ToneId, type Topic } from './data';
+import { ACCENTS, catToMode, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 type View = 'chat' | 'dashboard' | 'evaluation' | 'summary' | 'settings' | 'onboarding';
@@ -61,6 +61,8 @@ export function MentorManApp() {
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [userName, setUserName] = useState('');
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
+  const [sessionsVersion, setSessionsVersion] = useState(0);
 
   // Fetch user name from Clerk via /api/me
   useEffect(() => {
@@ -70,13 +72,23 @@ export function MentorManApp() {
       .catch(() => {});
   }, []);
 
-  // Fetch profile — auto-route to onboarding if none exists
+  // Fetch profile — auto-route to onboarding if none exists, resume draft if one exists
   useEffect(() => {
     fetch('/api/profile')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) {
           setProfile(data);
+          try {
+            const raw = localStorage.getItem('mentorman_draft');
+            if (raw) {
+              const draft = JSON.parse(raw);
+              if (draft?.msgs?.length > 0) {
+                setActiveSession('new');
+                if (draft.title) setActiveSessionTitle(draft.title);
+              }
+            }
+          } catch {}
         } else {
           setView('onboarding');
         }
@@ -119,16 +131,18 @@ export function MentorManApp() {
       .catch(() => {});
   };
 
-  const pickSession = (id: string, type?: string) => {
+  const pickSession = (id: string, type?: string, title?: string) => {
     setActiveSession(id);
-    const s = SESSIONS.find(x => x.id === id);
-    const cat = s?.cat ?? type ?? 'Topic';
+    if (title) setActiveSessionTitle(title);
+    const cat = type ?? 'Topic';
     if (cat === 'Eval') { setView('evaluation'); }
     else { setMode(catToMode[cat] || 'topic'); setView('chat'); }
   };
 
   const startTopic = () => {
+    localStorage.removeItem('mentorman_draft');
     setActiveSession('new');
+    setActiveSessionTitle(null);
     setMode('topic');
     setView('chat');
   };
@@ -149,11 +163,13 @@ export function MentorManApp() {
   return (
     <div className={`app ${fullScreen ? 'full' : ''} density-${t.density}`}>
       {fullScreen ? (
-        <Onboarding onFinish={() => {
+        <Onboarding userName={userName} onFinish={(goal) => {
+          localStorage.removeItem('mentorman_draft');
           refreshProfile();
-          setView('chat');
-          setActiveSession('s1');
+          setActiveSession('new');
+          setActiveSessionTitle(goal || null);
           setMode('topic');
+          setView('chat');
         }} />
       ) : (
         <>
@@ -162,17 +178,20 @@ export function MentorManApp() {
             activeSession={activeSession}
             onPickSession={pickSession}
             onNav={(v) => { setMobileOpen(false); setView(v as View); }}
-            onNew={() => { setActiveSession('new'); setMode('planning'); setView('chat'); }}
+            onNew={() => { localStorage.removeItem('mentorman_draft'); setActiveSession('new'); setMode('planning'); setView('chat'); }}
             profile={profile}
             userName={userName}
+            refreshKey={sessionsVersion}
           />
           {view === 'chat' && (
             <ChatPanel
               sessionId={activeSession}
+              sessionTitle={activeSessionTitle ?? undefined}
               mode={mode}
               setMode={setMode}
               tone={t.tone as ToneId}
               onNav={(v) => setView(v as View)}
+              onSessionSaved={() => setSessionsVersion(v => v + 1)}
               topics={topics}
             />
           )}

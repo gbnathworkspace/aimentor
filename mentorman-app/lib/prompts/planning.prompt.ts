@@ -1,8 +1,8 @@
 import type { SkillGraphNode } from '@/lib/schemas'
 import type { PromptBuilder } from './types'
 
-function daysUntil(isoDate: string): number {
-  return Math.max(0, Math.floor((new Date(isoDate).getTime() - Date.now()) / 86_400_000))
+function daysUntil(date: string): number {
+  return Math.max(0, Math.floor((new Date(date).getTime() - Date.now()) / 86_400_000))
 }
 
 function formatSkillTable(nodes: SkillGraphNode[]): string {
@@ -11,18 +11,19 @@ function formatSkillTable(nodes: SkillGraphNode[]): string {
     .sort((a, b) => b.gap - a.gap)
     .map(n => {
       const weak = n.weak_areas.length > 0 ? ` | weak: ${n.weak_areas.slice(0, 3).join(', ')}` : ''
-      const lc = n.signals.leetcode_solved
+      const lc = n.signals?.leetcode_solved
         ? ` | LC solved: E${n.signals.leetcode_solved.easy}/M${n.signals.leetcode_solved.medium}/H${n.signals.leetcode_solved.hard}`
         : ''
-      return `• ${n.topic} [${n.category}] — current: ${n.current_level} → required: ${n.required_level} — gap: ${n.gap}%${weak}${lc}`
+      const cat = n.category ? ` [${n.category}]` : ''
+      return `• ${n.topic}${cat} — current: ${n.current_level} → required: ${n.required_level} — gap: ${n.gap}%${weak}${lc}`
     })
     .join('\n')
 }
 
 export const build: PromptBuilder = ({ coreProfile: p, skillGraphNodes }) => {
-  const days = daysUntil(p.targetDate)
+  const days  = daysUntil(p.deadline)
   const weeks = Math.floor(days / 7)
-  const targetStr = new Date(p.targetDate).toLocaleDateString('en-IN', {
+  const targetStr = new Date(p.deadline).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'long', year: 'numeric',
   })
 
@@ -31,7 +32,7 @@ export const build: PromptBuilder = ({ coreProfile: p, skillGraphNodes }) => {
 ## User Profile
 Goal: ${p.goal}
 Deadline: ${targetStr} — ${days} days (${weeks} weeks) remaining
-Study capacity: ${p.availability.weekdayHrs}h/weekday · ${p.availability.weekendHrs}h/weekend · ~${p.availability.totalWeeklyHrs}h/week${p.yearsOfExperience != null ? `\nExperience: ${p.yearsOfExperience} year(s)` : ''}${p.currentRole ? ` | Current role: ${p.currentRole}` : ''}
+Study capacity: ${p.daily_availability}
 
 ## Skill Gaps (sorted by gap — highest priority first)
 ${formatSkillTable(skillGraphNodes)}

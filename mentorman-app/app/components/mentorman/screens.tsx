@@ -1,163 +1,165 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useClerk } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { Brand, Bubble, VerdictMsg, Typing, GapBar, fmt } from './ui';
 import { SEEDS, EVAL_SEED, EVAL_DONE_EXTRA, MODES, mentorSystemPrompt, type MessageItem, type ToneId } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-// ---------- Onboarding (full screen, guided) ----------------
-const ONB_STEPS = [
-  {
-    q: "What are you working towards?",
-    replies: [
-      "Crack a FAANG-level SWE role in 3 months",
-      "Switch from backend to ML engineering",
-      "Pass my system design interview",
-    ],
-  },
-  {
-    q: "When do you need to be ready?",
-    replies: ["3 months", "6 months", "August 2026"],
-  },
-  {
-    q: "Got it. Drop your resume and LeetCode export and I'll calibrate from there — or skip it.",
-    drop: true,
-  },
-  {
-    q: "How many hours a day can you realistically put in? Be honest, not optimistic.",
-    replies: ["~1 hr/day", "2 hrs weekdays, 4 on weekends", "4+ hrs/day"],
-  },
-];
+// ---------- Onboarding (conversational AI agent) ----------------
 
-export function Onboarding({ onFinish }: { onFinish: () => void }) {
-  const [step, setStep] = useState(0);
-  const [thread, setThread] = useState<MessageItem[]>([{ who: 'mentor', text: ONB_STEPS[0].q, _id: 'q0' }]);
-  const [uploaded, setUploaded] = useState(false);
-  const [done, setDone] = useState(false);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const answers = useRef<string[]>([]);
+type ApiMsg = { role: 'user' | 'assistant'; content: string };
+type CompletedProfile = { goal: string; deadline: string; overall_level: string; daily_availability: string };
+
+
+export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) => void; userName?: string }) {
+  const { signOut } = useClerk();
+  const [apiMsgs,    setApiMsgs]    = useState<ApiMsg[]>([]);
+  const [thread,     setThread]     = useState<MessageItem[]>([]);
+  const [busy,       setBusy]       = useState(false);
+  const [done,       setDone]       = useState(false);
+  const [profile,    setProfile]    = useState<CompletedProfile | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [input,       setInput]       = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const step = done ? 4 : Math.min(3, Math.max(0, apiMsgs.filter(m => m.role === 'user').length - 1));
+  const bodyRef  = useRef<HTMLDivElement>(null);
+  const textaRef = useRef<HTMLTextAreaElement>(null);
+  const started  = useRef(false);
 
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [thread, done]);
+  }, [thread, busy, done]);
 
-  const advance = (answerText: string, nextStep: number) => {
-    answers.current[step] = answerText;
-    setThread(prev => [...prev, { who: 'user', text: answerText, _id: 'a' + prev.length }]);
-    setTimeout(() => {
-      if (nextStep < ONB_STEPS.length) {
-        setThread(prev => [...prev, { who: 'mentor', text: ONB_STEPS[nextStep].q, _id: 'q' + nextStep }]);
-        setStep(nextStep);
-      } else {
-        const goal = answers.current[0] ?? 'FAANG-level SWE role';
-        const deadlineRaw = answers.current[1] ?? '3 months';
-        const availability = answers.current[3] ?? '2 hrs/day';
+  // Kick off conversation on mount — send a silent "hi" to get the first question
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    callAgent([{ role: 'user', content: 'hi' }], []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-        // Resolve deadline: if it looks like "N months", compute date; otherwise use as-is
-        let deadline = deadlineRaw;
-        const monthsMatch = deadlineRaw.match(/^(\d+)\s*months?$/i);
-        if (monthsMatch) {
-          const d = new Date();
-          d.setMonth(d.getMonth() + parseInt(monthsMatch[1]));
-          deadline = d.toISOString().slice(0, 10);
-        } else {
-          // Try to parse as a date
-          const parsed = new Date(deadlineRaw);
-          if (!isNaN(parsed.getTime())) {
-            deadline = parsed.toISOString().slice(0, 10);
-          }
-        }
-
-        setThread(prev => [...prev, { who: 'mentor', text: "That gives me everything I need — I've built your plan. Let's get started.", _id: 'qf' }]);
-        fetch('/api/profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            goal,
-            deadline,
-            overall_level: 'beginner',
-            daily_availability: availability,
-            email: '',
-          }),
-        }).catch(() => {});
-        setTimeout(() => setDone(true), 450);
-        setStep(nextStep);
-      }
-    }, 420);
+  const attemptSave = async (p: CompletedProfile) => {
+    setSaveFailed(false);
+    const res = await fetch('/api/onboarding/complete', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(p),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setSaveFailed(true);
+      return;
+    }
+    setSaveFailed(false);
+    setTimeout(() => setDone(true), 400);
   };
 
-  const cur = ONB_STEPS[step];
-  const lastMsg = thread[thread.length - 1];
+  const callAgent = async (msgs: ApiMsg[], currentThread: MessageItem[]) => {
+    setBusy(true);
+    try {
+      const res = await fetch('/api/onboarding/chat', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ messages: msgs }),
+      });
+      const { text, complete, profile: p, suggestions: chips } = await res.json();
+
+      const nextThread = text
+        ? [...currentThread, { who: 'mentor' as const, text, _id: 'm' + Date.now() }]
+        : currentThread;
+      setThread(nextThread);
+      setApiMsgs([...msgs, ...(text ? [{ role: 'assistant' as const, content: text }] : [])]);
+      setSuggestions(Array.isArray(chips) ? chips : []);
+
+      if (complete && p) {
+        setProfile(p);
+        await attemptSave(p);
+      }
+    } catch {
+      setThread(prev => [...prev, { who: 'mentor', text: "Sorry, I lost connection for a second — try again.", _id: 'err' + Date.now() }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendText = (text: string) => {
+    if (!text || busy || done) return;
+    setSuggestions([]);
+    const userMsg: ApiMsg        = { role: 'user', content: text };
+    const threadMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now() };
+    const nextThread = [...thread, threadMsg];
+    const nextMsgs   = [...apiMsgs, userMsg];
+    setThread(nextThread);
+    callAgent(nextMsgs, nextThread);
+  };
+
+  const send = () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    if (textaRef.current) textaRef.current.style.height = 'auto';
+    sendText(text);
+  };
 
   return (
     <div className="onb">
       <div className="onb-top">
         <Brand />
+        {userName && (
+          <span style={{ fontSize: 13, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+            hey, <span style={{ color: 'var(--fg-dim)', fontWeight: 600 }}>{userName}</span>
+          </span>
+        )}
         <div className="onb-progress">
           <span>setup</span>
           <div className="onb-steps">
-            {[0,1,2,3,4].map(i => (
+            {[0,1,2,3].map(i => (
               <div key={i} className={`s ${i < step || done ? 'done' : i === step ? 'curr' : ''}`} />
             ))}
           </div>
         </div>
+        <button
+          className="icon-btn"
+          title="Sign out"
+          onClick={() => signOut({ redirectUrl: '/sign-in' })}
+        >
+          <Icon name="logout" />
+        </button>
       </div>
 
       <div className="onb-stage" ref={bodyRef}>
         <div className="onb-thread">
           {thread.map((m, i) => (
-            i === 0
+            i === 0 && m.who === 'mentor'
               ? <div key={m._id} className="onb-q fade-up">{fmt(m.text)}</div>
               : <Bubble key={m._id} who={m.who as 'mentor' | 'user'} item={m} />
           ))}
+          {busy && <Typing />}
 
-          {!done && cur && cur.replies && step < ONB_STEPS.length && lastMsg.who === 'mentor' && (
-            <div className="quick-replies">
-              {cur.replies.map(r => (
-                <button key={r} className="quick-reply" onClick={() => advance(r, step + 1)}>{r}</button>
-              ))}
+          {saveFailed && profile && !done && (
+            <div className="onb-save-error">
+              <span>Couldn&apos;t save your profile — please check your connection.</span>
+              <button
+                className="btn btn-sm btn-accent"
+                disabled={busy}
+                onClick={() => attemptSave(profile)}
+              >
+                Retry
+              </button>
             </div>
           )}
 
-          {!done && cur && cur.drop && !uploaded && lastMsg.who === 'mentor' && (
-            <>
-              <div className="dropzone" onClick={() => setUploaded(true)}>
-                <div className="dz-ico"><Icon name="upload" size={18} /></div>
-                <div className="dz-copy">
-                  <div className="dz-t">Drop files here or click to upload</div>
-                  <div className="dz-s">resume.pdf · leetcode_export.csv · optional</div>
-                </div>
-              </div>
-              <div className="quick-replies">
-                <button className="quick-reply" onClick={() => advance("Skipping for now", step + 1)}>Skip this</button>
-              </div>
-            </>
-          )}
-
-          {!done && cur && cur.drop && uploaded && (
-            <>
-              <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end' }}>
-                <span className="file-chip"><Icon name="doc" size={12} /> resume.pdf <span className="ok"><Icon name="check" size={12} /></span></span>
-                <span className="file-chip"><Icon name="doc" size={12} /> leetcode_export.csv <span className="ok"><Icon name="check" size={12} /></span></span>
-              </div>
-              <div className="quick-replies">
-                <button className="quick-reply" onClick={() => advance("Uploaded both — 184 problems", step + 1)}>Continue →</button>
-              </div>
-            </>
-          )}
-
-          {done && (
+          {done && profile && (
             <div className="setup-card">
               <div className="badge"><span className="dot" /> Setup complete</div>
               <h3>You&apos;re all set.</h3>
               <div className="setup-lines">
-                <div className="setup-line"><span className="k">goal</span><span className="v">{answers.current[0] ?? '—'}</span></div>
-                <div className="setup-line"><span className="k">deadline</span><span className="v">{answers.current[1] ?? '—'}</span></div>
-                <div className="setup-line"><span className="k">availability</span><span className="v">{answers.current[3] ?? '—'}</span></div>
+                <div className="setup-line"><span className="k">goal</span><span className="v">{profile.goal}</span></div>
+                <div className="setup-line"><span className="k">deadline</span><span className="v">{profile.deadline}</span></div>
+                <div className="setup-line"><span className="k">availability</span><span className="v">{profile.daily_availability}</span></div>
               </div>
-              <button className="btn btn-accent" style={{ width: '100%', height: 42 }} onClick={onFinish}>
+              <button className="btn btn-accent" style={{ width: '100%', height: 42 }} onClick={() => onFinish(profile.goal)}>
                 Start your first session <Icon name="arrowR" size={15} />
               </button>
             </div>
@@ -168,20 +170,37 @@ export function Onboarding({ onFinish }: { onFinish: () => void }) {
       {!done && (
         <div className="onb-composer">
           <div className="onb-composer-inner">
+            {!busy && suggestions.length > 0 && (
+              <div className="onb-suggestions">
+                {suggestions.map(r => (
+                  <button key={r} className="onb-suggestion" onClick={() => sendText(r)}>{r}</button>
+                ))}
+              </div>
+            )}
             <div className="composer-box">
-              <textarea rows={1} placeholder="…or type your own answer" style={{ minHeight: 22 }}
-                onKeyDown={e => {
+              <textarea
+                ref={textaRef}
+                rows={1}
+                value={input}
+                placeholder="Reply to your mentor…"
+                style={{ minHeight: 22 }}
+                onChange={e => {
+                  setInput(e.target.value);
                   const el = e.target as HTMLTextAreaElement;
-                  if (e.key === 'Enter' && !e.shiftKey && el.value.trim()) {
-                    e.preventDefault();
-                    advance(el.value.trim(), step + 1);
-                    el.value = '';
-                  }
-                }} />
+                  el.style.height = 'auto';
+                  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                }}
+              />
               <div className="composer-tools">
                 <button className="tool-btn">+</button>
                 <div className="spacer" />
                 <span className="tag">onboarding</span>
+                <button className="send-btn" onClick={send} disabled={busy || !input.trim()}>
+                  <Icon name="send" />
+                </button>
               </div>
             </div>
           </div>
@@ -340,6 +359,7 @@ export function Settings({ profile, onReset, onSaved }: {
   const [deadlineVal, setDeadlineVal] = useState(profile?.deadline ?? '');
   const [availVal, setAvailVal] = useState(profile?.daily_availability ?? '');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Sync form values when profile loads / changes
   useEffect(() => {
@@ -348,15 +368,24 @@ export function Settings({ profile, onReset, onSaved }: {
     setAvailVal(profile?.daily_availability ?? '');
   }, [profile]);
 
-  const save = async (field: Record<string, string>) => {
+  const save = async (field: Record<string, string>): Promise<boolean> => {
     setSaving(true);
+    setSaveError(null);
     try {
-      await fetch('/api/profile', {
+      const res = await fetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(field),
       });
+      if (!res.ok) {
+        setSaveError('Save failed — please try again');
+        return false;
+      }
       onSaved();
+      return true;
+    } catch {
+      setSaveError('Connection error — please try again');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -364,12 +393,21 @@ export function Settings({ profile, onReset, onSaved }: {
 
   const handleReset = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
-      await fetch('/api/profile', { method: 'DELETE' });
+      const res = await fetch('/api/profile', { method: 'DELETE' });
+      if (!res.ok) {
+        setSaveError('Reset failed — please try again');
+        setConfirmReset(false);
+        return;
+      }
+      onReset();
+    } catch {
+      setSaveError('Connection error — please try again');
+      setConfirmReset(false);
     } finally {
       setSaving(false);
     }
-    onReset();
   };
 
   const deadlineDisplay = profile?.deadline
@@ -384,6 +422,12 @@ export function Settings({ profile, onReset, onSaved }: {
       <div className="set-body">
         <div className="set-inner">
 
+          {saveError && (
+            <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', background: 'rgba(248,113,113,0.08)', borderRadius: 6, marginBottom: 8 }}>
+              {saveError}
+            </div>
+          )}
+
           <div className="set-section">
             <div className="set-label">Goal</div>
 
@@ -397,7 +441,7 @@ export function Settings({ profile, onReset, onSaved }: {
                     onChange={e => setGoalVal(e.target.value)}
                   />
                   <button className="btn btn-sm btn-ghost" onClick={() => { setEditGoal(false); setGoalVal(profile?.goal ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { await save({ goal: goalVal }); setEditGoal(false); }}>Save</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ goal: goalVal })) setEditGoal(false); }}>Save</button>
                 </div>
               ) : (
                 <>
@@ -417,7 +461,7 @@ export function Settings({ profile, onReset, onSaved }: {
                     onChange={e => setDeadlineVal(e.target.value)}
                   />
                   <button className="btn btn-sm btn-ghost" onClick={() => { setEditDeadline(false); setDeadlineVal(profile?.deadline ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { await save({ deadline: deadlineVal }); setEditDeadline(false); }}>Save</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ deadline: deadlineVal })) setEditDeadline(false); }}>Save</button>
                 </div>
               ) : (
                 <>
@@ -446,7 +490,7 @@ export function Settings({ profile, onReset, onSaved }: {
                     />
                   </div>
                   <button className="btn btn-sm btn-ghost" onClick={() => { setEditAvail(false); setAvailVal(profile?.daily_availability ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { await save({ daily_availability: availVal }); setEditAvail(false); }}>Save</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ daily_availability: availVal })) setEditAvail(false); }}>Save</button>
                 </div>
               ) : (
                 <button className="btn btn-sm btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setEditAvail(true)}>Edit</button>

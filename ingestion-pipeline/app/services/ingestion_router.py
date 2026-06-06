@@ -9,7 +9,10 @@ from datetime import UTC, datetime
 
 from app.config.database import get_ingestion_jobs_collection
 from app.models.schemas import LeetCodeTopicStats, ResumeSection
+from app.services.chunker_service import ChunkerService
+from app.services.embedder_service import EmbedderService
 from app.services.extractor_service import ExtractionResult
+from app.services.structured_parser import StructuredParser
 
 logger = logging.getLogger(__name__)
 
@@ -139,22 +142,44 @@ class IngestionRouter:
     async def _run_structured_path(
         self, routed: RoutedContent, user_id: str, job_id: str
     ) -> None:
-        """Execute the structured path processing.
+        """Execute the structured path: StructuredParser → MongoDB."""
+        if not routed.structured_leetcode and not routed.structured_sections:
+            logger.info("Structured path: nothing to process for job %s", job_id)
+            return
 
-        Stub implementation — actual logic will be added in Tasks 7.
-        """
-        # Will be implemented by StructuredParser in Task 7
-        pass
+        parser = StructuredParser()
+        await parser.process(
+            leetcode_stats=routed.structured_leetcode,
+            resume_sections=routed.structured_sections,
+            user_id=user_id,
+            job_id=job_id,
+        )
 
     async def _run_narrative_path(
         self, routed: RoutedContent, user_id: str, job_id: str
     ) -> None:
-        """Execute the narrative path processing.
+        """Execute the narrative path: ChunkerService → EmbedderService → Atlas Vector Search."""
+        if not routed.narrative_sections:
+            logger.info("Narrative path: nothing to process for job %s", job_id)
+            return
 
-        Stub implementation — actual logic will be added in Tasks 8-9.
-        """
-        # Will be implemented by ChunkerService + EmbedderService in Tasks 8-9
-        pass
+        chunker = ChunkerService()
+        chunks = chunker.chunk(
+            sections=routed.narrative_sections,
+            user_id=user_id,
+            source="resume",
+            job_id=job_id,
+        )
+
+        if not chunks:
+            logger.info("Narrative path: chunker produced 0 chunks for job %s", job_id)
+            return
+
+        logger.info(
+            "Narrative path: embedding %d chunks for job %s", len(chunks), job_id
+        )
+        embedder = EmbedderService()
+        await embedder.embed_and_store(chunks)
 
     async def _update_job_status(
         self, job_id: str, status: str, error: str | None = None

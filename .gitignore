@@ -8,4 +8,5 @@ mentorman-app/C*Users*AppData*
 __pycache__/
 *.pyc
 *.pyo
+.venv/
 uploads/

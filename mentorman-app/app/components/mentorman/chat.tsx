@@ -188,14 +188,49 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       } catch {}
     }
 
+    // If it's a known seed session or 'new', use hardcoded seeds
+    if (seed.length > 0 || sessionId === 'new') {
+      setMsgs([]);
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      seed.forEach((m, i) => {
+        timers.push(setTimeout(() => {
+          setMsgs(prev => [...prev, { ...m, _id: 'seed' + i }]);
+        }, 160 + i * 480));
+      });
+      return () => timers.forEach(clearTimeout);
+    }
+
+    // Existing backend session — fetch stored messages
+    let cancelled = false;
     setMsgs([]);
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    seed.forEach((m, i) => {
-      timers.push(setTimeout(() => {
-        setMsgs(prev => [...prev, { ...m, _id: 'seed' + i }]);
-      }, 160 + i * 480));
-    });
-    return () => timers.forEach(clearTimeout);
+    setBusy(true);
+    fetch(`/api/sessions/${sessionId}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to load session');
+        return r.json();
+      })
+      .then(data => {
+        if (cancelled) return;
+        if (data.messages && data.messages.length > 0) {
+          const loaded: MessageItem[] = data.messages.map((m: { id: string; role: string; content: string }) => ({
+            who: m.role === 'mentor' ? 'mentor' as const : 'user' as const,
+            text: m.content,
+            _id: m.id,
+          }));
+          setMsgs(loaded);
+          setBackendSessionId(sessionId);
+          greetedRef.current = true; // skip auto-greet — history loaded
+        }
+      })
+      .catch(() => {
+        // If fetch fails (session not saved yet), let auto-greet handle it
+        if (!cancelled) setMsgs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+
+    return () => { cancelled = true; };
   }, [sessionId]);
 
   // Auto-greet: when starting a fresh session with no seeds, get the first mentor message

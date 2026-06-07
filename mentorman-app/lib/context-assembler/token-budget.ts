@@ -1,4 +1,4 @@
-import { encoding_for_model } from 'tiktoken'
+import { encodingForModel } from 'js-tiktoken'
 import type { ImmediateContextDoc } from './types'
 
 // ─── Token Budget Priority ────────────────────────────────────────────────────
@@ -46,12 +46,8 @@ export function getTokenBudget(): number {
  */
 export function countTokens(text: string): number {
   if (!text) return 0
-  const enc = encoding_for_model(TOKENIZER_MODEL)
-  try {
-    return enc.encode(text).length
-  } finally {
-    enc.free()
-  }
+  const enc = encodingForModel(TOKENIZER_MODEL)
+  return enc.encode(text).length
 }
 
 // ─── Budget Priority Logic ────────────────────────────────────────────────────

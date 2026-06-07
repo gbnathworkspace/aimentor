@@ -78,8 +78,8 @@ export interface UseFileUploadReturn {
 /** Polling interval in milliseconds (2 seconds) */
 const POLL_INTERVAL_MS = 2000;
 
-/** Maximum number of polls before timeout (5 minutes / 2 seconds = 150) */
-const MAX_POLL_COUNT = 150;
+/** Maximum number of polls before timeout (60 seconds / 2 seconds = 30) */
+const MAX_POLL_COUNT = 30;
 
 /** Retry interval for failed poll requests (4 seconds) */
 const POLL_RETRY_INTERVAL_MS = 4000;

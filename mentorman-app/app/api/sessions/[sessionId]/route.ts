@@ -8,6 +8,32 @@ import type { Message } from '@/lib/schemas';
 
 const client = new Anthropic();
 
+// GET /api/sessions/[sessionId] — Retrieve session with messages
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> }
+) {
+  try {
+    const uid = await requireUserId();
+    const { sessionId } = await params;
+
+    const session = await SessionRepo.getById(sessionId);
+    if (!session) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    // Ensure user can only access their own sessions
+    if (session.userId !== uid) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    return NextResponse.json(session);
+  } catch (err) {
+    console.error('GET /api/sessions/[sessionId] error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 // Extract ```json skill_update { ... } ``` block from last assistant message
 function extractSkillUpdate(messages: { role: string; content: string }[]) {
   const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');

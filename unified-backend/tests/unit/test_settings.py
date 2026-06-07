@@ -47,15 +47,18 @@ class TestSettingsValidation:
             with pytest.raises(ValidationError):
                 Settings(_env_file=None)
 
-    def test_missing_mentorman_api_key_raises(self):
-        """Settings raises ValidationError if MENTORMAN_API_KEY is missing."""
+    def test_missing_mentorman_api_key_is_allowed(self):
+        """MENTORMAN_API_KEY is now optional (legacy) — Clerk JWT is the primary auth.
+
+        Its absence must NOT fail settings construction.
+        """
         from app.config.settings import Settings
 
         env = self._make_env()
         del env["MENTORMAN_API_KEY"]
         with patch.dict(os.environ, env, clear=True):
-            with pytest.raises(ValidationError):
-                Settings(_env_file=None)
+            settings = Settings(_env_file=None)
+        assert settings.MENTORMAN_API_KEY is None
 
     def test_missing_anthropic_api_key_raises(self):
         """Settings raises ValidationError if ANTHROPIC_API_KEY is missing."""

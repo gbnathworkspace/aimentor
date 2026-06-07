@@ -91,7 +91,7 @@ async def onboarding_chat(
         client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-haiku-4-5-20251001",
             max_tokens=1024,
             system=system_prompt,
             messages=api_messages,
@@ -112,7 +112,7 @@ async def onboarding_chat(
         text=parsed["text"],
         suggestions=parsed["suggestions"],
         complete=parsed["complete"],
-        profile_data=parsed["profile_data"],
+        profile=parsed["profile_data"],
     )
 
 

@@ -27,7 +27,7 @@ Once you have gathered all four pieces of information (goal, deadline, level, av
 ```json onboarding_complete
 {
   "goal": "the user's stated goal",
-  "deadline": "their deadline or timeframe",
+  "deadline": "YYYY-MM-DD (an absolute date; convert any relative timeframe using today's date below)",
   "overall_level": "beginner|intermediate|advanced",
   "daily_availability": "their stated time commitment"
 }

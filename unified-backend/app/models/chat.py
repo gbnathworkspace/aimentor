@@ -38,7 +38,8 @@ class OnboardingResponse(BaseModel):
     text: str
     suggestions: list[str] = []
     complete: bool = False
-    profile_data: Optional[dict] = Field(None, alias="profileData")
+    # Key is `profile` to match the frontend/Next contract (read as `profile`).
+    profile: Optional[dict] = None
 
 
 class OnboardingCompleteRequest(BaseModel):

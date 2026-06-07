@@ -5,6 +5,12 @@ motor>=3.3.0
 pydantic-settings>=2.1.0
 python-multipart>=0.0.6
 
+# Auth
+pyjwt[crypto]>=2.8.0
+
+# Tokenization (cl100k_base — parity with the Next.js token budget)
+tiktoken>=0.5.0
+
 # LLM & Embeddings
 anthropic>=0.39.0
 voyageai>=0.3.0

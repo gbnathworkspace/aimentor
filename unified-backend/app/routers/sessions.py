@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/sessions", tags=["Sessions"])
 class SessionUpdate(BaseModel):
     """Fields allowed in a PATCH update."""
 
+    title: Optional[str] = None
     messages: Optional[list[Message]] = None
     mode: Optional[str] = None
     topic: Optional[str] = None
@@ -28,9 +29,13 @@ async def list_sessions(
     limit: Optional[int] = Query(None, ge=1),
     user_id: str = Depends(require_auth),
 ) -> list[dict]:
-    """Return all sessions for the authenticated user, newest first."""
-    query = {"user_id": user_id}
-    cursor = sessions_col().find(query, {"_id": 0}).sort("created_at", -1)
+    """Return the user's chat sessions, most-recently-active first.
+
+    Filters to live chat sessions (those with a `messages` array), excluding
+    episodic-summary documents that also live in this collection.
+    """
+    query = {"user_id": user_id, "messages": {"$exists": True}}
+    cursor = sessions_col().find(query, {"_id": 0}).sort("updated_at", -1)
     if limit is not None:
         cursor = cursor.limit(limit)
     return await cursor.to_list(length=limit or 100)
@@ -104,3 +109,19 @@ async def update_session(
 
     updated = await sessions_col().find_one({"session_id": session_id}, {"_id": 0})
     return updated
+
+
+@router.delete("/{session_id}")
+async def delete_session(
+    session_id: str,
+    user_id: str = Depends(require_auth),
+) -> dict:
+    """Delete a session. 404 if missing, 403 if not owned by the user."""
+    doc = await sessions_col().find_one({"session_id": session_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if doc.get("user_id") != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    await sessions_col().delete_one({"session_id": session_id})
+    return {"ok": True}

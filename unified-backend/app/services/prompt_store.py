@@ -168,11 +168,20 @@ def get_system_prompt(mode: str, context: dict[str, Any]) -> str:
 
 
 def get_onboarding_prompt() -> str:
-    """Load and return the onboarding system prompt.
+    """Load the onboarding system prompt with today's date injected.
 
-    No interpolation needed — onboarding prompt is static.
+    The date lets the model convert a relative timeframe ("3 months") into an
+    absolute ``YYYY-MM-DD`` deadline (parity with the original Next.js prompt).
     """
-    return _load_template(_ONBOARDING_TEMPLATE)
+    import datetime
+
+    template = _load_template(_ONBOARDING_TEMPLATE)
+    today = datetime.date.today().isoformat()
+    return (
+        f"{template}\n\nToday's date is {today}. When the user gives a relative "
+        f"timeframe (e.g. \"3 months\"), compute and output `deadline` as an "
+        f"absolute YYYY-MM-DD date relative to today."
+    )
 
 
 def clear_cache() -> None:

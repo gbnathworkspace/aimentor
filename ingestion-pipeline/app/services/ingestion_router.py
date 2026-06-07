@@ -12,6 +12,7 @@ from app.models.schemas import LeetCodeTopicStats, ResumeSection
 from app.services.chunker_service import ChunkerService
 from app.services.embedder_service import EmbedderService
 from app.services.extractor_service import ExtractionResult
+from app.services.session_context_hook import SessionContextHook
 from app.services.structured_parser import StructuredParser
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,27 @@ class IngestionRouter:
             job_id: The ingestion job identifier.
             user_id: The user who owns this job.
         """
+        # Hook: after extraction, create ImmediateContext for session uploads
+        session_hook = SessionContextHook()
+        collection = get_ingestion_jobs_collection()
+        job_record = await collection.find_one({"job_id": job_id})
+
+        if job_record and job_record.get("upload_context") == "session":
+            await session_hook.after_extraction(
+                job_id=job_id,
+                user_id=user_id,
+                extraction_result=extraction_result,
+                job_record=job_record,
+            )
+            # If the hook marked the job as failed, stop processing
+            refreshed_job = await collection.find_one({"job_id": job_id})
+            if refreshed_job and refreshed_job.get("status") == "failed":
+                logger.error(
+                    "ImmediateContext creation failed for job %s — aborting pipeline.",
+                    job_id,
+                )
+                return
+
         routed = self._route_content(extraction_result)
 
         # Run structured and narrative paths in parallel
@@ -138,6 +160,10 @@ class IngestionRouter:
 
         # Both paths succeeded
         await self._update_job_status(job_id, "done")
+
+        # Hook: after full ingestion completes, deactivate ImmediateContext
+        if job_record and job_record.get("upload_context") == "session":
+            await session_hook.after_ingestion_complete(job_id)
 
     async def _run_structured_path(
         self, routed: RoutedContent, user_id: str, job_id: str

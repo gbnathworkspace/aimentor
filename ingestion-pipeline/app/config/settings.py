@@ -1,6 +1,7 @@
 """Environment-based configuration using pydantic BaseSettings."""
 
 from functools import lru_cache
+from typing import Literal, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,11 +15,14 @@ class Settings(BaseSettings):
     MONGODB_URI: str
     DATABASE_NAME: str = "mentorman"
 
-    # AWS S3
-    S3_BUCKET: str
-    S3_REGION: str = "us-east-1"
-    AWS_ACCESS_KEY_ID: str
-    AWS_SECRET_ACCESS_KEY: str
+    # Storage backend: 'local' (disk) or 's3' (AWS S3)
+    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+
+    # AWS S3 (only required when STORAGE_BACKEND='s3')
+    S3_BUCKET: Optional[str] = None
+    S3_REGION: str = "ap-south-1"
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
 
     # Voyage AI embeddings
     VOYAGE_AI_API_KEY: str

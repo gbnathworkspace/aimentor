@@ -4,6 +4,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
 import { SESSIONS, SEEDS, MODES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
+import { ChatUploadButton } from './chat/ChatUploadButton';
+import { UploadMessage } from './chat/UploadMessage';
+import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUpload';
 import type { SkillNode } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
@@ -19,11 +22,12 @@ function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy }: {
+function Composer({ mode, tone, onSend, busy, uploadElement }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
+  uploadElement?: React.ReactNode;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
@@ -58,7 +62,7 @@ function Composer({ mode, tone, onSend, busy }: {
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
           />
           <div className="composer-tools">
-            <button className="tool-btn" title="Attach">+</button>
+            {uploadElement}
             <button className="tool-btn" title="Code block">{'</>'}</button>
             <div className="spacer" />
             <span className="tag" style={{ marginRight: 2 }}>mode: {mode}</span>
@@ -133,6 +137,36 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
   const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  // Upload state: track whether an upload is in progress for non-blocking verification
+  const [uploadActive, setUploadActive] = useState(false);
+
+  // File upload hook — manages submission, polling, retries independently of chat
+  const {
+    state: uploadState,
+    submit: submitUpload,
+    retry: retryUpload,
+    refreshStatus: refreshUploadStatus,
+    reset: resetUpload,
+  } = useFileUpload({
+    sessionId: backendSessionId ?? '',
+    onReady: (info) => {
+      // Insert system message when extraction is ready (Req 6.9)
+      const systemMsg: MessageItem = {
+        who: 'system',
+        text: `📎 ${info.filename} is now available to your mentor. ${info.summary}`,
+        _id: 'sys-upload-' + info.jobId,
+      };
+      setMsgs(prev => [...prev, systemMsg]);
+    },
+    onStatusChange: (status) => {
+      const activeStatuses = new Set<UploadStatus>(['uploading', 'pending', 'processing', 'ready']);
+      setUploadActive(activeStatuses.has(status));
+    },
+  });
+
+  // Track the selected file for submission
+  const pendingFileRef = useRef<File | null>(null);
+
   const greetedRef = useRef(false);
 
   useEffect(() => {
@@ -194,6 +228,14 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       })
       .catch(() => {
         setMsgs([{ who: 'mentor', text: "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        // Still create the backend session so file uploads work even if LLM is unreachable
+        fetch('/api/sessions', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ title: session.title, mode, topic: session.title, topic_category: session.cat }),
+        }).then(r => r.ok ? r.json() : null)
+          .then(data => { if (data?.sessionId) setBackendSessionId(data.sessionId); })
+          .catch(() => {});
       })
       .finally(() => setBusy(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,7 +273,7 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       const res = await fetch('/api/mentor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: session.title, mode, tone, messages: history }),
+        body: JSON.stringify({ topic: session.title, mode, tone, messages: history, sessionId: backendSessionId }),
       });
       const { text: reply } = await res.json();
       setMsgs(prev => [...prev, { who: 'mentor', text: (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?", _id: 'm' + Date.now() }]);
@@ -240,7 +282,7 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
     } finally {
       setBusy(false);
     }
-  }, [msgs, mode, tone, session.title]);
+  }, [msgs, mode, tone, session.title, backendSessionId]);
 
   const endSession = useCallback(async () => {
     localStorage.removeItem(DRAFT_KEY);
@@ -267,8 +309,54 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       }).then(r => r.ok).catch(() => false);
       if (ok) onSessionSaved?.();
     }
+    // Note: Ending the session does NOT cancel the ingestion pipeline.
+    // If an upload is still being processed, the pipeline continues to completion
+    // in the background (Requirement 7.7). The JobRecord and ImmediateContext
+    // operations are independent of session state.
     onNav('summary');
   }, [msgs, session, mode, onNav, onSessionSaved, backendSessionId]);
+
+  /**
+   * Handle file selection from the ChatUploadButton.
+   * Stores the file reference for submission with the next message or immediately.
+   */
+  const handleFileSelected = useCallback((file: File) => {
+    pendingFileRef.current = file;
+    // Auto-submit the file immediately (user doesn't need to type a message)
+    if (backendSessionId) {
+      submitUpload(file);
+      pendingFileRef.current = null;
+    }
+  }, [backendSessionId, submitUpload]);
+
+  /**
+   * Handle file removal from the ChatUploadButton preview chip.
+   */
+  const handleFileRemoved = useCallback(() => {
+    pendingFileRef.current = null;
+    if (uploadState.status === 'idle') {
+      resetUpload();
+    }
+  }, [uploadState.status, resetUpload]);
+
+  /**
+   * Determine if the attachment button should be disabled.
+   * Disabled while an upload is in progress (uploading or polling).
+   * Re-enabled on terminal states, retries exhausted, or idle.
+   */
+  const isAttachmentDisabled = (() => {
+    if (!backendSessionId) return true; // No session yet
+    if (uploadState.status === 'idle') return false;
+    if (uploadState.retriesExhausted) return false;
+    if (uploadState.status === 'failed' && !uploadState.isActive) return false;
+    if (uploadState.status === 'done' || uploadState.status === 'timeout' || uploadState.status === 'connection_lost') return false;
+    return uploadState.isActive;
+  })();
+
+  /**
+   * Whether to show the retry button on the UploadMessage.
+   */
+  const showRetryButton = uploadState.status === 'failed' && !uploadState.retriesExhausted;
 
   return (
     <div className="panel">
@@ -291,13 +379,43 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
           {msgs.map((m, i) =>
             m.who === 'verdict'
               ? <VerdictMsg key={m._id || i} item={m as any} />
+              : m.who === 'system'
+              ? <div key={m._id || i} className="system-msg">
+                  <span className="system-msg-text">{m.text}</span>
+                </div>
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
+          )}
+          {/* Upload message in the conversation timeline (Req 1.6) */}
+          {uploadState.status !== 'idle' && uploadState.filename && uploadState.fileType && (
+            <UploadMessage
+              jobId={uploadState.jobId ?? ''}
+              filename={uploadState.filename}
+              fileType={uploadState.fileType}
+              status={uploadState.status as Exclude<UploadStatus, 'idle'>}
+              summary={uploadState.summary ?? undefined}
+              error={uploadState.error ?? undefined}
+              onRetry={showRetryButton ? retryUpload : undefined}
+              onRefresh={uploadState.status === 'connection_lost' ? refreshUploadStatus : undefined}
+            />
           )}
           {busy && <Typing />}
         </div>
       </div>
 
-      <Composer mode={mode} tone={tone} onSend={send} busy={busy} />
+      <Composer
+        mode={mode}
+        tone={tone}
+        onSend={send}
+        busy={busy}
+        uploadElement={
+          <ChatUploadButton
+            sessionId={backendSessionId ?? ''}
+            disabled={isAttachmentDisabled}
+            onFileSelected={handleFileSelected}
+            onFileRemoved={handleFileRemoved}
+          />
+        }
+      />
     </div>
   );
 }

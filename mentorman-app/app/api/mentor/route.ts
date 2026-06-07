@@ -4,6 +4,7 @@ import { requireUserId } from '@/lib/auth';
 import { CoreProfileRepo } from '@/lib/db/repositories/core-profile.repo';
 import { SkillGraphRepo } from '@/lib/db/repositories/skill-graph.repo';
 import { promptStore } from '@/lib/prompts/store';
+import { assembleImmediateContext, countTokens } from '@/lib/context-assembler';
 import type { SessionMode } from '@/lib/schemas';
 
 const client = new Anthropic();
@@ -13,7 +14,7 @@ const VALID_MODES = new Set<SessionMode>(['planning', 'topic', 'doubt', 'evaluat
 export async function POST(req: NextRequest) {
   try {
     const uid = await requireUserId();
-    const { topic, mode, messages } = await req.json();
+    const { topic, mode, messages, sessionId } = await req.json();
 
     const sessionMode: SessionMode = VALID_MODES.has(mode) ? mode : 'topic';
 
@@ -37,10 +38,34 @@ export async function POST(req: NextRequest) {
       currentTopic: topic,
     });
 
+    // Count tokens for the core context (system prompt with Core Profile + Skill Graph)
+    // These tokens are never dropped — they always take priority
+    const coreContextTokens = countTokens(systemPrompt)
+
+    // Assemble ImmediateContext with token budget enforcement
+    // If combined context exceeds budget, ImmediateContext blocks are dropped oldest-first
+    const immediateContext = sessionId
+      ? await assembleImmediateContext(sessionId, {
+          contextTokenCounts: { coreContextTokens, episodicRagTokens: 0 },
+        })
+      : null
+
+    // Build the full system prompt with ImmediateContext integration
+    // Order: system prompt (Core Profile + Skill Graph) → ImmediateContext → Episodic RAG
+    let fullSystemPrompt = systemPrompt
+
+    if (immediateContext && immediateContext.systemInstruction) {
+      fullSystemPrompt += `\n\n## Uploaded File Context\n${immediateContext.systemInstruction}`
+    }
+
+    if (immediateContext && immediateContext.formattedText) {
+      fullSystemPrompt += `\n\n## File Content\n${immediateContext.formattedText}`
+    }
+
     const response = await client.messages.create({
       model:      'claude-sonnet-4-6',
       max_tokens: 1024,
-      system:     systemPrompt,
+      system:     fullSystemPrompt,
       messages:   messages ?? [],
     });
 

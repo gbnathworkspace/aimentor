@@ -5,6 +5,7 @@ Handles:
 - Resume sections → Core Profile extraction
 - Zod-style validation before writes
 - MongoDB transaction wrapping for atomicity
+- Session merge mode: non-null overwrite for Core Profile, additive merge for LeetCode
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ class StructuredParser:
         resume_sections: list[ResumeSection] | None,
         user_id: str,
         job_id: str,
+        upload_context: str | None = None,
     ) -> None:
         """Process extracted content into structured MongoDB writes.
 
@@ -41,10 +43,13 @@ class StructuredParser:
             resume_sections: Resume sections routed to the structured path.
             user_id: The user who owns this data.
             job_id: The ingestion job identifier for traceability.
+            upload_context: "session" for session uploads (merge mode), None for onboarding (overwrite mode).
 
         Raises:
             ValidationError: If any data fails Zod-style schema validation.
         """
+        is_session_upload = upload_context == "session"
+
         # Build upsert documents from LeetCode stats
         skill_graph_upserts = self._build_skill_graph_upserts(leetcode_stats)
 
@@ -59,17 +64,25 @@ class StructuredParser:
             validate_skill_graph_signals(upsert["signals"])
 
         # Write within a MongoDB transaction
-        await self._write_within_transaction(
-            user_id=user_id,
-            skill_graph_upserts=skill_graph_upserts,
-            profile_data=profile_data,
-        )
+        if is_session_upload:
+            await self._write_session_merge(
+                user_id=user_id,
+                skill_graph_upserts=skill_graph_upserts,
+                profile_data=profile_data,
+            )
+        else:
+            await self._write_within_transaction(
+                user_id=user_id,
+                skill_graph_upserts=skill_graph_upserts,
+                profile_data=profile_data,
+            )
 
         logger.info(
-            "Structured parser completed for job %s: %d skill graph upserts, profile=%s",
+            "Structured parser completed for job %s: %d skill graph upserts, profile=%s, mode=%s",
             job_id,
             len(skill_graph_upserts),
             bool(profile_data),
+            "session_merge" if is_session_upload else "overwrite",
         )
 
     def _build_skill_graph_upserts(
@@ -319,3 +332,130 @@ class StructuredParser:
                         user_id,
                     )
                     raise
+
+    async def _write_session_merge(
+        self,
+        user_id: str,
+        skill_graph_upserts: list[dict],
+        profile_data: dict | None,
+    ) -> None:
+        """Execute session merge writes within a MongoDB transaction.
+
+        For session uploads:
+        - Core Profile: overwrite only non-null fields, preserve existing values for null fields
+        - Skill Graph (LeetCode): sum solved counts per difficulty for existing topics,
+          create new documents for new topics
+
+        Args:
+            user_id: The user who owns this data.
+            skill_graph_upserts: List of skill graph upsert documents.
+            profile_data: Core Profile fields to write (only non-null values applied), or None.
+        """
+        client = get_mongo_client()
+        async with await client.start_session() as session:
+            async with session.start_transaction():
+                try:
+                    # Merge skill graph documents (additive)
+                    if skill_graph_upserts:
+                        skill_graph_collection = get_skill_graph_collection()
+                        for upsert in skill_graph_upserts:
+                            existing = await skill_graph_collection.find_one(
+                                {"user_id": user_id, "topic": upsert["topic"]},
+                                session=session,
+                            )
+
+                            if existing and "signals" in existing:
+                                # Sum counts with existing values
+                                merged_signals = self._merge_leetcode_signals(
+                                    existing.get("signals", {}),
+                                    upsert["signals"],
+                                )
+                                await skill_graph_collection.update_one(
+                                    {"user_id": user_id, "topic": upsert["topic"]},
+                                    {"$set": {"signals": merged_signals}},
+                                    session=session,
+                                )
+                            else:
+                                # New topic — create document
+                                await skill_graph_collection.update_one(
+                                    {"user_id": user_id, "topic": upsert["topic"]},
+                                    {"$set": upsert["signals"]},
+                                    upsert=True,
+                                    session=session,
+                                )
+
+                    # Merge profile data (non-null overwrite only)
+                    if profile_data:
+                        merged_profile = self._merge_profile_fields(profile_data)
+                        if merged_profile:
+                            users_collection = get_users_collection()
+                            await users_collection.update_one(
+                                {"user_id": user_id},
+                                {"$set": merged_profile},
+                                upsert=True,
+                                session=session,
+                            )
+                except Exception:
+                    logger.error(
+                        "MongoDB session merge transaction failed for user %s, aborting.",
+                        user_id,
+                    )
+                    raise
+
+    @staticmethod
+    def _merge_profile_fields(profile_data: dict) -> dict:
+        """Filter profile data to only include non-null fields for session merge.
+
+        For session uploads, only fields with non-null extracted values should
+        overwrite existing values. Fields with null values are excluded from
+        the update, preserving existing values in the database.
+
+        Special handling for skills: an empty list is treated as null (no update),
+        only a non-empty list overwrites.
+
+        Args:
+            profile_data: Extracted profile fields (may contain null values).
+
+        Returns:
+            Dictionary containing only non-null fields to update. May be empty.
+        """
+        merged: dict = {}
+        for key, value in profile_data.items():
+            if key == "skills":
+                # Only overwrite skills if the new list is non-empty
+                if value and isinstance(value, list) and len(value) > 0:
+                    merged[key] = value
+            else:
+                # For scalar fields, overwrite only if non-null
+                if value is not None:
+                    merged[key] = value
+        return merged
+
+    @staticmethod
+    def _merge_leetcode_signals(existing_signals: dict, new_signals: dict) -> dict:
+        """Merge LeetCode signals by summing solved counts per difficulty.
+
+        For session uploads, solved counts are additive — new counts are
+        summed with existing counts per difficulty level. This ensures
+        existing progress is never removed or reduced.
+
+        Args:
+            existing_signals: The current signals from the database.
+            new_signals: New signals from the session upload.
+
+        Returns:
+            Merged signals dict with summed leetcode_solved counts.
+        """
+        merged = dict(existing_signals)
+
+        existing_leetcode = existing_signals.get("leetcode_solved", {})
+        new_leetcode = new_signals.get("leetcode_solved", {})
+
+        if new_leetcode:
+            merged["leetcode_solved"] = {
+                "easy": existing_leetcode.get("easy", 0) + new_leetcode.get("easy", 0),
+                "medium": existing_leetcode.get("medium", 0) + new_leetcode.get("medium", 0),
+                "hard": existing_leetcode.get("hard", 0) + new_leetcode.get("hard", 0),
+            }
+
+        return merged

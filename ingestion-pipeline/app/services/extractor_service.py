@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from app.config.database import get_ingestion_jobs_collection, get_s3_client
-from app.config.settings import get_settings
+from app.config.database import get_ingestion_jobs_collection
 from app.models.schemas import IngestionFile, LeetCodeTopicStats, ResumeSection
 from app.services.extractors import CSVExtractionError, CSVExtractor, ExtractionError, PDFExtractor
+from app.services.storage_backend import get_storage_backend
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,11 @@ class ExtractorService:
             CSVExtractionError: If CSV extraction fails.
         """
         result = ExtractionResult()
-        settings = get_settings()
-        s3_client = get_s3_client()
+        backend = get_storage_backend()
 
         try:
             for file in files:
-                file_bytes = self._download_from_s3(s3_client, settings.S3_BUCKET, file.s3_key)
+                file_bytes = await backend.download(file.s3_key)
 
                 if file.mime_type == "application/pdf":
                     logger.info("Extracting PDF: %s", file.filename)
@@ -79,20 +78,6 @@ class ExtractorService:
             raise
 
         return result
-
-    def _download_from_s3(self, s3_client, bucket: str, s3_key: str) -> bytes:
-        """Download file bytes from S3.
-
-        Args:
-            s3_client: The boto3 S3 client.
-            bucket: The S3 bucket name.
-            s3_key: The object key in S3.
-
-        Returns:
-            Raw file bytes.
-        """
-        response = s3_client.get_object(Bucket=bucket, Key=s3_key)
-        return response["Body"].read()
 
     async def _mark_job_failed(self, job_id: str, error_message: str) -> None:
         """Mark the job as 'failed' in MongoDB with the error message.

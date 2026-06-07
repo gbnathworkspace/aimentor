@@ -38,6 +38,9 @@ class JobRecord(BaseModel):
     embedding_done: bool = False
     source_category: Optional[str] = None
     last_reingested_at: Optional[str] = None
+    session_id: Optional[str] = None
+    upload_context: Optional[str] = None
+    accompanying_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
@@ -87,6 +90,7 @@ class ChunkMetadata(BaseModel):
     job_id: Optional[str] = None
     topic_category: Optional[str] = None
     session_id: Optional[str] = None
+    upload_context: Optional[str] = None
     date: Optional[str] = None
     type: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -9,6 +9,8 @@ from botocore.exceptions import ClientError
 from fastapi import UploadFile
 from fastapi import BackgroundTasks
 
+import logging
+
 from app.config.database import get_ingestion_jobs_collection, get_s3_client
 from app.config.settings import get_settings
 from app.models.schemas import (
@@ -18,6 +20,8 @@ from app.models.schemas import (
     IngestionStatus,
     JobRecord,
 )
+
+logger = logging.getLogger(__name__)
 
 # Constants
 MAX_FILES = 2
@@ -186,10 +190,44 @@ class FileUploadHandler:
         collection = get_ingestion_jobs_collection()
         await collection.insert_one(job_record.model_dump())
 
-        background_tasks.add_task(self._run_extraction, job_id)
+        background_tasks.add_task(self._run_extraction, job_id, user_id)
 
         return IngestionJobResponse(job_id=job_id)
 
-    async def _run_extraction(self, job_id: str) -> None:
-        """Background task placeholder for extraction processing."""
-        pass
+    async def _run_extraction(self, job_id: str, user_id: str) -> None:
+        """Run the full extraction pipeline for a job."""
+        from app.services.extractor_service import ExtractorService
+        from app.services.ingestion_router import IngestionRouter
+
+        logger.info("Starting extraction for job %s", job_id)
+        collection = get_ingestion_jobs_collection()
+        job = await collection.find_one({"job_id": job_id})
+        if not job:
+            logger.error("Job %s not found — cannot extract", job_id)
+            return
+
+        # Mark job as 'processing' so the UI can show the correct status
+        await collection.update_one(
+            {"job_id": job_id},
+            {"$set": {"status": "processing", "updated_at": datetime.now(UTC)}},
+        )
+
+        files = [IngestionFile(**f) for f in job["files"]]
+        try:
+            extraction_result = await ExtractorService().extract(job_id, files)
+            await IngestionRouter().route(extraction_result, job_id=job_id, user_id=user_id)
+        except Exception as exc:
+            logger.error("Extraction pipeline failed for job %s: %s", job_id, exc)
+            # Mark as failed if not already done by a downstream service
+            refreshed = await collection.find_one({"job_id": job_id})
+            if refreshed and refreshed.get("status") != "failed":
+                await collection.update_one(
+                    {"job_id": job_id},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error": str(exc),
+                            "updated_at": datetime.now(UTC),
+                        }
+                    },
+                )

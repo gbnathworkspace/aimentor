@@ -58,6 +58,11 @@ def get_embeddings_collection() -> AsyncIOMotorCollection:
     return get_collection("embeddings")
 
 
+def get_immediate_contexts_collection() -> AsyncIOMotorCollection:
+    """Return the immediate_contexts collection (session ImmediateContext documents)."""
+    return get_collection("immediate_contexts")
+
+
 # --- S3 client ---
 
 

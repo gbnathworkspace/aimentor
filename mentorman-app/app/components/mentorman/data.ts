@@ -1,7 +1,7 @@
 // MentorMan — data, types, constants
 
 export type MessageItem = {
-  who: 'mentor' | 'user' | 'verdict';
+  who: 'mentor' | 'user' | 'verdict' | 'system';
   text: string;
   label?: string;
   nudge?: string;

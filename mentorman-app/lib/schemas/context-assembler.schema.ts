@@ -33,6 +33,16 @@ export const SessionInputSchema = z.object({
 
 export type SessionInput = z.infer<typeof SessionInputSchema>
 
+// ImmediateContext block — uploaded file content available mid-session
+export const ImmediateContextBlockSchema = z.object({
+  filename: z.string(),
+  uploadTimestamp: z.string(),           // ISO date string
+  content: z.string(),
+  accompanyingMessage: z.string(),
+})
+
+export type ImmediateContextBlock = z.infer<typeof ImmediateContextBlockSchema>
+
 // Output returned by every assembler — the LLM prompt contract
 export const AssembledContextSchema = z.object({
   systemPrompt: z.string().min(1),
@@ -40,12 +50,15 @@ export const AssembledContextSchema = z.object({
   skillGraphNodes: z.array(SkillGraphNodeSchema),
   episodes: z.array(EpisodeSchema),
   conversationWindow: z.array(MessageSchema),
+  // ImmediateContext — uploaded file content (between Skill Graph and Episodic RAG)
+  immediateContextBlocks: z.array(ImmediateContextBlockSchema).default([]),
   // metadata for logging / debugging
   meta: z.object({
     assemblerType: z.string(),           // e.g. "SemanticAssembler"
     retrievalLatencyMs: z.number().optional(),
     episodeCount: z.number().int().min(0),
     promptVersion: z.string(),           // e.g. "topic.v1"
+    immediateContextCount: z.number().int().min(0).default(0),
   }),
 })
 

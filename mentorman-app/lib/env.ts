@@ -16,6 +16,11 @@ const EnvSchema = z.object({
   // AI providers
   ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
 
+  // Storage backend: 'local' (disk) or 's3' (AWS S3)
+  STORAGE_BACKEND: z.enum(['local', 's3']).default('local'),
+  // Required when STORAGE_BACKEND=local — absolute path where uploads are written
+  LOCAL_UPLOADS_DIR:       z.string().optional(),
+
   // Optional — warn but don't crash if missing
   VOYAGE_API_KEY:          z.string().optional(),
   AWS_ACCESS_KEY_ID:       z.string().optional(),

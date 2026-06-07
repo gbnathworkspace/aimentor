@@ -1,6 +1,6 @@
 """Ingest router for file upload and job status endpoints."""
 
-from fastapi import APIRouter, BackgroundTasks, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, File, Header, HTTPException, UploadFile
 
 from app.config.database import get_ingestion_jobs_collection
 from app.models.schemas import IngestionJobResponse
@@ -58,6 +58,22 @@ async def ingest_files(
     )
 
     return response
+
+
+@router.post("/ingest/trigger")
+async def trigger_extraction(
+    job_id: str = Body(..., embed=True),
+    user_id: str = Header(..., alias="X-User-Id"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """Trigger extraction for a job already created in MongoDB.
+
+    Called by Next.js after it creates the job record directly (session upload flow).
+    Returns immediately; extraction runs as a background task.
+    """
+    handler = FileUploadHandler()
+    background_tasks.add_task(handler._run_extraction, job_id, user_id)
+    return {"status": "ok"}
 
 
 @router.get("/ingest/{job_id}/status")

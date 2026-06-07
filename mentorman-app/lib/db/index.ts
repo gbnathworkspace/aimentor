@@ -7,6 +7,8 @@ export { default as connectDB } from './mongoose'
 export { CoreProfileModel } from './models/core-profile.model'
 export { SkillGraphNodeModel } from './models/skill-graph.model'
 export { SessionModel } from './models/session.model'
+export { ImmediateContextModel } from './models/immediate-context.model'
+export { IngestionJobModel } from './models/ingestion-job.model'
 
 // Repositories — use these in service layer
 export { CoreProfileRepo } from './repositories/core-profile.repo'

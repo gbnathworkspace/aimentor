@@ -3,7 +3,7 @@
 import io
 from collections import Counter
 
-from hypothesis import given, settings, assume
+from hypothesis import given, settings, assume, HealthCheck
 from hypothesis import strategies as st
 
 from app.services.extractors.csv_extractor import (
@@ -59,7 +59,7 @@ class TestCSVAggregationCorrectness:
     """
 
     @given(data=valid_csv_bytes())
-    @settings(max_examples=100)
+    @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     def test_aggregation_matches_manual_computation(self, data):
         """**Validates: Requirements 3.4, 3.5, 3.6, 3.7, 3.8**
 

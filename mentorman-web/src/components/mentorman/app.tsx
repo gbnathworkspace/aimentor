@@ -107,9 +107,6 @@ export function MentorManApp() {
     setView('chat');
   };
 
-  // Don't render until we know whether to show onboarding or the app
-  if (!profileLoaded) return null;
-
   const fullScreen = view === 'onboarding';
 
   return (
@@ -123,6 +120,22 @@ export function MentorManApp() {
           setMode('topic');
           setView('chat');
         }} />
+      ) : !profileLoaded ? (
+        <>
+          <Sidebar
+            view={view}
+            activeSession={activeSession}
+            onPickSession={pickSession}
+            onNav={(v) => setView(v as View)}
+            onNew={() => {}}
+            profile={null}
+            userName={userName}
+            refreshKey={-1}
+          />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', border: '3px solid var(--accent)', borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} />
+          </div>
+        </>
       ) : (
         <>
           <Sidebar

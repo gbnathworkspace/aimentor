@@ -3,6 +3,8 @@
    Dark zinc base · emerald accent (tweakable) · layered depth
    ============================================================ */
 
+@keyframes spin { to { transform: rotate(360deg); } }
+
 :root {
   --bg:        #08080a;
   --bg-2:      #0b0b0e;

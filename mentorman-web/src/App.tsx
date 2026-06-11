@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import {
   ClerkProvider,
   ClerkLoaded,
+  ClerkLoading,
   SignedIn,
   SignedOut,
   RedirectToSignIn,
@@ -52,6 +53,11 @@ export default function App() {
             path="/*"
             element={
               <>
+                <ClerkLoading>
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#08080a' }}>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #34d399', borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} />
+                  </div>
+                </ClerkLoading>
                 <SignedIn>
                   {/* ClerkLoaded guarantees window.Clerk.session is ready before
                       the app's data-fetching effects run. */}

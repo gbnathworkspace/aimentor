@@ -10,7 +10,7 @@ import { TweaksPanel, TweakSection, TweakRadio, TweakColor, useTweaks } from './
 import { ACCENTS, catToMode, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'evaluation' | 'summary' | 'settings' | 'onboarding';
+type View = 'chat' | 'dashboard' | 'evaluation' | 'summary' | 'settings' | 'onboarding' | 'deferred-onboarding';
 
 const LAUNCH_ITEMS: { id: string; num: string; label: string }[] = [
   { id: 'onboarding', num: '01', label: 'Onboarding' },
@@ -54,7 +54,7 @@ function Launcher({ view, mobileOpen, onGo }: {
 export function MentorManApp() {
   const [t, setTweak] = useTweaks({ accent: '#34d399', tone: 'balanced', density: 'cozy' });
   const [view, setView] = useState<View>('chat');
-  const [activeSession, setActiveSession] = useState('s1');
+  const [activeSession, setActiveSession] = useState('new');
   const [mode, setMode] = useState<ModeId>('topic');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profile, setProfile] = useState<CoreProfile | null>(null);
@@ -63,6 +63,7 @@ export function MentorManApp() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   const [sessionsVersion, setSessionsVersion] = useState(0);
+  const [chatKey, setChatKey] = useState(0);
 
   // Fetch user name from Clerk via /api/me
   useEffect(() => {
@@ -136,7 +137,7 @@ export function MentorManApp() {
     if (title) setActiveSessionTitle(title);
     const cat = type ?? 'Topic';
     if (cat === 'Eval') { setView('evaluation'); }
-    else { setMode(catToMode[cat] || 'topic'); setView('chat'); }
+    else { setMode(catToMode[cat] || 'topic'); setView('chat'); setChatKey(k => k + 1); }
   };
 
   const startTopic = () => {
@@ -145,32 +146,52 @@ export function MentorManApp() {
     setActiveSessionTitle(null);
     setMode('topic');
     setView('chat');
+    setChatKey(k => k + 1);
   };
 
   const go = (target: string) => {
     if (target === 'mobile') { setMobileOpen(true); return; }
     setMobileOpen(false);
-    if (target === 'chat') { setActiveSession('s1'); setMode('topic'); }
-    if (target === 'evaluation') { setActiveSession('s7'); }
+    if (target === 'chat') { setActiveSession('new'); setMode('topic'); setChatKey(k => k + 1); }
+    if (target === 'evaluation') { setActiveSession('new'); }
     setView(target as View);
   };
 
   // Don't render until we know whether to show onboarding or the app
   if (!profileLoaded) return null;
 
-  const fullScreen = view === 'onboarding';
+  const fullScreen = view === 'onboarding' || view === 'deferred-onboarding';
 
   return (
     <div className={`app ${fullScreen ? 'full' : ''} density-${t.density}`}>
       {fullScreen ? (
-        <Onboarding userName={userName} onFinish={(goal) => {
-          localStorage.removeItem('mentorman_draft');
-          refreshProfile();
-          setActiveSession('new');
-          setActiveSessionTitle(goal || null);
-          setMode('topic');
-          setView('chat');
-        }} />
+        view === 'deferred-onboarding' ? (
+          <Onboarding
+            userName={userName}
+            deferred
+            onFinish={(goal) => {
+              refreshProfile();
+              setActiveSession('new');
+              setActiveSessionTitle(goal || null);
+              setMode('topic');
+              setView('chat');
+            }}
+            onAbandon={() => {
+              // Abandon deferred onboarding: return to Settings without saving
+              // profile_status remains "skipped", no Skill Graph documents created
+              setView('settings');
+            }}
+          />
+        ) : (
+          <Onboarding userName={userName} onFinish={(goal) => {
+            localStorage.removeItem('mentorman_draft');
+            refreshProfile();
+            setActiveSession('new');
+            setActiveSessionTitle(goal || null);
+            setMode('topic');
+            setView('chat');
+          }} />
+        )
       ) : (
         <>
           <Sidebar
@@ -178,13 +199,14 @@ export function MentorManApp() {
             activeSession={activeSession}
             onPickSession={pickSession}
             onNav={(v) => { setMobileOpen(false); setView(v as View); }}
-            onNew={() => { localStorage.removeItem('mentorman_draft'); setActiveSession('new'); setMode('planning'); setView('chat'); }}
+            onNew={() => { localStorage.removeItem('mentorman_draft'); setActiveSession('new'); setActiveSessionTitle(null); setMode('topic'); setView('chat'); setChatKey(k => k + 1); }}
             profile={profile}
             userName={userName}
             refreshKey={sessionsVersion}
           />
           {view === 'chat' && (
             <ChatPanel
+              key={chatKey}
               sessionId={activeSession}
               sessionTitle={activeSessionTitle ?? undefined}
               mode={mode}
@@ -193,6 +215,8 @@ export function MentorManApp() {
               onNav={(v) => setView(v as View)}
               onSessionSaved={() => setSessionsVersion(v => v + 1)}
               topics={topics}
+              profile={profile}
+              onStartDeferredOnboarding={() => setView('deferred-onboarding')}
             />
           )}
           {view === 'dashboard' && (
@@ -203,8 +227,8 @@ export function MentorManApp() {
           )}
           {view === 'summary' && (
             <SessionEnd
-              onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }}
-              onBack={() => { setActiveSession('s1'); setView('chat'); }}
+              onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); setChatKey(k => k + 1); }}
+              onBack={() => { setActiveSession('new'); setView('chat'); setChatKey(k => k + 1); }}
             />
           )}
           {view === 'settings' && (
@@ -212,6 +236,7 @@ export function MentorManApp() {
               profile={profile}
               onReset={() => { setProfile(null); setView('onboarding'); }}
               onSaved={refreshProfile}
+              onStartDeferredOnboarding={() => setView('deferred-onboarding')}
             />
           )}
         </>

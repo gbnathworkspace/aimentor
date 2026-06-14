@@ -29,13 +29,13 @@ function skillToTopic(s: SkillNode): Topic {
   };
 }
 
-function daysLeft(deadline: string | undefined): number | null {
+function daysLeft(deadline: string | null | undefined): number | null {
   if (!deadline) return null;
   const diff = new Date(deadline).getTime() - Date.now();
   return Math.max(0, Math.round(diff / 86_400_000));
 }
 
-function weeksLeft(deadline: string | undefined): number | null {
+function weeksLeft(deadline: string | null | undefined): number | null {
   const d = daysLeft(deadline);
   return d === null ? null : Math.ceil(d / 7);
 }

@@ -19,3 +19,11 @@ export {
   DEFAULT_TOKEN_BUDGET,
 } from './token-budget'
 export type { ContextTokenCounts, BudgetPriorityResult } from './token-budget'
+
+// Context assembly with graceful degradation for skipped profiles
+export {
+  assembleContext,
+  SKIPPED_ONBOARDING_ADDENDUM,
+  CONVERSATION_WINDOW_SIZE,
+} from './assemble-context'
+export type { AssembleContextInput, AssembledContextResult } from './assemble-context'

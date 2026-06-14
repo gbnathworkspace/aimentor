@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Get Linear Pending Tasks",
+  "description": "Fetches all pending/in-progress tasks assigned to me from Linear when manually triggered",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Use the Linear integration to list all issues assigned to me that are in a pending or in-progress state. Summarize them with their identifier, title, priority, and current status."
+  },
+  "workspaceFolderName": "ai mentor",
+  "shortName": "linear-pending-tasks"
+}

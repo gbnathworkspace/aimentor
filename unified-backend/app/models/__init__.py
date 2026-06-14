@@ -2,7 +2,16 @@
 
 from app.models.profile import ProfileCreate, ProfileUpdate, ProfileResponse
 from app.models.skill import SkillNode, SkillUpdate
-from app.models.session import Message, SessionCreate, SessionDoc
+from app.models.session import (
+    Message,
+    SessionCreate,
+    SessionDoc,
+    SessionDocument,
+    SessionEndResult,
+    SessionSkillUpdate,
+    SessionStatus,
+    SkillLevel,
+)
 from app.models.episodic import EpisodicEntry, SearchQuery
 from app.models.ingestion import IngestionJobResponse
 from app.models.chat import MentorRequest, MentorResponse, OnboardingRequest, OnboardingResponse
@@ -19,6 +28,11 @@ __all__ = [
     "Message",
     "SessionCreate",
     "SessionDoc",
+    "SessionDocument",
+    "SessionEndResult",
+    "SessionSkillUpdate",
+    "SessionStatus",
+    "SkillLevel",
     # Episodic
     "EpisodicEntry",
     "SearchQuery",

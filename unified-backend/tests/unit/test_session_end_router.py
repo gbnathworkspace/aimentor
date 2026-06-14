@@ -90,8 +90,8 @@ class TestSessionEndEndpoint:
                 "test-user-123",
                 "python-basics",
                 [
-                    {"role": "user", "content": "How do I use list comprehensions?"},
-                    {"role": "assistant", "content": "List comprehensions provide a concise way to create lists..."},
+                    {"role": "user", "content": "How do I use list comprehensions?", "timestamp": None},
+                    {"role": "assistant", "content": "List comprehensions provide a concise way to create lists...", "timestamp": None},
                 ],
             )
 

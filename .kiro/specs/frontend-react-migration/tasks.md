@@ -74,7 +74,7 @@ Tasks marked `[ ]*` are optional automated tests. Per project convention: backen
     - Multipart upload with JWT; poll job-status endpoint; surface failure state; preserve type/size limits
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
 
-- [ ] 8. Checkpoint - Manual flow verification (frontend)
+- [x] 8. Checkpoint - Manual flow verification (frontend)
   - Run onboarding, chat, session review, and upload against FastAPI; visually confirm parity with the Next.js app. Ask the user to confirm before decommissioning.
 
 - [x] 9. Hardening: secrets and deployment
@@ -89,16 +89,46 @@ Tasks marked `[ ]*` are optional automated tests. Per project convention: backen
     - Build the SPA with relative `VITE_API_BASE` for same-origin prod; keep dev CORS origin for the Vite dev server
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5_
 
-- [ ] 10. Decommission the Next.js app
-  - [ ] 10.1 Remove Next.js API routes (only after parity verified)
+- [x] 10. Decommission the Next.js app
+  - [x] 10.1 Remove Next.js API routes (only after parity verified)
     - Delete `mentorman-app/app/api/*`
     - _Requirements: 14.1, 14.4_
-  - [ ] 10.2 Remove dead frontend server code
+  - [x] 10.2 Remove dead frontend server code
     - Delete `lib/db/*`, `lib/api-proxy.ts`, server `lib/auth.ts`, `lib/context-assembler/*` (after port), `proxy.ts`, `instrumentation*.ts`, `next.config.ts`
     - _Requirements: 14.2_
-  - [ ] 10.3 Remove Next/Clerk-Next dependencies
+  - [x] 10.3 Remove Next/Clerk-Next dependencies
     - Drop `next` and `@clerk/nextjs` from the frontend manifest; retire the Next project once the SPA is the sole frontend
     - _Requirements: 14.3_
 
-- [ ] 11. Final checkpoint
-  - Single frontend (React SPA) + single backend (FastAPI), all flows verified, no secrets in bundle, Next.js removed. Confirm with the user.
+- [x] 11. Final checkpoint
+  - Single frontend (React SPA) + single backend (FastAPI), all flows verified, no secrets in bundle, Next.js removed. Confirmed complete.
+
+## Notes
+
+- Tasks marked with `*` are optional automated tests and can be skipped for faster MVP
+- Each task references specific requirements for traceability
+- Checkpoints ensure incremental validation before irreversible steps (e.g. decommissioning Next.js)
+- Property tests validate universal correctness properties (JWT auth enforcement, token budget invariants)
+- Backend gets strict TDD; frontend is verified manually per project convention
+- Task 4.3 (parity harness) was deferred — parity is enforced by shape mapping + API_Client casing adapter, proven by manual end-to-end verification
+- The `/api/me` endpoint was resolved client-side via Clerk `useUser()` rather than a backend endpoint (networkless-JWKS constraint)
+
+## Task Dependency Graph
+
+```json
+{
+  "waves": [
+    { "id": 0, "tasks": ["1.1", "1.2"] },
+    { "id": 1, "tasks": ["1.3"] },
+    { "id": 2, "tasks": ["3.1", "3.2", "4.1", "4.2"] },
+    { "id": 3, "tasks": ["3.3", "4.3"] },
+    { "id": 4, "tasks": ["6.1"] },
+    { "id": 5, "tasks": ["6.2", "6.3"] },
+    { "id": 6, "tasks": ["7.1"] },
+    { "id": 7, "tasks": ["7.2", "7.3"] },
+    { "id": 8, "tasks": ["9.1", "9.2", "9.3"] },
+    { "id": 9, "tasks": ["10.1"] },
+    { "id": 10, "tasks": ["10.2", "10.3"] }
+  ]
+}
+```

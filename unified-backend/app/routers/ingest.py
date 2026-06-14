@@ -1,5 +1,6 @@
 """Ingestion router — /api/ingest upload + status + trigger."""
 
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, status
@@ -11,6 +12,7 @@ from app.models.ingestion import IngestionJobResponse
 from app.services.extraction import process_extraction
 from app.services.file_upload import store_file, validate_files
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ingest", tags=["Ingestion"])
 
 
@@ -52,9 +54,13 @@ async def upload_files(
     job_id = str(uuid4())
     file_paths: list[str] = []
 
-    for file in valid_files:
-        path = await store_file(file, user_id, job_id)
-        file_paths.append(path)
+    try:
+        for file in valid_files:
+            path = await store_file(file, user_id, job_id)
+            file_paths.append(path)
+    except Exception:
+        logger.exception("File storage failed for job=%s user=%s", job_id, user_id)
+        raise
 
     # Create job record in MongoDB
     job_doc = {

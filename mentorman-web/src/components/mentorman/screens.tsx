@@ -211,24 +211,30 @@ export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) =>
 }
 
 // ---------- Session-end summary -----------------------------
-export function SessionEnd({ onFollow, onBack }: { onFollow: () => void; onBack: () => void }) {
+export function SessionEnd({ onFollow, onBack, title, summary }: {
+  onFollow: () => void;
+  onBack: () => void;
+  title?: string;
+  summary?: string;
+}) {
+  const displayTitle = title || 'Session ended';
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="ph-left"><div className="ph-title">BFS/DFS revision</div><div className="ph-sub">session ended · saved</div></div>
+        <div className="ph-left"><div className="ph-title">{displayTitle}</div><div className="ph-sub">session ended · saved</div></div>
         <div className="ph-right"><span className="pill ok"><span className="ind" /> session saved</span></div>
       </div>
       <div className="se-body">
         <div className="se-inner">
           <div className="se-top">
             <div className="label">Session summary</div>
-            <h2 className="title-lg">BFS/DFS revision</h2>
-            <div className="meta">today · 36 min · session ended</div>
+            <h2 className="title-lg">{displayTitle}</h2>
+            <div className="meta">session ended</div>
           </div>
           <div className="se-summary">
             <div className="label">Summary</div>
             <div className="body">
-              Session saved. Your skill graph has been updated based on this conversation.
+              {summary || 'Session saved. Your skill graph has been updated based on this conversation.'}
             </div>
           </div>
           <div className="se-actions">

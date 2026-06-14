@@ -1,5 +1,7 @@
 """Profile router — /api/profile CRUD."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
 
@@ -7,6 +9,7 @@ from app.config.database import profiles_col
 from app.core.security import require_auth
 from app.models.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/profile", tags=["Profile"])
 
 
@@ -29,10 +32,14 @@ async def create_profile(
     try:
         await profiles_col().insert_one(doc)
     except DuplicateKeyError:
+        logger.warning("Duplicate profile creation attempt for user=%s", user_id)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Profile already exists for this user",
         )
+    except Exception:
+        logger.exception("Failed to create profile for user=%s", user_id)
+        raise
     doc.pop("_id", None)
     return doc
 

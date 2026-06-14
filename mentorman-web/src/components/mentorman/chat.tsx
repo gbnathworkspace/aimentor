@@ -7,6 +7,7 @@ import { MODES, type MessageItem, type ModeId, type ToneId, type Topic } from '.
 import { ChatUploadButton } from './chat/ChatUploadButton';
 import { UploadMessage } from './chat/UploadMessage';
 import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUpload';
+import { useSessionPersistence, type Message as PersistenceMessage, type SessionEndResult } from '@/lib/session-persistence/useSessionPersistence';
 import type { SkillNode } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
@@ -22,12 +23,15 @@ function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, uploadElement }: {
+function Composer({ mode, tone, onSend, busy, disabled, uploadElement, suggestions, onSuggestionClick }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
+  disabled?: boolean;
   uploadElement?: React.ReactNode;
+  suggestions?: string[];
+  onSuggestionClick?: (text: string) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
@@ -40,22 +44,31 @@ function Composer({ mode, tone, onSend, busy, uploadElement }: {
 
   const submit = () => {
     const t = val.trim();
-    if (!t || busy) return;
+    if (!t || busy || disabled) return;
     setVal('');
     if (ref.current) ref.current.style.height = 'auto';
     onSend(t);
   };
 
   const isEval = mode === 'evaluation';
+  const showChips = !busy && !isEval && suggestions && suggestions.length > 0 && !val;
   return (
     <div className="composer">
       {isEval && (
         <div className="eval-flag"><span className="dot" /> Evaluation mode — your answer is graded</div>
       )}
+      {showChips && (
+        <div className="suggestions">
+          {suggestions.map(s => (
+            <button key={s} className="suggestion-chip" onClick={() => onSuggestionClick?.(s)}>{s}</button>
+          ))}
+        </div>
+      )}
       <div className="composer-inner">
         <div className={`composer-box ${focus ? 'focus' : ''}`}>
           <textarea
             ref={ref} value={val} rows={1}
+            disabled={disabled}
             placeholder={isEval ? 'Type your answer…' : 'Reply to your mentor…'}
             onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
             onChange={e => { setVal(e.target.value); grow(); }}
@@ -66,7 +79,7 @@ function Composer({ mode, tone, onSend, busy, uploadElement }: {
             <button className="tool-btn" title="Code block">{'</>'}</button>
             <div className="spacer" />
             <span className="tag" style={{ marginRight: 2 }}>mode: {mode}</span>
-            <button className="send-btn" onClick={submit} disabled={busy || !val.trim()} title="Send">
+            <button className="send-btn" onClick={submit} disabled={busy || disabled || !val.trim()} title="Send">
               <Icon name={isEval ? 'arrowUp' : 'send'} />
             </button>
           </div>
@@ -120,7 +133,7 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
 
 const DRAFT_KEY = 'mentorman_draft';
 
-export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, topics = [] }: {
+export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, onSessionEnd, topics = [] }: {
   sessionId: string;
   sessionTitle?: string;
   mode: ModeId;
@@ -128,17 +141,31 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
   tone: ToneId;
   onNav: (v: string) => void;
   onSessionSaved?: () => void;
+  onSessionEnd?: (result: SessionEndResult) => void;
   topics?: Topic[];
 }) {
   const fallback = { id: sessionId, title: 'New session', cat: 'Topic', date: 'now' };
   const session = sessionTitle ? { ...fallback, title: sessionTitle } : fallback;
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // Upload state: track whether an upload is in progress for non-blocking verification
   const [uploadActive, setUploadActive] = useState(false);
+
+  // Session persistence hook — manages session lifecycle, message persistence, recovery
+  const {
+    sessionId: persistenceSessionId,
+    isEnding,
+    error: persistenceError,
+    createSession: persistenceCreateSession,
+    persistMessages,
+    endSession: persistenceEndSession,
+    recoverOrphanedMessages,
+    retryCreateSession,
+  } = useSessionPersistence();
 
   // File upload hook — manages submission, polling, retries independently of chat
   const {
@@ -168,6 +195,19 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
   const pendingFileRef = useRef<File | null>(null);
 
   const greetedRef = useRef(false);
+
+  // Recover orphaned messages from localStorage on mount (Req 3.5, 3.6, 3.7)
+  useEffect(() => {
+    recoverOrphanedMessages();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync persistence hook's sessionId into local backendSessionId state
+  useEffect(() => {
+    if (persistenceSessionId && !backendSessionId) {
+      setBackendSessionId(persistenceSessionId);
+    }
+  }, [persistenceSessionId, backendSessionId]);
 
   useEffect(() => {
     greetedRef.current = false;
@@ -210,6 +250,11 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
           setMsgs(loaded);
           setBackendSessionId(sessionId);
           greetedRef.current = true; // skip auto-greet — history loaded
+        } else if (data.status === 'ended') {
+          // Ended session with no saved messages — show placeholder, suppress auto-greet
+          setMsgs([{ who: 'system' as const, text: 'This session ended with no saved messages.', _id: 'empty-ended' }]);
+          setBackendSessionId(sessionId);
+          greetedRef.current = true;
         }
       })
       .catch(() => {
@@ -223,10 +268,12 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
     return () => { cancelled = true; };
   }, [sessionId]);
 
-  // Auto-greet: when starting a fresh session, get the first mentor message
+  // Auto-greet: only runs for fresh sessions (sessionId === 'new'), never for sidebar-loaded sessions
   useEffect(() => {
     if (greetedRef.current) return;
+    if (sessionId !== 'new') return; // existing sessions show their stored history, not a new greeting
     greetedRef.current = true;
+    let cancelled = false;
     setBusy(true);
     fetch('/api/mentor', {
       method: 'POST',
@@ -239,16 +286,20 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       }),
     })
       .then(r => r.json())
-      .then(({ text: reply }) => {
+      .then(({ text: reply, suggestions: chips }) => {
+        if (cancelled) return;
         setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        setSuggestions(Array.isArray(chips) ? chips : []);
         // NOTE: no session is created here. The greeting alone must not create a
         // backend session — that produced phantom empty sessions on every open.
         // The session is created lazily on the user's first action (send/upload).
       })
       .catch(() => {
+        if (cancelled) return;
         setMsgs([{ who: 'mentor', text: "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
       })
-      .finally(() => setBusy(false));
+      .finally(() => { if (!cancelled) setBusy(false); });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -300,16 +351,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
     if (creatingRef.current) return null; // a creation is already in flight
     creatingRef.current = true;
     try {
-      const title = firstUserText
-        ? (firstUserText.length > 48 ? firstUserText.slice(0, 48) + '…' : firstUserText)
-        : session.title;
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, mode, topic: session.title, topic_category: session.cat }),
-      });
-      const data = res.ok ? await res.json() : null;
-      const id = data?.sessionId ?? null;
+      // Use the persistence hook's createSession which handles retry + localStorage + error state
+      const id = await persistenceCreateSession(mode, session.title);
       if (id) {
         setBackendSessionId(id);
         onSessionSaved?.(); // refresh the sidebar so the new chat appears
@@ -320,11 +363,12 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
     } finally {
       creatingRef.current = false;
     }
-  }, [backendSessionId, mode, session.title, session.cat, onSessionSaved]);
+  }, [backendSessionId, mode, session.title, onSessionSaved, persistenceCreateSession]);
 
   const send = useCallback(async (text: string) => {
     const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now() };
     setMsgs(prev => [...prev, userMsg]);
+    setSuggestions([]);
     setBusy(true);
     try {
       const sid = backendSessionId || await ensureSession(text);
@@ -339,46 +383,60 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic: session.title, mode, tone, messages: history, sessionId: sid }),
       });
-      const { text: reply } = await res.json();
-      setMsgs(prev => [...prev, { who: 'mentor', text: (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?", _id: 'm' + Date.now() }]);
+      const { text: reply, suggestions: chips } = await res.json();
+      setSuggestions(Array.isArray(chips) ? chips : []);
+      const mentorText = (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?";
+      setMsgs(prev => [...prev, { who: 'mentor', text: mentorText, _id: 'm' + Date.now() }]);
+
+      // Persist messages via the session persistence hook (Req 8.2)
+      const now = new Date().toISOString();
+      const userPersistMsg: PersistenceMessage = { role: 'user', content: text, timestamp: now };
+      const mentorPersistMsg: PersistenceMessage = { role: 'mentor', content: mentorText, timestamp: now };
+      persistMessages(userPersistMsg, mentorPersistMsg);
     } catch {
       setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble reaching my notes right now — try that again in a moment.", _id: 'm' + Date.now() }]);
     } finally {
       setBusy(false);
     }
-  }, [msgs, mode, tone, session.title, backendSessionId, ensureSession]);
+  }, [msgs, mode, tone, session.title, backendSessionId, ensureSession, persistMessages]);
 
   const endSession = useCallback(async () => {
     localStorage.removeItem(DRAFT_KEY);
     if (msgs.length < 2) { onNav('summary'); return; }
 
-    const apiMessages = msgs
-      .filter(m => m.who === 'mentor' || m.who === 'user')
-      .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
+    // Use the persistence hook's endSession which handles loading state, timeout, and cleanup (Req 8.4, 8.5, 8.9)
+    // Pass backendSessionId as fallback for restored sessions where sessionIdRef.current is null
+    const result = await persistenceEndSession(backendSessionId ?? undefined);
 
-    if (backendSessionId) {
-      // Full save — messages + Haiku summary + skill_update extraction
-      const ok = await fetch(`/api/sessions/${backendSessionId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ messages: apiMessages, mode, topic: session.title }),
-      }).then(r => r.ok).catch(() => false);
-      if (ok) onSessionSaved?.();
+    if (result) {
+      // Update sidebar with the completed session title from SessionEndResult (Req 8.5)
+      onSessionSaved?.();
+      onSessionEnd?.(result);
+      // Clear session_id from state and localStorage on successful end
+      setBackendSessionId(null);
     } else {
-      // Fallback: no backendSessionId (session create failed) — create a minimal record
-      const ok = await fetch('/api/sessions', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ title: session.title, mode, topic: session.title, topic_category: session.cat }),
-      }).then(r => r.ok).catch(() => false);
-      if (ok) onSessionSaved?.();
+      // If endSession returned null, the hook sets its own error state.
+      // We still do a fallback save for the messages if we have a backendSessionId.
+      if (backendSessionId) {
+        const apiMessages = msgs
+          .filter(m => m.who === 'mentor' || m.who === 'user')
+          .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
+        await fetch(`/api/sessions/${backendSessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: apiMessages, mode, topic: session.title }),
+        }).catch(() => {});
+      }
+      // Don't navigate on failure — let user retry via error state
+      return;
     }
+
     // Note: Ending the session does NOT cancel the ingestion pipeline.
     // If an upload is still being processed, the pipeline continues to completion
     // in the background (Requirement 7.7). The JobRecord and ImmediateContext
     // operations are independent of session state.
     onNav('summary');
-  }, [msgs, session, mode, onNav, onSessionSaved, backendSessionId]);
+  }, [msgs, session, mode, onNav, onSessionSaved, onSessionEnd, backendSessionId, persistenceEndSession]);
 
   /**
    * Handle file selection from the ChatUploadButton.
@@ -443,7 +501,9 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         </div>
         <div className="ph-right">
           <ModeBar mode={mode} onMode={setMode} />
-          <button className="btn btn-sm btn-ghost" onClick={endSession} title="End session">End</button>
+          <button className="btn btn-sm btn-ghost" onClick={endSession} disabled={isEnding} title="End session">
+            {isEnding ? 'Ending…' : 'End'}
+          </button>
           <span className="pill ok"><span className="ind" /> active</span>
         </div>
       </div>
@@ -452,6 +512,18 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
 
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">
+          {/* Session creation error state with retry button (Req 8.8) */}
+          {persistenceError && (
+            <div className="session-error">
+              <div className="session-error-text">
+                <Icon name="warn" size={16} />
+                <span>{persistenceError}</span>
+              </div>
+              <button className="btn btn-sm btn-ghost" onClick={retryCreateSession}>
+                Retry
+              </button>
+            </div>
+          )}
           {msgs.map((m, i) =>
             m.who === 'verdict'
               ? <VerdictMsg key={m._id || i} item={m as any} />
@@ -475,6 +547,13 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
             />
           )}
           {busy && <Typing />}
+          {/* Loading indicator during session-end processing (Req 8.9) */}
+          {isEnding && (
+            <div className="session-ending-indicator">
+              <Typing />
+              <span className="session-ending-text">Ending session and generating summary…</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -483,6 +562,9 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         tone={tone}
         onSend={send}
         busy={busy}
+        disabled={isEnding || !!persistenceError}
+        suggestions={suggestions}
+        onSuggestionClick={send}
         uploadElement={
           <ChatUploadButton
             sessionId={backendSessionId ?? ''}

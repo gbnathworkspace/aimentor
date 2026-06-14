@@ -1,11 +1,14 @@
 """Skills router — /api/skills CRUD."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.database import skill_graph_col
 from app.core.security import require_auth
 from app.models.skill import SkillNode, SkillUpdate
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/skills", tags=["Skills"])
 
 
@@ -34,11 +37,15 @@ async def get_skill(topic: str, user_id: str = Depends(require_auth)) -> dict:
 async def upsert_skill(data: SkillNode, user_id: str = Depends(require_auth)) -> dict:
     """Upsert a skill node. Creates if not exists, updates if it does."""
     doc = data.model_dump()
-    await skill_graph_col().update_one(
-        {"user_id": user_id, "topic": data.topic},
-        {"$set": {**doc, "user_id": user_id}},
-        upsert=True,
-    )
+    try:
+        await skill_graph_col().update_one(
+            {"user_id": user_id, "topic": data.topic},
+            {"$set": {**doc, "user_id": user_id}},
+            upsert=True,
+        )
+    except Exception:
+        logger.exception("Failed to upsert skill topic=%s for user=%s", data.topic, user_id)
+        raise
     return doc
 
 

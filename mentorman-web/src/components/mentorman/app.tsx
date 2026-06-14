@@ -23,6 +23,8 @@ export function MentorManApp() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   const [sessionsVersion, setSessionsVersion] = useState(0);
+  const [chatKey, setChatKey] = useState(0);
+  const [lastSessionEnd, setLastSessionEnd] = useState<{ title: string; summary: string } | null>(null);
 
   // Fetch user name from Clerk via /api/me
   useEffect(() => {
@@ -143,13 +145,14 @@ export function MentorManApp() {
             activeSession={activeSession}
             onPickSession={pickSession}
             onNav={(v) => setView(v as View)}
-            onNew={() => { localStorage.removeItem('mentorman_draft'); setActiveSession('new'); setMode('planning'); setView('chat'); }}
+            onNew={() => { localStorage.removeItem('mentorman_draft'); setActiveSession('new'); setActiveSessionTitle(null); setMode('topic'); setView('chat'); setChatKey(k => k + 1); }}
             profile={profile}
             userName={userName}
             refreshKey={sessionsVersion}
           />
           {view === 'chat' && (
             <ChatPanel
+              key={chatKey}
               sessionId={activeSession}
               sessionTitle={activeSessionTitle ?? undefined}
               mode={mode}
@@ -157,6 +160,7 @@ export function MentorManApp() {
               tone={t.tone as ToneId}
               onNav={(v) => setView(v as View)}
               onSessionSaved={() => setSessionsVersion(v => v + 1)}
+              onSessionEnd={(result) => setLastSessionEnd({ title: result.title, summary: result.summary })}
               topics={topics}
             />
           )}
@@ -165,6 +169,8 @@ export function MentorManApp() {
           )}
           {view === 'summary' && (
             <SessionEnd
+              title={lastSessionEnd?.title}
+              summary={lastSessionEnd?.summary}
               onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }}
               onBack={() => { setActiveSession('new'); setView('chat'); }}
             />

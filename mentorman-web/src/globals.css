@@ -436,6 +436,23 @@ body {
 }
 .eval-flag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent-glow); }
 
+.suggestions {
+  display: flex; gap: 6px; flex-wrap: wrap; margin: 0 auto 10px; max-width: 760px; padding: 0 2px;
+}
+.suggestion-chip {
+  font-size: 11.5px; font-family: var(--mono); letter-spacing: 0.01em;
+  padding: 5px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-soft); background: var(--card);
+  color: var(--muted); cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+.suggestion-chip:hover {
+  border-color: var(--accent-line);
+  color: var(--fg-dim);
+  background: var(--accent-weak);
+}
+
 .composer-box {
   border: 1px solid var(--border); background: var(--card); border-radius: var(--r);
   padding: 11px 12px 9px; transition: border-color .15s, box-shadow .15s;

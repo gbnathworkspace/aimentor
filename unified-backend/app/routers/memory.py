@@ -1,5 +1,6 @@
 """Memory router — /api/memory/episodes search + list + delete."""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +10,7 @@ from app.core.security import require_auth
 from app.models.episodic import EpisodicEntry, SearchQuery
 from app.services.embedder import embed_text
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/memory/episodes", tags=["Memory"])
 
 
@@ -22,7 +24,11 @@ async def search_episodes(
     Accepts a query string, optional topic filter, and limit.
     Returns matching episodes ranked by relevance score.
     """
-    vector = await embed_text(body.query)
+    try:
+        vector = await embed_text(body.query)
+    except Exception:
+        logger.exception("Embedding failed for episode search user=%s query=%r", user_id, body.query)
+        raise
 
     if not vector:
         return []
@@ -59,7 +65,11 @@ async def search_episodes(
         },
     ]
 
-    results = await sessions_col().aggregate(pipeline).to_list(body.limit)
+    try:
+        results = await sessions_col().aggregate(pipeline).to_list(body.limit)
+    except Exception:
+        logger.exception("Vector search failed for user=%s topic=%s", user_id, body.topic)
+        raise
     return results
 
 

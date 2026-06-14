@@ -15,6 +15,9 @@ async def connect_db() -> None:
     _client = AsyncIOMotorClient(settings.MONGODB_URI)
     _db = _client[settings.DATABASE_NAME]
     await _ensure_indexes()
+    # Session persistence compound indexes (stale cleanup + timeout sweep)
+    from app.core.indexes import ensure_indexes as ensure_session_indexes
+    await ensure_session_indexes()
 
 
 async def disconnect_db() -> None:

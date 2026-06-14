@@ -98,12 +98,16 @@ async def mentor_chat(
 
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system_prompt,
-        messages=api_messages,
-    )
+    try:
+        response = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=api_messages,
+        )
+    except Exception:
+        logger.exception("Anthropic API call failed for user=%s topic=%s mode=%s", user_id, body.topic, body.mode)
+        raise
 
     # Step 5: Extract and return assistant text
     response_text = response.content[0].text if response.content else ""

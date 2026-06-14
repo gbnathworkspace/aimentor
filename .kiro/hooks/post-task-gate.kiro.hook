@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Post-Task Verification Gate",
+  "description": "After each spec task completes, forces the agent to declare what files changed, what existing behavior could be affected, and run existing tests before proceeding to the next task.",
+  "version": "1",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "STOP before proceeding to the next task. You must complete this verification gate:\n\n1. **Change Manifest** — List every file you created or modified in this task.\n\n2. **Blast Radius Analysis** — For each modified file, answer: \"What other modules import this file or depend on its behavior?\" If any exist, state what could break.\n\n3. **Test Verification** — Run the project's existing test suite (or at minimum, the tests related to the files you touched). Show the output. If any test fails, fix it before moving on.\n\n4. **Integration Check** — If this task touched an API route or a shared service, verify that callers of that route/service still work correctly by tracing one call path end-to-end.\n\nDo NOT proceed to the next task until all 4 checks pass. If you cannot run tests (missing dependencies, env issues), explicitly state that and ask the user how to proceed."
+  }
+}

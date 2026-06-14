@@ -33,6 +33,13 @@ vi.mock('@clerk/nextjs', () => ({
   useClerk: () => ({ signOut: vi.fn() }),
 }));
 
+// Mock next/navigation so useRouter doesn't throw in test environment
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => '/onboarding',
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 // ---------------------------------------------------------------------------
 // Arbitraries
 // ---------------------------------------------------------------------------
@@ -45,16 +52,18 @@ type CompletedProfile = {
 };
 
 /**
- * Generates a valid CompletedProfile with random non-empty, non-whitespace-only
- * string fields. Whitespace-only strings are excluded because DOM text matchers
- * normalize whitespace (empty-after-normalization strings can't be found via
- * getByText), and they are also not meaningful profile values.
+ * Generates a valid CompletedProfile with random non-empty, trimmed string fields.
+ * Strings are trimmed and filtered because:
+ *  - DOM text matchers normalize whitespace (leading/trailing spaces cause mismatches)
+ *  - Whitespace-only strings can't be found via getByText
+ *  - They are not meaningful profile values
+ * We also exclude strings containing newlines since they break text matching.
  */
 const completedProfileArb = fc.record({
-  goal:               fc.string({ minLength: 1, maxLength: 120 }).filter(s => s.trim().length > 0),
-  deadline:           fc.string({ minLength: 1, maxLength: 40 }).filter(s => s.trim().length > 0),
-  overall_level:      fc.string({ minLength: 1, maxLength: 40 }).filter(s => s.trim().length > 0),
-  daily_availability: fc.string({ minLength: 1, maxLength: 40 }).filter(s => s.trim().length > 0),
+  goal:               fc.string({ minLength: 1, maxLength: 120 }).map(s => s.trim()).filter(s => s.length > 0 && !s.includes('\n') && !s.includes('\r')),
+  deadline:           fc.string({ minLength: 1, maxLength: 40 }).map(s => s.trim()).filter(s => s.length > 0 && !s.includes('\n') && !s.includes('\r')),
+  overall_level:      fc.string({ minLength: 1, maxLength: 40 }).map(s => s.trim()).filter(s => s.length > 0 && !s.includes('\n') && !s.includes('\r')),
+  daily_availability: fc.string({ minLength: 1, maxLength: 40 }).map(s => s.trim()).filter(s => s.length > 0 && !s.includes('\n') && !s.includes('\r')),
 });
 
 /**
@@ -191,7 +200,12 @@ describe('Property 2 — Preservation: Non-Failing Save Path and In-Progress Cha
               expect(screen.getByText(/you're all set/i)).toBeInTheDocument();
 
               // Assert the profile data is shown in the card
-              expect(screen.getByText(profile.goal)).toBeInTheDocument();
+              // Use a function matcher to handle DOM text normalization edge cases
+              // (special chars, whitespace variations in different environments).
+              const goalElements = screen.getAllByText(
+                (content) => content.trim() === profile.goal.trim()
+              );
+              expect(goalElements.length).toBeGreaterThan(0);
 
               // Assert "Start your first session" CTA is present
               expect(

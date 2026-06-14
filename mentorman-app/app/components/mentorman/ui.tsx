@@ -127,7 +127,7 @@ export function GapBar({ cur, req, animate }: { cur: number; req: number; animat
   );
 }
 
-function daysLeft(deadline: string | undefined): number | null {
+function daysLeft(deadline: string | null | undefined): number | null {
   if (!deadline) return null;
   const diff = new Date(deadline).getTime() - Date.now();
   return Math.max(0, Math.round(diff / 86_400_000));

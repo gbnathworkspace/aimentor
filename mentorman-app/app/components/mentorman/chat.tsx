@@ -7,7 +7,9 @@ import { SESSIONS, SEEDS, MODES, type MessageItem, type ModeId, type ToneId, typ
 import { ChatUploadButton } from './chat/ChatUploadButton';
 import { UploadMessage } from './chat/UploadMessage';
 import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUpload';
+import { OnboardingBanner } from './OnboardingBanner';
 import type { SkillNode } from '@/lib/mentorman-api';
+import type { CoreProfile } from '@/lib/schemas';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
   return (
@@ -22,12 +24,14 @@ function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, uploadElement }: {
+function Composer({ mode, tone, onSend, busy, uploadElement, suggestions, onSuggestionClick }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   uploadElement?: React.ReactNode;
+  suggestions?: string[];
+  onSuggestionClick?: (text: string) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
@@ -47,10 +51,18 @@ function Composer({ mode, tone, onSend, busy, uploadElement }: {
   };
 
   const isEval = mode === 'evaluation';
+  const showChips = !busy && !isEval && suggestions && suggestions.length > 0 && !val;
   return (
     <div className="composer">
       {isEval && (
         <div className="eval-flag"><span className="dot" /> Evaluation mode — your answer is graded</div>
+      )}
+      {showChips && (
+        <div className="suggestions">
+          {suggestions.map(s => (
+            <button key={s} className="suggestion-chip" onClick={() => onSuggestionClick?.(s)}>{s}</button>
+          ))}
+        </div>
       )}
       <div className="composer-inner">
         <div className={`composer-box ${focus ? 'focus' : ''}`}>
@@ -120,7 +132,7 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
 
 const DRAFT_KEY = 'mentorman_draft';
 
-export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, topics = [] }: {
+export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, topics = [], profile, onStartDeferredOnboarding }: {
   sessionId: string;
   sessionTitle?: string;
   mode: ModeId;
@@ -129,11 +141,14 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
   onNav: (v: string) => void;
   onSessionSaved?: () => void;
   topics?: Topic[];
+  profile?: CoreProfile | null;
+  onStartDeferredOnboarding?: () => void;
 }) {
-  const fallback = SESSIONS.find(s => s.id === sessionId) || { id: 'new', title: 'New session', cat: 'Topic', date: 'now' };
+  const fallback = SESSIONS.find(s => s.id === sessionId) || { id: sessionId, title: sessionTitle || 'New session', cat: 'Topic', date: 'now' };
   const session = sessionTitle ? { ...fallback, title: sessionTitle } : fallback;
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -178,9 +193,10 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       try {
         const raw = localStorage.getItem(DRAFT_KEY);
         if (raw) {
-          const draft = JSON.parse(raw) as { msgs: MessageItem[] };
+          const draft = JSON.parse(raw) as { msgs: MessageItem[]; backendSessionId?: string };
           if (draft.msgs?.length > 0) {
             setMsgs(draft.msgs);
+            if (draft.backendSessionId) setBackendSessionId(draft.backendSessionId);
             greetedRef.current = true; // skip greeting — conversation already started
             return;
           }
@@ -250,15 +266,21 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       }),
     })
       .then(r => r.json())
-      .then(({ text: reply }) => {
+      .then(({ text: reply, suggestions: chips }) => {
         setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        setSuggestions(Array.isArray(chips) ? chips : []);
         // Create active session in MongoDB now that we have a confirmed title and mode
         return fetch('/api/sessions', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ title: session.title, mode, topic: session.title, topic_category: session.cat }),
         }).then(r => r.ok ? r.json() : null)
-          .then(data => { if (data?.sessionId) setBackendSessionId(data.sessionId); })
+          .then(data => {
+            if (data?.sessionId) {
+              setBackendSessionId(data.sessionId);
+              onSessionSaved?.();
+            }
+          })
           .catch(() => {});
       })
       .catch(() => {
@@ -269,7 +291,12 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ title: session.title, mode, topic: session.title, topic_category: session.cat }),
         }).then(r => r.ok ? r.json() : null)
-          .then(data => { if (data?.sessionId) setBackendSessionId(data.sessionId); })
+          .then(data => {
+            if (data?.sessionId) {
+              setBackendSessionId(data.sessionId);
+              onSessionSaved?.();
+            }
+          })
           .catch(() => {});
       })
       .finally(() => setBusy(false));
@@ -289,14 +316,38 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         title: session.title,
         cat: session.cat,
         msgs,
+        backendSessionId,
         savedAt: new Date().toISOString(),
       }));
     } catch {}
-  }, [msgs, sessionId, session.title, session.cat]);
+  }, [msgs, sessionId, session.title, session.cat, backendSessionId]);
+
+  // Auto-save messages to the backend after every exchange (debounced)
+  useEffect(() => {
+    if (!backendSessionId || msgs.length === 0) return;
+    const apiMessages = msgs
+      .filter(m => m.who === 'mentor' || m.who === 'user')
+      .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
+    if (apiMessages.length === 0) return;
+    // Derive a readable title from the first user message
+    const firstUser = msgs.find(m => m.who === 'user')?.text?.trim();
+    const derivedTitle = firstUser
+      ? (firstUser.length > 48 ? firstUser.slice(0, 48) + '…' : firstUser)
+      : session.title;
+    const t = setTimeout(() => {
+      fetch(`/api/sessions/${backendSessionId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: apiMessages, title: derivedTitle }),
+      }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [msgs, backendSessionId, session.title]);
 
   const send = useCallback(async (text: string) => {
     const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now() };
     setMsgs(prev => [...prev, userMsg]);
+    setSuggestions([]);
     setBusy(true);
     try {
       const allHistory = [...msgs, userMsg]
@@ -310,7 +361,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic: session.title, mode, tone, messages: history, sessionId: backendSessionId }),
       });
-      const { text: reply } = await res.json();
+      const { text: reply, suggestions: chips } = await res.json();
+      setSuggestions(Array.isArray(chips) ? chips : []);
       setMsgs(prev => [...prev, { who: 'mentor', text: (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?", _id: 'm' + Date.now() }]);
     } catch {
       setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble reaching my notes right now — try that again in a moment.", _id: 'm' + Date.now() }]);
@@ -409,6 +461,13 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
 
+      {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
+        <OnboardingBanner
+          onComplete={onStartDeferredOnboarding}
+          onDismiss={() => {}}
+        />
+      )}
+
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">
           {msgs.map((m, i) =>
@@ -442,6 +501,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         tone={tone}
         onSend={send}
         busy={busy}
+        suggestions={suggestions}
+        onSuggestionClick={send}
         uploadElement={
           <ChatUploadButton
             sessionId={backendSessionId ?? ''}

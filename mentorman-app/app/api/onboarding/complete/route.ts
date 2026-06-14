@@ -10,10 +10,11 @@ export async function POST(req: NextRequest) {
     await CoreProfileRepo.upsert({
       userId: uid,
       goal,
-      deadline,
+      deadline: deadline ?? null,
       overall_level: overall_level ?? 'beginner',
       daily_availability: daily_availability ?? '2 hrs/day',
       email: '',
+      profile_status: 'complete',
     });
 
     return NextResponse.json({ ok: true });

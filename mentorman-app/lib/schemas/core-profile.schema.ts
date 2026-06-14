@@ -7,10 +7,11 @@ import { z } from 'zod'
 export const CoreProfileSchema = z.object({
   userId: z.string(),
   goal: z.string().min(1),
-  deadline: z.string(),           // "YYYY-MM-DD"
-  overall_level: z.string(),      // "beginner" | "intermediate" | "advanced"
-  daily_availability: z.string(), // free text: "2 hrs/day"
+  deadline: z.string().nullable(),           // "YYYY-MM-DD" or null for skipped users
+  overall_level: z.string(),                 // "beginner" | "intermediate" | "advanced"
+  daily_availability: z.string(),            // free text: "2 hrs/day"
   email: z.string().default(''),
+  profile_status: z.enum(['complete', 'skipped']).default('complete'),
 })
 
 export type CoreProfile = z.infer<typeof CoreProfileSchema>

@@ -28,7 +28,7 @@ export const build: PromptBuilder = ({ coreProfile: p, skillGraphNodes, episodes
   return `You are an invested technical mentor. The user wants to study ${currentTopic ?? 'a topic'} today.
 
 ## User Goal
-${p.goal} — ${Math.max(0, Math.floor((new Date(p.deadline).getTime() - Date.now()) / 86_400_000))} days remaining
+${p.goal}${p.deadline ? ` — ${Math.max(0, Math.floor((new Date(p.deadline).getTime() - Date.now()) / 86_400_000))} days remaining` : ''}
 
 ## Topic Profile
 ${topicNode ? formatTopicNode(topicNode) : '(no prior data for this topic — treat as first session)'}${otherNodes.length > 0 ? `\n\n## Related topics in scope\n${otherNodes.map(n => `• ${n.topic} — gap: ${n.gap}%`).join('\n')}` : ''}

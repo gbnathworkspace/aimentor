@@ -1,20 +1,33 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useClerk } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
 import { Icon } from './icons';
 import { Brand, Bubble, VerdictMsg, Typing, GapBar, fmt } from './ui';
 import { SEEDS, EVAL_SEED, EVAL_DONE_EXTRA, MODES, mentorSystemPrompt, type MessageItem, type ToneId } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
+import { CompleteSetupSection } from './CompleteSetupSection';
+import { SkipButton } from './SkipButton';
+import { SkipConfirmationDialog } from './SkipConfirmationDialog';
 
 // ---------- Onboarding (conversational AI agent) ----------------
 
 type ApiMsg = { role: 'user' | 'assistant'; content: string };
 type CompletedProfile = { goal: string; deadline: string; overall_level: string; daily_availability: string };
 
+export interface OnboardingProps {
+  onFinish: (goal: string) => void;
+  userName?: string;
+  /** When true, runs in deferred mode — skips already-completed phases */
+  deferred?: boolean;
+  /** Called when user abandons deferred onboarding (navigates away without completing) */
+  onAbandon?: () => void;
+}
 
-export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) => void; userName?: string }) {
+export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: OnboardingProps) {
   const { signOut } = useClerk();
+  const router = useRouter();
   const [apiMsgs,    setApiMsgs]    = useState<ApiMsg[]>([]);
   const [thread,     setThread]     = useState<MessageItem[]>([]);
   const [busy,       setBusy]       = useState(false);
@@ -28,21 +41,157 @@ export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) =>
   const textaRef = useRef<HTMLTextAreaElement>(null);
   const started  = useRef(false);
 
+  // Skip onboarding state
+  const [showSkipDialog, setShowSkipDialog] = useState(false);
+  const [skipLoading,    setSkipLoading]    = useState(false);
+  const [skipError,      setSkipError]      = useState<string | null>(null);
+
+  // Extract partial profile data from the conversation state (assistant messages may contain parsed fields)
+  const extractPartialProfile = useCallback((): Record<string, string> | undefined => {
+    // Look through assistant messages for any structured data that the LLM may have extracted
+    // The onboarding LLM collects: goal, deadline, overall_level, daily_availability
+    // We can infer partial data from the number of user responses (phases completed)
+    const userMsgs = apiMsgs.filter(m => m.role === 'user').slice(1); // skip initial "hi"
+    if (userMsgs.length === 0) return undefined;
+
+    const partial: Record<string, string> = {};
+    // Phase 0 collects goal + deadline from the first user response
+    if (userMsgs.length >= 1 && userMsgs[0].content) {
+      partial.goal = userMsgs[0].content;
+    }
+    // Phase 1 collects overall_level
+    if (userMsgs.length >= 2 && userMsgs[1].content) {
+      partial.overall_level = userMsgs[1].content;
+    }
+    // Phase 2 is file upload — no profile field extracted
+    // Phase 3 collects daily_availability
+    if (userMsgs.length >= 4 && userMsgs[3].content) {
+      partial.daily_availability = userMsgs[3].content;
+    }
+
+    return Object.keys(partial).length > 0 ? partial : undefined;
+  }, [apiMsgs]);
+
+  // Handle skip confirmation — call POST /api/onboarding/skip
+  const handleSkipConfirm = useCallback(async () => {
+    setSkipLoading(true);
+    setSkipError(null);
+
+    try {
+      const partialProfile = extractPartialProfile();
+      const res = await fetch('/api/onboarding/skip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ partialProfile }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setSkipError(data.error || 'Failed to skip onboarding — please try again.');
+        setSkipLoading(false);
+        return;
+      }
+
+      // Requirement 2.3: Redirect to Chat Interface within 1 second
+      // Requirement 2.6: Terminate onboarding conversation without sending further messages
+      if (data.sessionId) {
+        router.push(`/session/${data.sessionId}`);
+      } else {
+        onFinish('exploring');
+      }
+    } catch {
+      setSkipError('Connection failed — please check your network and try again.');
+      setSkipLoading(false);
+    }
+  }, [extractPartialProfile, router, onFinish]);
+
+  // Handle skip cancel — dismiss dialog, clear error
+  const handleSkipCancel = useCallback(() => {
+    if (skipLoading) return; // Don't allow cancel while API call in progress
+    setShowSkipDialog(false);
+    setSkipError(null);
+  }, [skipLoading]);
+
+  // Deferred mode: fetch existing profile to determine which phases to skip
+  const [deferredState, setDeferredState] = useState<{
+    loaded: boolean;
+    phasesToSkip: number[];
+    existingProfile: Record<string, string | null> | null;
+  }>({ loaded: !deferred, phasesToSkip: [], existingProfile: null });
+
+  useEffect(() => {
+    if (!deferred) return;
+    let cancelled = false;
+    async function loadProfile() {
+      try {
+        const res = await fetch('/api/profile');
+        if (!res.ok) {
+          if (!cancelled) setDeferredState({ loaded: true, phasesToSkip: [], existingProfile: null });
+          return;
+        }
+        const p = await res.json();
+        if (cancelled) return;
+
+        const skip: number[] = [];
+        // Phase 0: skip if goal ≠ "exploring" AND deadline ≠ null
+        if (p.goal && p.goal !== 'exploring' && p.deadline !== null && p.deadline !== undefined && p.deadline !== '') {
+          skip.push(0);
+        }
+        // Phase 1: skip if overall_level ≠ "beginner"
+        if (p.overall_level && p.overall_level !== 'beginner') {
+          skip.push(1);
+        }
+        // Phase 2: File Upload — always included in deferred mode
+        // Phase 3: skip if daily_availability ≠ "1 hour"
+        if (p.daily_availability && p.daily_availability !== '1 hour') {
+          skip.push(3);
+        }
+
+        setDeferredState({ loaded: true, phasesToSkip: skip, existingProfile: p });
+      } catch {
+        if (!cancelled) setDeferredState({ loaded: true, phasesToSkip: [], existingProfile: null });
+      }
+    }
+    loadProfile();
+    return () => { cancelled = true; };
+  }, [deferred]);
+
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread, busy, done]);
 
   // Kick off conversation on mount — send a silent "hi" to get the first question
+  // In deferred mode, wait until profile is loaded and include context about skipped phases
   useEffect(() => {
     if (started.current) return;
+    if (!deferredState.loaded) return;
     started.current = true;
-    callAgent([{ role: 'user', content: 'hi' }], []);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (deferred && deferredState.phasesToSkip.length > 0) {
+      // Build context message that tells the LLM which info we already have
+      const existing = deferredState.existingProfile;
+      const contextParts: string[] = [];
+      if (existing?.goal && existing.goal !== 'exploring') contextParts.push(`goal: ${existing.goal}`);
+      if (existing?.deadline) contextParts.push(`deadline: ${existing.deadline}`);
+      if (existing?.overall_level && existing.overall_level !== 'beginner') contextParts.push(`level: ${existing.overall_level}`);
+      if (existing?.daily_availability && existing.daily_availability !== '1 hour') contextParts.push(`availability: ${existing.daily_availability}`);
+
+      const contextMsg = contextParts.length > 0
+        ? `hi, I'm completing my profile. I already have: ${contextParts.join(', ')}. Please only ask about what's missing.`
+        : 'hi';
+
+      callAgent([{ role: 'user', content: contextMsg }], []);
+    } else {
+      callAgent([{ role: 'user', content: 'hi' }], []);
+    }
+  }, [deferredState.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const attemptSave = async (p: CompletedProfile) => {
     setSaveFailed(false);
-    const res = await fetch('/api/onboarding/complete', {
+    const endpoint = deferred ? '/api/onboarding/complete-deferred' : '/api/onboarding/complete';
+    const res = await fetch(endpoint, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(p),
@@ -52,7 +201,12 @@ export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) =>
       return;
     }
     setSaveFailed(false);
-    setTimeout(() => setDone(true), 400);
+    if (deferred) {
+      // Requirement 5.4: redirect to Chat Interface within 1 second
+      setTimeout(() => onFinish(p.goal), 600);
+    } else {
+      setTimeout(() => setDone(true), 400);
+    }
   };
 
   const callAgent = async (msgs: ApiMsg[], currentThread: MessageItem[]) => {
@@ -102,6 +256,18 @@ export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) =>
     sendText(text);
   };
 
+  // Don't render until deferred profile state is loaded
+  if (deferred && !deferredState.loaded) {
+    return (
+      <div className="onb">
+        <div className="onb-top"><Brand /></div>
+        <div className="onb-stage" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Typing />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="onb">
       <div className="onb-top">
@@ -112,20 +278,36 @@ export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) =>
           </span>
         )}
         <div className="onb-progress">
-          <span>setup</span>
+          <span>{deferred ? 'complete setup' : 'setup'}</span>
           <div className="onb-steps">
             {[0,1,2,3].map(i => (
               <div key={i} className={`s ${i < step || done ? 'done' : i === step ? 'curr' : ''}`} />
             ))}
           </div>
         </div>
-        <button
-          className="icon-btn"
-          title="Sign out"
-          onClick={() => signOut({ redirectUrl: '/sign-in' })}
-        >
-          <Icon name="logout" />
-        </button>
+        {deferred && onAbandon ? (
+          <button
+            className="btn btn-ghost btn-sm"
+            title="Back to Settings"
+            onClick={onAbandon}
+          >
+            ← Settings
+          </button>
+        ) : (
+          <>
+            <SkipButton
+              onSkip={() => setShowSkipDialog(true)}
+              disabled={busy && thread.length === 0}
+            />
+            <button
+              className="icon-btn"
+              title="Sign out"
+              onClick={() => signOut({ redirectUrl: '/sign-in' })}
+            >
+              <Icon name="logout" />
+            </button>
+          </>
+        )}
       </div>
 
       <div className="onb-stage" ref={bodyRef}>
@@ -205,6 +387,17 @@ export function Onboarding({ onFinish, userName }: { onFinish: (goal: string) =>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Skip Confirmation Dialog — only in non-deferred mode */}
+      {!deferred && (
+        <SkipConfirmationDialog
+          open={showSkipDialog}
+          onConfirm={handleSkipConfirm}
+          onCancel={handleSkipCancel}
+          loading={skipLoading}
+          error={skipError}
+        />
       )}
     </div>
   );
@@ -345,10 +538,11 @@ export function SessionEnd({ onFollow, onBack }: { onFollow: () => void; onBack:
 }
 
 // ---------- Settings ----------------------------------------
-export function Settings({ profile, onReset, onSaved }: {
+export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding }: {
   profile: CoreProfile | null;
   onReset: () => void;
   onSaved: () => void;
+  onStartDeferredOnboarding?: () => void;
 }) {
   const [editGoal, setEditGoal] = useState(false);
   const [editDeadline, setEditDeadline] = useState(false);
@@ -497,6 +691,11 @@ export function Settings({ profile, onReset, onSaved }: {
               )}
             </div>
           </div>
+
+          {/* Complete Setup section — shown only for skipped profiles */}
+          {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
+            <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} />
+          )}
 
           <div className="set-section">
             <div className="set-label">Data sources</div>

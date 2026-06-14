@@ -1,7 +1,8 @@
 import type { SkillGraphNode } from '@/lib/schemas'
 import type { PromptBuilder } from './types'
 
-function daysUntil(date: string): number {
+function daysUntil(date: string | null): number {
+  if (!date) return 0
   return Math.max(0, Math.floor((new Date(date).getTime() - Date.now()) / 86_400_000))
 }
 
@@ -23,9 +24,11 @@ function formatSkillTable(nodes: SkillGraphNode[]): string {
 export const build: PromptBuilder = ({ coreProfile: p, skillGraphNodes }) => {
   const days  = daysUntil(p.deadline)
   const weeks = Math.floor(days / 7)
-  const targetStr = new Date(p.deadline).toLocaleDateString('en-IN', {
-    day: 'numeric', month: 'long', year: 'numeric',
-  })
+  const targetStr = p.deadline
+    ? new Date(p.deadline).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'long', year: 'numeric',
+      })
+    : 'not set'
 
   return `You are an invested technical mentor helping a developer land their target role. Your job in this session is planning — not teaching.
 

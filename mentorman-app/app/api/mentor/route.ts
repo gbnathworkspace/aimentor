@@ -4,7 +4,7 @@ import { requireUserId } from '@/lib/auth';
 import { CoreProfileRepo } from '@/lib/db/repositories/core-profile.repo';
 import { SkillGraphRepo } from '@/lib/db/repositories/skill-graph.repo';
 import { promptStore } from '@/lib/prompts/store';
-import { assembleImmediateContext, countTokens } from '@/lib/context-assembler';
+import { assembleImmediateContext, assembleContext, countTokens } from '@/lib/context-assembler';
 import type { SessionMode } from '@/lib/schemas';
 
 const client = new Anthropic();
@@ -23,20 +23,17 @@ export async function POST(req: NextRequest) {
       SkillGraphRepo.getAllForUser(uid),
     ]);
 
-    if (!coreProfile) {
-      return NextResponse.json(
-        { text: "I don't have your profile yet — please complete onboarding first." },
-        { status: 400 },
-      );
-    }
-
-    const systemPrompt = promptStore.get(sessionMode)({
+    // Assemble context with graceful degradation for skipped/missing profiles
+    const contextResult = assembleContext({
       coreProfile,
       skillGraphNodes,
       episodes: [],
-      conversationWindow: [],
+      conversationWindow: messages ?? [],
       currentTopic: topic,
     });
+
+    const systemPrompt = promptStore.get(sessionMode)(contextResult.promptInput)
+      + (contextResult.addendum ?? '');
 
     // Count tokens for the core context (system prompt with Core Profile + Skill Graph)
     // These tokens are never dropped — they always take priority
@@ -62,6 +59,18 @@ export async function POST(req: NextRequest) {
       fullSystemPrompt += `\n\n## File Content\n${immediateContext.formattedText}`
     }
 
+    // Append suggestion chip instructions (skip for evaluation mode — graded answers shouldn't have hints)
+    if (sessionMode !== 'evaluation') {
+      fullSystemPrompt += `\n\nAfter EVERY message you send, append a suggestions block — quick-reply chips for the user. Rules for suggestions:
+- 2–4 options max. Each option must be under 8 words.
+- Make chips contextual to what you just discussed or asked.
+- If the conversation is open-ended and no clear follow-ups exist, emit an empty array.
+- The suggestions block must always appear as the very last thing in your message, in this exact format:
+\`\`\`json suggestions
+["option 1", "option 2"]
+\`\`\``
+    }
+
     const response = await client.messages.create({
       model:      'claude-sonnet-4-6',
       max_tokens: 1024,
@@ -69,8 +78,25 @@ export async function POST(req: NextRequest) {
       messages:   messages ?? [],
     });
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
-    return NextResponse.json({ text });
+    const raw = response.content[0].type === 'text' ? response.content[0].text : '';
+
+    // Parse and strip suggestions block from the response (same pattern as onboarding)
+    let text = raw;
+    let suggestions: string[] = [];
+    const sugIdx = raw.indexOf('```json suggestions');
+    if (sugIdx !== -1) {
+      const start = sugIdx + '```json suggestions'.length;
+      const end = raw.indexOf('```', start);
+      if (end !== -1) {
+        try {
+          suggestions = JSON.parse(raw.slice(start, end).trim());
+          if (!Array.isArray(suggestions)) suggestions = [];
+        } catch { suggestions = []; }
+        text = (raw.slice(0, sugIdx) + raw.slice(end + 3)).trim();
+      }
+    }
+
+    return NextResponse.json({ text, suggestions });
   } catch (err) {
     console.error('Mentor route error:', err);
     return NextResponse.json({ text: '' }, { status: 500 });

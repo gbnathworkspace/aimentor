@@ -35,6 +35,13 @@ vi.mock('@clerk/nextjs', () => ({
   useClerk: () => ({ signOut: vi.fn() }),
 }));
 
+// Mock next/navigation so useRouter doesn't throw in test environment
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => '/onboarding',
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 // ---------------------------------------------------------------------------
 // Arbitraries
 // ---------------------------------------------------------------------------

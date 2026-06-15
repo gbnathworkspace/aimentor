@@ -145,8 +145,8 @@ export function Dashboard({ onStartTopic, profile }: {
     ? Math.round(topics.reduce((a, t) => a + t.gap, 0) / topics.length)
     : 0;
 
-  const days = daysLeft(profile?.deadline);
-  const weeks = weeksLeft(profile?.deadline);
+  const days = daysLeft(profile?.deadline ?? undefined);
+  const weeks = weeksLeft(profile?.deadline ?? undefined);
   const goalText = profile?.goal ?? '—';
   const deadlineMs = profile?.deadline ? new Date(profile.deadline).getTime() : NaN;
   const deadlineText = !Number.isNaN(deadlineMs)

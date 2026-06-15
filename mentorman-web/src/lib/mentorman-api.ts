@@ -11,10 +11,11 @@
 
 export interface CoreProfile {
   goal: string;
-  deadline: string;
+  deadline: string | null;
   overall_level: string;
   daily_availability: string;
   email?: string;
+  profile_status?: 'complete' | 'skipped';
   [key: string]: any;
 }
 

@@ -1,6 +1,6 @@
 """L1 Profile Pydantic models."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
@@ -13,10 +13,11 @@ class ProfileCreate(BaseModel):
     )
 
     goal: str
-    deadline: str
+    deadline: Optional[str] = None
     overall_level: str = "beginner"
     daily_availability: str = "2 hrs/day"
     email: Optional[str] = None
+    profile_status: Literal["complete", "skipped"] = "complete"
 
 
 class ProfileUpdate(BaseModel):
@@ -30,6 +31,7 @@ class ProfileUpdate(BaseModel):
     overall_level: Optional[str] = None
     daily_availability: Optional[str] = None
     email: Optional[str] = None
+    profile_status: Optional[Literal["complete", "skipped"]] = None
 
 
 class ProfileResponse(BaseModel):
@@ -40,7 +42,8 @@ class ProfileResponse(BaseModel):
 
     user_id: str
     goal: str
-    deadline: str
+    deadline: Optional[str] = None
     overall_level: str
     daily_availability: str
     email: Optional[str] = None
+    profile_status: Literal["complete", "skipped"] = "complete"

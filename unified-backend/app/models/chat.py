@@ -59,3 +59,37 @@ class OnboardingCompleteResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     skills: list[dict]
+
+
+class OnboardingSkipRequest(BaseModel):
+    """Request body for POST /api/onboarding/skip."""
+
+    partial_profile: Optional[dict] = Field(None, alias="partialProfile")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OnboardingSkipResponse(BaseModel):
+    """Response body for POST /api/onboarding/skip."""
+
+    ok: bool
+    session_id: str = Field("", alias="sessionId")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OnboardingCompleteDeferredRequest(BaseModel):
+    """Request body for POST /api/onboarding/complete-deferred."""
+
+    goal: Optional[str] = None
+    deadline: Optional[str] = None
+    overall_level: Optional[str] = Field(None, alias="overallLevel")
+    daily_availability: Optional[str] = Field(None, alias="dailyAvailability")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OnboardingCompleteDeferredResponse(BaseModel):
+    """Response body for POST /api/onboarding/complete-deferred."""
+
+    ok: bool

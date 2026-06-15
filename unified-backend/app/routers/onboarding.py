@@ -1,20 +1,26 @@
-"""Onboarding router — /api/onboarding/chat + /complete."""
+"""Onboarding router — /api/onboarding/chat + /complete + /skip + /complete-deferred."""
 
 import json
 import logging
 import re
+import uuid
+from datetime import datetime, timezone
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.config.database import profiles_col
+from app.config.database import profiles_col, sessions_col
 from app.config.settings import get_settings
 from app.core.security import require_auth
 from app.models.chat import (
     OnboardingCompleteRequest,
     OnboardingCompleteResponse,
+    OnboardingCompleteDeferredRequest,
+    OnboardingCompleteDeferredResponse,
     OnboardingRequest,
     OnboardingResponse,
+    OnboardingSkipRequest,
+    OnboardingSkipResponse,
 )
 from app.services.onboarding_bootstrap import bootstrap_skills
 from app.services.prompt_store import get_onboarding_prompt
@@ -134,6 +140,7 @@ async def onboarding_complete(
         "deadline": body.deadline,
         "overall_level": body.overall_level,
         "daily_availability": body.daily_availability,
+        "profile_status": "complete",
     }
 
     await profiles_col().update_one(
@@ -146,3 +153,80 @@ async def onboarding_complete(
     skill_nodes = await bootstrap_skills(user_id, body.goal, body.overall_level)
 
     return OnboardingCompleteResponse(skills=skill_nodes)
+
+
+_SKIP_DEFAULTS = {
+    "goal": "exploring",
+    "deadline": None,
+    "daily_availability": "1 hour",
+    "overall_level": "beginner",
+}
+
+
+@router.post("/skip", response_model=OnboardingSkipResponse)
+async def onboarding_skip(
+    body: OnboardingSkipRequest,
+    user_id: str = Depends(require_auth),
+) -> OnboardingSkipResponse:
+    """Skip onboarding: create a minimal profile and a new chat session."""
+    partial = body.partial_profile or {}
+
+    profile_data = {
+        "user_id": user_id,
+        "goal": partial.get("goal") or _SKIP_DEFAULTS["goal"],
+        "deadline": partial.get("deadline") or _SKIP_DEFAULTS["deadline"],
+        "daily_availability": partial.get("daily_availability") or _SKIP_DEFAULTS["daily_availability"],
+        "overall_level": partial.get("overall_level") or _SKIP_DEFAULTS["overall_level"],
+        "email": "",
+        "profile_status": "skipped",
+    }
+
+    await profiles_col().update_one(
+        {"user_id": user_id},
+        {"$set": profile_data},
+        upsert=True,
+    )
+
+    session_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    await sessions_col().insert_one({
+        "session_id": session_id,
+        "user_id": user_id,
+        "title": "New session",
+        "mode": "topic",
+        "status": "active",
+        "messages": [],
+        "tags": [],
+        "created_at": now,
+        "updated_at": now,
+    })
+
+    return OnboardingSkipResponse(ok=True, session_id=session_id)
+
+
+@router.post("/complete-deferred", response_model=OnboardingCompleteDeferredResponse)
+async def onboarding_complete_deferred(
+    body: OnboardingCompleteDeferredRequest,
+    user_id: str = Depends(require_auth),
+) -> OnboardingCompleteDeferredResponse:
+    """Complete deferred onboarding: merge new answers and set profile_status to complete."""
+    existing = await profiles_col().find_one({"user_id": user_id})
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No profile found. Please complete full onboarding.",
+        )
+
+    updates: dict = {"profile_status": "complete"}
+    if body.goal:
+        updates["goal"] = body.goal
+    if body.deadline is not None:
+        updates["deadline"] = body.deadline
+    if body.overall_level:
+        updates["overall_level"] = body.overall_level
+    if body.daily_availability:
+        updates["daily_availability"] = body.daily_availability
+
+    await profiles_col().update_one({"user_id": user_id}, {"$set": updates})
+
+    return OnboardingCompleteDeferredResponse(ok=True)

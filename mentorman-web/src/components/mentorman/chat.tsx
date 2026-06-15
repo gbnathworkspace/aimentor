@@ -6,9 +6,10 @@ import { Bubble, VerdictMsg, Typing } from './ui';
 import { MODES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
 import { ChatUploadButton } from './chat/ChatUploadButton';
 import { UploadMessage } from './chat/UploadMessage';
+import { OnboardingBanner } from './OnboardingBanner';
 import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUpload';
 import { useSessionPersistence, type Message as PersistenceMessage, type SessionEndResult } from '@/lib/session-persistence/useSessionPersistence';
-import type { SkillNode } from '@/lib/mentorman-api';
+import type { CoreProfile, SkillNode } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
   return (
@@ -133,7 +134,7 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
 
 const DRAFT_KEY = 'mentorman_draft';
 
-export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, onSessionEnd, topics = [] }: {
+export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, onSessionEnd, topics = [], profile, onStartDeferredOnboarding }: {
   sessionId: string;
   sessionTitle?: string;
   mode: ModeId;
@@ -143,6 +144,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
   onSessionSaved?: () => void;
   onSessionEnd?: (result: SessionEndResult) => void;
   topics?: Topic[];
+  profile?: CoreProfile | null;
+  onStartDeferredOnboarding?: () => void;
 }) {
   const fallback = { id: sessionId, title: 'New session', cat: 'Topic', date: 'now' };
   const session = sessionTitle ? { ...fallback, title: sessionTitle } : fallback;
@@ -509,6 +512,10 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       </div>
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
+
+      {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
+        <OnboardingBanner onComplete={onStartDeferredOnboarding} onDismiss={() => {}} />
+      )}
 
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">

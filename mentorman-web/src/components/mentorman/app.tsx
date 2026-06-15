@@ -9,7 +9,7 @@ import { Onboarding, SessionEnd, Settings } from './screens';
 import { ACCENTS, catToMode, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'summary' | 'settings' | 'onboarding';
+type View = 'chat' | 'dashboard' | 'summary' | 'settings' | 'onboarding' | 'deferred-onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
@@ -109,11 +109,25 @@ export function MentorManApp() {
     setView('chat');
   };
 
-  const fullScreen = view === 'onboarding';
+  const fullScreen = view === 'onboarding' || view === 'deferred-onboarding';
 
   return (
     <div className={`app ${fullScreen ? 'full' : ''} density-${t.density}`}>
-      {fullScreen ? (
+      {view === 'deferred-onboarding' ? (
+        <Onboarding
+          userName={userName}
+          deferred
+          onFinish={(goal) => {
+            refreshProfile();
+            setActiveSession('new');
+            setActiveSessionTitle(goal || null);
+            setMode('topic');
+            setView('chat');
+            setChatKey(k => k + 1);
+          }}
+          onAbandon={() => setView('settings')}
+        />
+      ) : fullScreen ? (
         <Onboarding userName={userName} onFinish={(goal) => {
           localStorage.removeItem('mentorman_draft');
           refreshProfile();
@@ -162,6 +176,8 @@ export function MentorManApp() {
               onSessionSaved={() => setSessionsVersion(v => v + 1)}
               onSessionEnd={(result) => setLastSessionEnd({ title: result.title, summary: result.summary })}
               topics={topics}
+              profile={profile}
+              onStartDeferredOnboarding={() => setView('deferred-onboarding')}
             />
           )}
           {view === 'dashboard' && (
@@ -179,6 +195,7 @@ export function MentorManApp() {
             <Settings
               profile={profile}
               onReset={() => { setProfile(null); setView('onboarding'); }}
+              onStartDeferredOnboarding={() => setView('deferred-onboarding')}
               onSaved={refreshProfile}
             />
           )}

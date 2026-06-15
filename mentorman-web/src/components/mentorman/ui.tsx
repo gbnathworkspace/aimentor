@@ -202,7 +202,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
   };
 
   const { signOut } = useClerk();
-  const days = daysLeft(profile?.deadline);
+  const days = daysLeft(profile?.deadline ?? undefined);
   const displayName = userName || profile?.email?.split('@')[0] || 'You';
   const initial = displayName[0]?.toUpperCase() ?? 'Y';
 

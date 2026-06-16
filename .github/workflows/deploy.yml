@@ -86,7 +86,7 @@ jobs:
             docker run -d \
               --name mentorman \
               --restart unless-stopped \
-              -p 80:8000 \
+              -p 3000:8000 \
               -e MONGODB_URI="$MONGODB_URI" \
               -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
               -e VOYAGE_API_KEY="$VOYAGE_API_KEY" \

@@ -3,7 +3,7 @@
 import logging
 
 import anthropic
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.database import immediate_contexts_col
 from app.config.settings import get_settings
@@ -47,8 +47,16 @@ async def mentor_chat(
     # Step 1: Assemble context (raises HTTPException 400 if no profile)
     context = await context_assembler.assemble(user_id, body.topic, last_user_message)
 
-    # Step 2: Build system prompt from mode + context
-    system_prompt = get_system_prompt(body.mode, context)
+    # Step 2: Build system prompt from mode + context.
+    # MentorRequest already constrains `mode` to the known set, but guard the
+    # internal contract too so a bad mode can never crash the core chat (issue #6).
+    try:
+        system_prompt = get_system_prompt(body.mode, context)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
 
     # Step 3: If sessionId provided, include ImmediateContext from uploaded files
     if body.session_id:

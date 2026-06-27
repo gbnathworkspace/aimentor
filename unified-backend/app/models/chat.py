@@ -1,10 +1,15 @@
 """Chat request/response Pydantic models."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.session import Message
+
+# The four supported mentor session modes. Constraining the API boundary to this
+# set turns an unknown/corrupted mode into a 422 at request-validation time,
+# instead of an uncaught ValueError → 500 inside get_system_prompt (issue #6).
+MentorMode = Literal["planning", "topic", "doubt", "evaluation"]
 
 
 class MentorRequest(BaseModel):
@@ -13,7 +18,7 @@ class MentorRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     topic: str
-    mode: str = "topic"
+    mode: MentorMode = "topic"
     messages: list[Message]
     session_id: Optional[str] = Field(None, alias="sessionId")
 

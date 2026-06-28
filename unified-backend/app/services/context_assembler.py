@@ -17,7 +17,6 @@ from app.config.database import (
     skill_graph_col,
     sessions_col,
 )
-from app.services.embedder import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +57,10 @@ async def assemble(user_id: str, topic: str, query: str) -> dict:
         logger.warning("Skill graph fetch failed for user=%s topic=%s: %s", user_id, topic, e)
         skill = None
 
-    # L3 — Episodic memory via vector search (optional, degrade gracefully)
-    episodes = await _vector_search(user_id, query, topic, limit=3)
+    # L3 — Episodic memory: most-recent ended-session summaries (optional).
+    # `query` is reserved for future vector ranking (#5); recency works today
+    # without an Atlas vector index. Degrades to [] on failure.
+    episodes = await _recent_episodes(user_id, topic, limit=3)
 
     # Uploaded documents (résumé / LeetCode etc. ingested at onboarding).
     # Without this read the ingest pipeline is orphaned — files embedded, never used (issue #4).
@@ -86,58 +87,44 @@ async def _fetch_documents(user_id: str, limit: int = _MAX_DOCUMENT_CHUNKS) -> l
         return []
 
 
-async def _vector_search(
-    user_id: str, query: str, topic: str | None, limit: int
-) -> list:
-    """Perform vector search on sessions collection for relevant episodes.
+async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:
+    """Fetch the user's most recent ended-session summaries.
 
-    Uses the shared embedder service instead of an inline Voyage client call.
-    Returns an empty list on any failure so the mentor can still respond.
+    Recency-based L3: no vector search. This avoids both the missing Atlas index
+    and the writer/reader collection mismatch (#5), and works offline. Same-topic
+    sessions are preferred, then filled with other recent ones. [] on any failure.
     """
     try:
-        vector = await embed_text(query)
-        if not vector:
-            logger.warning("Embedding returned empty vector; skipping vector search.")
-            return []
-
-        vector_filter = {"user_id": {"$eq": user_id}}
-        if topic:
-            vector_filter["topic"] = {"$eq": topic}
-
-        pipeline = [
-            {
-                "$vectorSearch": {
-                    "index": "session_embedding_index",
-                    "path": "embedding",
-                    "queryVector": vector,
-                    "numCandidates": max(20, limit * 10),
-                    "limit": limit,
-                    "filter": vector_filter,
-                }
-            },
-            {
-                "$project": {
+        cursor = (
+            sessions_col()
+            .find(
+                {"user_id": user_id, "status": "ended", "summary": {"$nin": [None, ""]}},
+                {
                     "_id": 0,
-                    "embedding": 0,
                     "session_id": 1,
                     "title": 1,
                     "summary": 1,
                     "topic": 1,
                     "date": 1,
                     "skill_update": 1,
-                    "score": {"$meta": "vectorSearchScore"},
-                }
-            },
-        ]
+                },
+            )
+            .sort("updated_at", -1)
+            .limit(limit * 4)  # over-fetch so the same-topic preference has options
+        )
+        docs = await cursor.to_list(length=limit * 4)
 
-        results = await sessions_col().aggregate(pipeline).to_list(limit)
-        return results
+        if topic:
+            same = [d for d in docs if d.get("topic") == topic]
+            others = [d for d in docs if d.get("topic") != topic]
+            docs = same + others
+
+        return docs[:limit]
 
     except Exception as e:
         logger.warning(
-            "Vector search failed for user=%s query=%r: %s. Returning empty episodes.",
+            "Recent-episode fetch failed for user=%s: %s. Returning empty episodes.",
             user_id,
-            query[:50],
             e,
         )
         return []

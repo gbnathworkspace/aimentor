@@ -579,7 +579,11 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
             </div>
           )}
           {msgs.map((m, i) =>
-            m.who === 'verdict'
+            // Don't render the empty mentor placeholder before the first streamed
+            // token — the typing dots cover that moment (issue #17).
+            m.who === 'mentor' && !m.text
+              ? null
+              : m.who === 'verdict'
               ? <VerdictMsg key={m._id || i} item={m as any} />
               : m.who === 'system'
               ? <div key={m._id || i} className="system-msg">

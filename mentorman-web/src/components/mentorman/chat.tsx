@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
-import { MODES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
+import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
 import { ChatUploadButton } from './chat/ChatUploadButton';
 import { UploadMessage } from './chat/UploadMessage';
 import { OnboardingBanner } from './OnboardingBanner';
@@ -13,11 +13,26 @@ import type { CoreProfile, SkillNode } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
   return (
-    <div className="modes" role="tablist">
+    <div className="modes" role="tablist" aria-label="Session mode">
+      <span className="bar-label">mode</span>
       {MODES.map(m => (
         <div key={m.id} className={`mode-tab ${mode === m.id ? 'active' : ''}`}
              onClick={() => onMode(m.id)} title={m.blurb}>
           {m.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }) {
+  return (
+    <div className="modes" role="tablist" aria-label="Mentor tone">
+      <span className="bar-label">voice</span>
+      {TONES.map(t => (
+        <div key={t.id} className={`mode-tab ${tone === t.id ? 'active' : ''}`}
+             onClick={() => onTone(t.id)} title={t.blurb}>
+          {t.label}
         </div>
       ))}
     </div>
@@ -134,12 +149,13 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
 
 const DRAFT_KEY = 'mentorman_draft';
 
-export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, onSessionEnd, topics = [], profile, onStartDeferredOnboarding }: {
+export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTone, onNav, onSessionSaved, onSessionEnd, topics = [], profile, onStartDeferredOnboarding }: {
   sessionId: string;
   sessionTitle?: string;
   mode: ModeId;
   setMode: (m: ModeId) => void;
   tone: ToneId;
+  setTone: (t: ToneId) => void;
   onNav: (v: string) => void;
   onSessionSaved?: () => void;
   onSessionEnd?: (result: SessionEndResult) => void;
@@ -291,7 +307,7 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       .then(r => r.json())
       .then(({ text: reply, suggestions: chips }) => {
         if (cancelled) return;
-        setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", label: `${TONES.find(t => t.id === tone)?.label ?? tone} voice`, _id: 'greet0' }]);
         setSuggestions(Array.isArray(chips) ? chips : []);
         // NOTE: no session is created here. The greeting alone must not create a
         // backend session — that produced phantom empty sessions on every open.
@@ -389,7 +405,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       const { text: reply, suggestions: chips } = await res.json();
       setSuggestions(Array.isArray(chips) ? chips : []);
       const mentorText = (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?";
-      setMsgs(prev => [...prev, { who: 'mentor', text: mentorText, _id: 'm' + Date.now() }]);
+      const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
+      setMsgs(prev => [...prev, { who: 'mentor', text: mentorText, label: voiceLabel, _id: 'm' + Date.now() }]);
 
       // Persist messages via the session persistence hook (Req 8.2)
       const now = new Date().toISOString();
@@ -504,6 +521,7 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
         </div>
         <div className="ph-right">
           <ModeBar mode={mode} onMode={setMode} />
+          <ToneBar tone={tone} onTone={setTone} />
           <button className="btn btn-sm btn-ghost" onClick={endSession} disabled={isEnding} title="End session">
             {isEnding ? 'Ending…' : 'End'}
           </button>

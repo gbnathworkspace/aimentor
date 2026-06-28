@@ -51,7 +51,7 @@ async def mentor_chat(
     # MentorRequest already constrains `mode` to the known set, but guard the
     # internal contract too so a bad mode can never crash the core chat (issue #6).
     try:
-        system_prompt = get_system_prompt(body.mode, context)
+        system_prompt = get_system_prompt(body.mode, context, body.tone)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

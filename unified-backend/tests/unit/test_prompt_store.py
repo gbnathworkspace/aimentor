@@ -127,6 +127,17 @@ class TestGetSystemPrompt:
         result = get_system_prompt("topic", context)
         assert "Graphs" in result
 
+    def test_tone_instructions_injected(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        assert "TOUGH" in get_system_prompt("topic", context, "tough")
+        assert "ENCOURAGING" in get_system_prompt("topic", context, "encouraging")
+
+    def test_tone_defaults_to_balanced(self):
+        # No tone arg → balanced voice, and the placeholder is always filled.
+        result = get_system_prompt("topic", context={"profile": {}, "skill": {}, "episodes": []})
+        assert "BALANCED" in result
+        assert "{{tone_instructions}}" not in result
+
 
 class TestGetOnboardingPrompt:
     """Tests for get_onboarding_prompt function."""

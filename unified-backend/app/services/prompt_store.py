@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.models.chat import DEFAULT_TONE, ToneId
+
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # In-memory cache: filename → raw template string
@@ -59,6 +61,24 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "- After each answer, give a brief verdict: Strong / Partial / Weak.\n"
         "- After all levels, provide a final summary with gaps and strengths.\n"
         "- Do NOT confirm correct answers mid-evaluation."
+    ),
+}
+
+
+# Tone → voice instruction. The single source of truth for what each tone DOES.
+# Keyed by ToneId; the frontend only knows the ids (data.ts), never this text.
+_TONE_INSTRUCTIONS: dict[str, str] = {
+    "tough": (
+        "Adopt a TOUGH voice. Be blunt and demanding. Do not soften feedback or "
+        "cushion gaps — name them directly. Hold a high bar and expect rigour."
+    ),
+    "balanced": (
+        "Adopt a BALANCED voice. Be supportive but honest. Encourage effort, but "
+        "name weaknesses plainly. Neither harsh nor coddling."
+    ),
+    "encouraging": (
+        "Adopt an ENCOURAGING voice. Lead with warmth and affirmation. Frame gaps "
+        "as progress and next steps. Stay positive while still being truthful."
     ),
 }
 
@@ -116,7 +136,9 @@ def _format_episodes(episodes: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)
 
 
-def _build_context_variables(context: dict[str, Any], mode: str) -> dict[str, str]:
+def _build_context_variables(
+    context: dict[str, Any], mode: str, tone: ToneId
+) -> dict[str, str]:
     """Extract template variables from the assembled context dict."""
     profile = context.get("profile", {})
     skill = context.get("skill", {})
@@ -138,15 +160,20 @@ def _build_context_variables(context: dict[str, Any], mode: str) -> dict[str, st
         # Mode
         "mode": mode,
         "mode_instructions": _MODE_INSTRUCTIONS.get(mode, ""),
+        # Tone
+        "tone_instructions": _TONE_INSTRUCTIONS.get(tone, _TONE_INSTRUCTIONS[DEFAULT_TONE]),
     }
 
 
-def get_system_prompt(mode: str, context: dict[str, Any]) -> str:
+def get_system_prompt(
+    mode: str, context: dict[str, Any], tone: ToneId = DEFAULT_TONE
+) -> str:
     """Load and format the system prompt for a given mentor mode.
 
     Args:
         mode: One of "planning", "topic", "doubt", "evaluation".
         context: Dict with keys "profile", "skill", "episodes" from context_assembler.
+        tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.
 
     Returns:
         The fully interpolated system prompt string.
@@ -162,7 +189,7 @@ def get_system_prompt(mode: str, context: dict[str, Any]) -> str:
 
     template_file = _MODE_TEMPLATES[mode]
     template = _load_template(template_file)
-    variables = _build_context_variables(context, mode)
+    variables = _build_context_variables(context, mode, tone)
 
     return _interpolate(template, variables)
 

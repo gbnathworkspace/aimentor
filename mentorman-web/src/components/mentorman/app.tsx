@@ -6,17 +6,18 @@ import { Sidebar } from './ui';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
 import { Onboarding, SessionEnd, Settings } from './screens';
-import { ACCENTS, catToMode, type ModeId, type ToneId, type Topic } from './data';
+import { ACCENTS, catToMode, DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 type View = 'chat' | 'dashboard' | 'summary' | 'settings' | 'onboarding' | 'deferred-onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
-  const t = { accent: '#34d399', tone: 'balanced' as ToneId, density: 'cozy' };
+  const t = { accent: '#34d399', density: 'cozy' };
   const [view, setView] = useState<View>('chat');
   const [activeSession, setActiveSession] = useState('new');
   const [mode, setMode] = useState<ModeId>('topic');
+  const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
   const [profile, setProfile] = useState<CoreProfile | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [userName, setUserName] = useState('');
@@ -171,7 +172,8 @@ export function MentorManApp() {
               sessionTitle={activeSessionTitle ?? undefined}
               mode={mode}
               setMode={setMode}
-              tone={t.tone as ToneId}
+              tone={tone}
+              setTone={setTone}
               onNav={(v) => setView(v as View)}
               onSessionSaved={() => setSessionsVersion(v => v + 1)}
               onSessionEnd={(result) => setLastSessionEnd({ title: result.title, summary: result.summary })}

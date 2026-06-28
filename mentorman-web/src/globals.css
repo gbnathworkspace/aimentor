@@ -290,6 +290,7 @@ body {
 }
 .mode-tab:hover { color: var(--fg-dim); }
 .mode-tab.active { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }
+.bar-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2); padding: 0 6px 0 4px; }
 
 .chat-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 30px 0 12px; }
 .chat-inner { max-width: 760px; margin: 0 auto; padding: 0 26px; display: flex; flex-direction: column; gap: var(--gap-unit); }

@@ -15,7 +15,9 @@ function skillToTopic(s: SkillNode): Topic {
   const sig = (s.signals ?? {}) as Record<string, unknown>;
   const cur = lvl(s.current_level);
   const req = lvl(s.required_level);
-  const gap = typeof s.gap === 'number' ? s.gap : parseInt(String(s.gap)) || Math.max(0, req - cur);
+  // gap is a string scale ("none/small/medium/large") from the backend; derive a
+  // % from levels. parseInt also covers legacy numeric docs. (issue #3)
+  const gap = parseInt(String(s.gap)) || Math.max(0, req - cur);
   return {
     name: s.topic,
     cat: (sig.cat as string) ?? 'General',

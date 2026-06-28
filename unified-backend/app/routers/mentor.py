@@ -21,6 +21,25 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mentor", tags=["Mentor"])
 
+# Cap the chat history sent to the LLM. Without this the full transcript is
+# re-sent every turn → O(n²) token cost and eventual context overflow (issue #15).
+# Older turns survive across sessions via L3 summaries.
+_MAX_HISTORY_MESSAGES = 20
+
+
+def _window_messages(messages: list, limit: int = _MAX_HISTORY_MESSAGES) -> list[dict]:
+    """Keep the last `limit` messages, then drop leading assistant turns.
+
+    Anthropic requires the first message to be 'user'; slicing the tail can start
+    on an assistant turn, so trim until the first user message.
+    """
+    windowed = messages[-limit:]
+    first_user = next(
+        (i for i, m in enumerate(windowed) if m.role == "user"), len(windowed)
+    )
+    windowed = windowed[first_user:]
+    return [{"role": m.role, "content": m.content} for m in windowed]
+
 
 @router.post("", response_model=MentorResponse)
 async def mentor_chat(
@@ -104,7 +123,7 @@ async def mentor_chat(
     # Step 4: Call Anthropic API
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    api_messages = _window_messages(body.messages)
 
     try:
         response = await client.messages.create(

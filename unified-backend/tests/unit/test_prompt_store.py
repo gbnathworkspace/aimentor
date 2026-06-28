@@ -139,6 +139,29 @@ class TestGetSystemPrompt:
         assert "{{tone_instructions}}" not in result
 
 
+class TestUploadedDocuments:
+    """Issue #4: ingested file chunks must reach the mentor prompt."""
+
+    def test_documents_injected(self):
+        context = {
+            "profile": {},
+            "skill": {},
+            "episodes": [],
+            "documents": [
+                {"text": "5 years Python at Acme", "metadata": {"filename": "resume.pdf"}},
+            ],
+        }
+        result = get_system_prompt("topic", context)
+        assert "resume.pdf" in result
+        assert "5 years Python at Acme" in result
+        assert "{{documents}}" not in result
+
+    def test_no_documents_placeholder(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "(no uploaded documents)" in result
+
+
 class TestGetOnboardingPrompt:
     """Tests for get_onboarding_prompt function."""
 

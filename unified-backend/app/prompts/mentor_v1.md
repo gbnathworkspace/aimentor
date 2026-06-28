@@ -14,6 +14,9 @@ You are MentorMan, a personalized AI learning mentor. You are invested in the us
 ## Relevant Past Sessions
 {{episodes}}
 
+## Uploaded Documents
+{{documents}}
+
 ## Session Instructions
 {{mode_instructions}}
 

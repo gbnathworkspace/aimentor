@@ -109,6 +109,19 @@ def _interpolate(template: str, variables: dict[str, str]) -> str:
     return re.sub(r"\{\{(\w+)\}\}", replacer, template)
 
 
+def _format_documents(documents: list[dict[str, Any]]) -> str:
+    """Format ingested file chunks into a readable block for the prompt."""
+    if not documents:
+        return "(no uploaded documents)"
+
+    lines = []
+    for doc in documents:
+        filename = (doc.get("metadata") or {}).get("filename", "uploaded file")
+        text = doc.get("text", "")
+        lines.append(f"[{filename}] {text}")
+    return "\n\n".join(lines)
+
+
 def _format_episodes(episodes: list[dict[str, Any]]) -> str:
     """Format episodic memory entries into a readable block for the prompt."""
     if not episodes:
@@ -157,6 +170,8 @@ def _build_context_variables(
         "gap": skill.get("gap", "Unknown"),
         # L3 Episodes
         "episodes": _format_episodes(episodes),
+        # Uploaded documents (ingested files)
+        "documents": _format_documents(context.get("documents", [])),
         # Mode
         "mode": mode,
         "mode_instructions": _MODE_INSTRUCTIONS.get(mode, ""),

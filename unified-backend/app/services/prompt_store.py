@@ -169,6 +169,8 @@ def _build_context_variables(
         "deadline": profile.get("deadline", "Not specified"),
         "overall_level": profile.get("overall_level", "beginner"),
         "daily_availability": profile.get("daily_availability", "Not specified"),
+        # User's "how to teach me" note (issue #14)
+        "style_notes": profile.get("style_notes") or "(none provided)",
         # L2 Skill fields
         "topic": skill.get("topic", context.get("topic", "General")),
         "required_level": skill.get("required_level", "Not assessed"),

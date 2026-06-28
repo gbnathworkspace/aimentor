@@ -452,6 +452,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   const [goalVal, setGoalVal] = useState(profile?.goal ?? '');
   const [deadlineVal, setDeadlineVal] = useState(profile?.deadline ?? '');
   const [availVal, setAvailVal] = useState(profile?.daily_availability ?? '');
+  const [styleVal, setStyleVal] = useState((profile?.style_notes as string) ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -460,6 +461,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     setGoalVal(profile?.goal ?? '');
     setDeadlineVal(profile?.deadline ?? '');
     setAvailVal(profile?.daily_availability ?? '');
+    setStyleVal((profile?.style_notes as string) ?? '');
   }, [profile]);
 
   const save = async (field: Record<string, string>): Promise<boolean> => {
@@ -595,6 +597,26 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
           {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
             <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} />
           )}
+
+          <div className="set-section">
+            <div className="set-label">How should the mentor teach you?</div>
+            <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 0 8px' }}>
+              Tell the mentor how you learn best — it follows this in every reply.
+            </div>
+            <textarea
+              value={styleVal}
+              onChange={e => setStyleVal(e.target.value)}
+              placeholder="e.g. I learn best with code examples. Keep explanations short. Use real-world analogies."
+              rows={3}
+              style={{ width: '100%', resize: 'vertical', fontSize: 13, padding: 8, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
+            />
+            <div style={{ marginTop: 6 }}>
+              <button className="btn btn-sm btn-primary" disabled={saving || styleVal === ((profile?.style_notes as string) ?? '')}
+                onClick={() => save({ style_notes: styleVal })}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
 
           <div className="set-section">
             <div className="set-label">Data sources</div>

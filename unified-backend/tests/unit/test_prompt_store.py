@@ -139,6 +139,22 @@ class TestGetSystemPrompt:
         assert "{{tone_instructions}}" not in result
 
 
+class TestStyleNotes:
+    """Issue #14: the user's 'how to teach me' note reaches the prompt."""
+
+    def test_style_notes_injected(self):
+        context = {"profile": {"style_notes": "Use code examples, be concise"}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "How to Teach This User" in result
+        assert "Use code examples, be concise" in result
+
+    def test_no_style_notes_placeholder(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "(none provided)" in result
+        assert "{{style_notes}}" not in result
+
+
 class TestAttemptFirstTeaching:
     """Issue #12: attempt-first rule + mastery hint ladder in doubt/topic, not evaluation."""
 

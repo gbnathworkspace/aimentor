@@ -17,6 +17,8 @@ class ProfileCreate(BaseModel):
     overall_level: str = "beginner"
     daily_availability: str = "2 hrs/day"
     email: Optional[str] = None
+    # User-written "how to teach me" note, injected into the mentor prompt (issue #14)
+    style_notes: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"
 
 
@@ -31,6 +33,7 @@ class ProfileUpdate(BaseModel):
     overall_level: Optional[str] = None
     daily_availability: Optional[str] = None
     email: Optional[str] = None
+    style_notes: Optional[str] = None
     profile_status: Optional[Literal["complete", "skipped"]] = None
 
 
@@ -46,4 +49,5 @@ class ProfileResponse(BaseModel):
     overall_level: str
     daily_availability: str
     email: Optional[str] = None
+    style_notes: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"

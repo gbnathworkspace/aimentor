@@ -600,7 +600,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
               onRefresh={uploadState.status === 'connection_lost' ? refreshUploadStatus : undefined}
             />
           )}
-          {busy && <Typing />}
+          {/* Show the typing dots only until the streamed reply starts filling in (issue #17) */}
+          {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && <Typing />}
           {/* Loading indicator during session-end processing (Req 8.9) */}
           {isEnding && (
             <div className="session-ending-indicator">

@@ -139,6 +139,29 @@ class TestGetSystemPrompt:
         assert "{{tone_instructions}}" not in result
 
 
+class TestAttemptFirstTeaching:
+    """Issue #12: attempt-first rule + mastery hint ladder in doubt/topic, not evaluation."""
+
+    def test_global_attempt_first_rule_present(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "attempt-first" in result.lower()
+        assert "do not hand over the full answer" in result.lower()
+
+    def test_topic_and_doubt_have_hint_ladder(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        for mode in ("topic", "doubt"):
+            result = get_system_prompt(mode, context)
+            assert "ladder" in result.lower(), mode
+            assert "Current Level" in result, mode  # ladder fades with the shown level
+
+    def test_evaluation_stays_hint_free(self):
+        # Evaluation must NOT gain a hint ladder — it withholds hints by design.
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("evaluation", context)
+        assert "Do not give hints" in result
+
+
 class TestUploadedDocuments:
     """Issue #4: ingested file chunks must reach the mentor prompt."""
 

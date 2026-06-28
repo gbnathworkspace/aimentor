@@ -11,13 +11,18 @@ import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUploa
 import { useSessionPersistence, type Message as PersistenceMessage, type SessionEndResult } from '@/lib/session-persistence/useSessionPersistence';
 import type { CoreProfile, SkillNode } from '@/lib/mentorman-api';
 
-function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
+function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
+  // Mode is fixed once a chat starts: the whole system assumes one mode per chat,
+  // so switching mid-chat caused cross-mode context bleed (issue #20). Switch = new chat.
   return (
     <div className="modes" role="tablist" aria-label="Session mode">
       <span className="bar-label">mode</span>
       {MODES.map(m => (
-        <div key={m.id} className={`mode-tab ${mode === m.id ? 'active' : ''}`}
-             onClick={() => onMode(m.id)} title={m.blurb}>
+        <div key={m.id}
+             className={`mode-tab ${mode === m.id ? 'active' : ''} ${locked ? 'locked' : ''}`}
+             onClick={() => { if (!locked) onMode(m.id); }}
+             aria-disabled={locked || undefined}
+             title={locked ? 'Mode is fixed for this chat — start a new session to change it' : m.blurb}>
           {m.label}
         </div>
       ))}
@@ -520,7 +525,7 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
           <div className="ph-sub">session · {session.cat.toLowerCase()} · {session.date}</div>
         </div>
         <div className="ph-right">
-          <ModeBar mode={mode} onMode={setMode} />
+          <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />
           <ToneBar tone={tone} onTone={setTone} />
           <button className="btn btn-sm btn-ghost" onClick={endSession} disabled={isEnding} title="End session">
             {isEnding ? 'Ending…' : 'End'}

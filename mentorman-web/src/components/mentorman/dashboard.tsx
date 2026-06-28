@@ -7,7 +7,7 @@ import type { Topic } from './data';
 import type { SkillNode, CoreProfile } from '@/lib/mentorman-api';
 
 const LEVEL_PCT: Record<string, number> = {
-  novice: 15, beginner: 25, easy: 35, intermediate: 55, medium: 65, advanced: 75, hard: 85, expert: 95,
+  beginner: 25, intermediate: 50, advanced: 75, expert: 95,
 };
 const lvl = (s: string) => LEVEL_PCT[s?.toLowerCase()] ?? 50;
 

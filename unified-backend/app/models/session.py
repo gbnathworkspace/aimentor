@@ -16,13 +16,15 @@ class SessionStatus(str, Enum):
 
 
 class SkillLevel(str, Enum):
-    """Valid skill levels for LLM-extracted skill updates."""
+    """Valid skill levels for LLM-extracted skill updates.
 
-    novice = "novice"
-    easy = "easy"
-    medium = "medium"
-    medium_plus = "medium+"
-    hard = "hard"
+    Canonical vocabulary shared with the skill graph (onboarding_bootstrap.
+    LEVEL_ORDER) so session output feeds compute_gap/planning without translation.
+    """
+
+    beginner = "beginner"
+    intermediate = "intermediate"
+    advanced = "advanced"
     expert = "expert"
 
 

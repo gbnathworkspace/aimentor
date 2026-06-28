@@ -15,6 +15,7 @@ class SkillNode(BaseModel):
     topic: str
     required_level: str = "intermediate"
     current_level: str = "beginner"
+    previous_level: Optional[str] = None  # level before the last session (issue #16)
     gap: str = "medium"
     signals: Optional[dict] = None
 

@@ -145,4 +145,8 @@ class SessionEndResult(BaseModel):
     title: str
     summary: str
     skill_update: Optional[SessionSkillUpdate] = None
+    # Level change for this session's topic, for a "you leveled up" tag (issue #16).
+    # Both None when the session didn't produce a skill update.
+    level_from: Optional[str] = None
+    level_to: Optional[str] = None
     status: Literal["ended"] = "ended"

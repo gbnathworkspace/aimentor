@@ -343,13 +343,19 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
 }
 
 // ---------- Session-end summary -----------------------------
-export function SessionEnd({ onFollow, onBack, title, summary }: {
+const _LEVEL_ORDER = ['beginner', 'intermediate', 'advanced', 'expert'];
+
+export function SessionEnd({ onFollow, onBack, title, summary, levelFrom, levelTo }: {
   onFollow: () => void;
   onBack: () => void;
   title?: string;
   summary?: string;
+  levelFrom?: string | null;
+  levelTo?: string | null;
 }) {
   const displayTitle = title || 'Session ended';
+  const changed = !!levelFrom && !!levelTo && levelFrom !== levelTo;
+  const up = changed && _LEVEL_ORDER.indexOf(levelTo!) > _LEVEL_ORDER.indexOf(levelFrom!);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -362,6 +368,11 @@ export function SessionEnd({ onFollow, onBack, title, summary }: {
             <div className="label">Session summary</div>
             <h2 className="title-lg">{displayTitle}</h2>
             <div className="meta">session ended</div>
+            {changed && (
+              <div className={`level-tag ${up ? 'up' : 'down'}`}>
+                {up ? '▲ Leveled up' : '▼ Level adjusted'}: {levelFrom} → {levelTo}
+              </div>
+            )}
           </div>
           <div className="se-summary">
             <div className="label">Summary</div>

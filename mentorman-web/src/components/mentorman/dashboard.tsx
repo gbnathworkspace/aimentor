@@ -18,6 +18,10 @@ function skillToTopic(s: SkillNode): Topic {
   // gap is a string scale ("none/small/medium/large") from the backend; derive a
   // % from levels. parseInt also covers legacy numeric docs. (issue #3)
   const gap = parseInt(String(s.gap)) || Math.max(0, req - cur);
+  const prev = s.previous_level as string | undefined;
+  const levelUp = prev && prev !== s.current_level
+    ? { from: prev, to: s.current_level, up: lvl(s.current_level) > lvl(prev) }
+    : null;
   return {
     name: s.topic,
     cat: (sig.cat as string) ?? 'General',
@@ -26,6 +30,7 @@ function skillToTopic(s: SkillNode): Topic {
     last: (sig.last_studied as string) ?? (sig.last as string) ?? '–',
     gap,
     level: `${s.current_level} → ${s.required_level}`,
+    levelUp,
     strong: (sig.strong_areas as string[]) ?? (sig.strong as string[]) ?? [],
     weak: (sig.weak_areas as string[]) ?? (sig.weak as string[]) ?? [],
   };
@@ -101,6 +106,11 @@ function TopicCard({ t, onStart, animate }: { t: Topic; onStart: (t: Topic) => v
         </div>
       </div>
       <div>
+        {t.levelUp && (
+          <div className={`level-tag ${t.levelUp.up ? 'up' : 'down'}`} style={{ marginBottom: 6 }}>
+            {t.levelUp.up ? '▲ Leveled up' : '▼ Adjusted'}: {t.levelUp.from} → {t.levelUp.to} <span style={{ opacity: 0.7 }}>since last session</span>
+          </div>
+        )}
         <div className="gapbar-labels">
           <span>current {t.cur}%</span>
           <span className="arrow">{t.level}</span>

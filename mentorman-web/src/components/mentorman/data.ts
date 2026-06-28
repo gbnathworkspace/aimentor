@@ -26,6 +26,7 @@ export type Topic = {
   last: string;
   gap: number;
   level: string;
+  levelUp?: { from: string; to: string; up: boolean } | null;  // since-last-session delta (issue #16)
   strong: string[];
   weak: string[];
 };

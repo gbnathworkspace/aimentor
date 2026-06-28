@@ -368,11 +368,20 @@ class SessionSaveHandler:
 
         title = await self._get_session_title(session_id)
 
+        # Level change for the "you leveled up" tag (issue #16). current_level was
+        # read before the update (Step 2); new_level is this session's grade.
+        level_from = current_level if validated_skill_update else None
+        level_to = (
+            validated_skill_update.new_level.value if validated_skill_update else None
+        )
+
         return SessionEndResult(
             session_id=session_id,
             title=title,
             summary=summary,
             skill_update=validated_skill_update,
+            level_from=level_from,
+            level_to=level_to,
         )
 
     async def _call_llm_with_retries(self, prompt: str) -> str | None:

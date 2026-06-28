@@ -25,7 +25,7 @@ export function MentorManApp() {
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   const [sessionsVersion, setSessionsVersion] = useState(0);
   const [chatKey, setChatKey] = useState(0);
-  const [lastSessionEnd, setLastSessionEnd] = useState<{ title: string; summary: string } | null>(null);
+  const [lastSessionEnd, setLastSessionEnd] = useState<{ title: string; summary: string; levelFrom?: string | null; levelTo?: string | null } | null>(null);
 
   // Fetch user name from Clerk via /api/me
   useEffect(() => {
@@ -176,7 +176,7 @@ export function MentorManApp() {
               setTone={setTone}
               onNav={(v) => setView(v as View)}
               onSessionSaved={() => setSessionsVersion(v => v + 1)}
-              onSessionEnd={(result) => setLastSessionEnd({ title: result.title, summary: result.summary })}
+              onSessionEnd={(result) => setLastSessionEnd({ title: result.title, summary: result.summary, levelFrom: result.level_from, levelTo: result.level_to })}
               topics={topics}
               profile={profile}
               onStartDeferredOnboarding={() => setView('deferred-onboarding')}
@@ -189,6 +189,8 @@ export function MentorManApp() {
             <SessionEnd
               title={lastSessionEnd?.title}
               summary={lastSessionEnd?.summary}
+              levelFrom={lastSessionEnd?.levelFrom}
+              levelTo={lastSessionEnd?.levelTo}
               onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }}
               onBack={() => { setActiveSession('new'); setView('chat'); }}
             />

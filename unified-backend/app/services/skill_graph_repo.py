@@ -39,9 +39,12 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
         current_level = skill_update.new_level.value
         existing = await skill_graph_col().find_one(
             {"user_id": user_id, "topic": skill_update.topic},
-            {"required_level": 1, "_id": 0},
+            {"required_level": 1, "current_level": 1, "_id": 0},
         )
         required_level = (existing or {}).get("required_level", "intermediate")
+        # Remember the level we're replacing so the UI can show a "since last
+        # session" delta (issue #16). None for a brand-new topic.
+        previous_level = (existing or {}).get("current_level")
         gap = compute_gap(required_level, current_level)
 
         await skill_graph_col().update_one(
@@ -51,6 +54,7 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
                     "user_id": user_id,
                     "topic": skill_update.topic,
                     "current_level": current_level,
+                    "previous_level": previous_level,
                     "gap": gap,
                     "weak_areas": skill_update.weak_areas,
                     "strong_areas": skill_update.strong_areas,

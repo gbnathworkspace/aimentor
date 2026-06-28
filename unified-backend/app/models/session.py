@@ -16,13 +16,15 @@ class SessionStatus(str, Enum):
 
 
 class SkillLevel(str, Enum):
-    """Valid skill levels for LLM-extracted skill updates."""
+    """Valid skill levels for LLM-extracted skill updates.
 
-    novice = "novice"
-    easy = "easy"
-    medium = "medium"
-    medium_plus = "medium+"
-    hard = "hard"
+    Canonical vocabulary shared with the skill graph (onboarding_bootstrap.
+    LEVEL_ORDER) so session output feeds compute_gap/planning without translation.
+    """
+
+    beginner = "beginner"
+    intermediate = "intermediate"
+    advanced = "advanced"
     expert = "expert"
 
 
@@ -143,4 +145,8 @@ class SessionEndResult(BaseModel):
     title: str
     summary: str
     skill_update: Optional[SessionSkillUpdate] = None
+    # Level change for this session's topic, for a "you leveled up" tag (issue #16).
+    # Both None when the session didn't produce a skill update.
+    level_from: Optional[str] = None
+    level_to: Optional[str] = None
     status: Literal["ended"] = "ended"

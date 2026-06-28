@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import anthropic
 
-from app.config.database import sessions_col
+from app.config.database import sessions_col, skill_graph_col
 from app.config.settings import get_settings
 from app.models.session import (
     Message,
@@ -57,19 +57,35 @@ _NARRATIVE_REGEX = re.compile(
 )
 
 
-def _build_combined_prompt(transcript: str, topic: str, mode: str) -> str:
-    """Build the LLM prompt requesting both narrative_summary and skill_update."""
+def _build_combined_prompt(
+    transcript: str, topic: str, mode: str, current_level: str = "beginner"
+) -> str:
+    """Build the LLM prompt requesting both narrative_summary and skill_update.
+
+    Anchors grading to the student's current level with an explicit rubric so
+    `new_level` reflects demonstrated mastery rather than an unguided guess, and
+    can move at most one level per session (no wild swings).
+    """
     return (
         f"You are analyzing a completed learning session.\n"
         f"Session topic: {topic}\n"
-        f"Session mode: {mode}\n\n"
+        f"Session mode: {mode}\n"
+        f"Student's current level: {current_level}\n\n"
+        f"Grade against this rubric (order: beginner < intermediate < advanced < expert):\n"
+        f"  - beginner: recalls basics only with prompting\n"
+        f"  - intermediate: applies concepts independently on standard problems\n"
+        f"  - advanced: handles edge cases and explains trade-offs\n"
+        f"  - expert: generalizes and could teach the topic\n"
+        f"Rules: pick new_level from the transcript evidence only. Move at most ONE "
+        f"level from the current level, and only when the next level's bar is clearly "
+        f"met. If evidence is weak or mixed, keep the current level.\n\n"
         f"Based on the following transcript, produce a JSON object with exactly two keys:\n\n"
         f'1. "narrative_summary": A string of 3-5 sentences describing what was studied, '
         f"what the student was strong at, and what they were weak at. "
         f"Write it for future semantic search retrieval.\n\n"
         f'2. "skill_update": An object with the following fields:\n'
         f'   - "topic" (string): The main topic studied\n'
-        f'   - "new_level" (string): One of "novice", "easy", "medium", "medium+", "hard", "expert"\n'
+        f'   - "new_level" (string): One of "beginner", "intermediate", "advanced", "expert"\n'
         f'   - "gap" (integer): A score from 0 to 100 representing the knowledge gap\n'
         f'   - "weak_areas" (array of strings, max 10): Areas where the student struggled\n'
         f'   - "strong_areas" (array of strings, max 10): Areas where the student excelled\n'
@@ -301,9 +317,15 @@ class SessionSaveHandler:
                 skill_update=None,
             )
 
-        # Step 2: Build prompt and call LLM with retries
+        # Step 2: Build prompt and call LLM with retries.
+        # Anchor grading to the student's current level (default beginner for a
+        # brand-new topic) so new_level is rubric-graded, not an unguided guess.
         transcript = _truncate_transcript(messages)
-        prompt = _build_combined_prompt(transcript, topic, mode)
+        existing = await skill_graph_col().find_one(
+            {"user_id": user_id, "topic": topic}, {"current_level": 1, "_id": 0}
+        )
+        current_level = (existing or {}).get("current_level", "beginner")
+        prompt = _build_combined_prompt(transcript, topic, mode, current_level)
 
         raw_response = await self._call_llm_with_retries(prompt)
 
@@ -346,11 +368,20 @@ class SessionSaveHandler:
 
         title = await self._get_session_title(session_id)
 
+        # Level change for the "you leveled up" tag (issue #16). current_level was
+        # read before the update (Step 2); new_level is this session's grade.
+        level_from = current_level if validated_skill_update else None
+        level_to = (
+            validated_skill_update.new_level.value if validated_skill_update else None
+        )
+
         return SessionEndResult(
             session_id=session_id,
             title=title,
             summary=summary,
             skill_update=validated_skill_update,
+            level_from=level_from,
+            level_to=level_to,
         )
 
     async def _call_llm_with_retries(self, prompt: str) -> str | None:

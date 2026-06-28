@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
-import { MODES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
+import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
 import { ChatUploadButton } from './chat/ChatUploadButton';
 import { UploadMessage } from './chat/UploadMessage';
 import { OnboardingBanner } from './OnboardingBanner';
@@ -11,13 +11,54 @@ import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUploa
 import { useSessionPersistence, type Message as PersistenceMessage, type SessionEndResult } from '@/lib/session-persistence/useSessionPersistence';
 import type { CoreProfile, SkillNode } from '@/lib/mentorman-api';
 
-function ModeBar({ mode, onMode }: { mode: ModeId; onMode: (m: ModeId) => void }) {
+// POST /api/mentor and read the plain-text token stream (issue #17).
+// Calls onChunk with the accumulated text after each chunk; returns the full reply.
+async function streamMentor(body: object, onChunk: (full: string) => void): Promise<string> {
+  const res = await fetch('/api/mentor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`mentor request failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let acc = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    acc += decoder.decode(value, { stream: true });
+    onChunk(acc);
+  }
+  return acc;
+}
+
+function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
+  // Mode is fixed once a chat starts: the whole system assumes one mode per chat,
+  // so switching mid-chat caused cross-mode context bleed (issue #20). Switch = new chat.
   return (
-    <div className="modes" role="tablist">
+    <div className="modes" role="tablist" aria-label="Session mode">
+      <span className="bar-label">mode</span>
       {MODES.map(m => (
-        <div key={m.id} className={`mode-tab ${mode === m.id ? 'active' : ''}`}
-             onClick={() => onMode(m.id)} title={m.blurb}>
+        <div key={m.id}
+             className={`mode-tab ${mode === m.id ? 'active' : ''} ${locked ? 'locked' : ''}`}
+             onClick={() => { if (!locked) onMode(m.id); }}
+             aria-disabled={locked || undefined}
+             title={locked ? 'Mode is fixed for this chat — start a new session to change it' : m.blurb}>
           {m.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }) {
+  return (
+    <div className="modes" role="tablist" aria-label="Mentor tone">
+      <span className="bar-label">voice</span>
+      {TONES.map(t => (
+        <div key={t.id} className={`mode-tab ${tone === t.id ? 'active' : ''}`}
+             onClick={() => onTone(t.id)} title={t.blurb}>
+          {t.label}
         </div>
       ))}
     </div>
@@ -134,12 +175,13 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
 
 const DRAFT_KEY = 'mentorman_draft';
 
-export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav, onSessionSaved, onSessionEnd, topics = [], profile, onStartDeferredOnboarding }: {
+export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTone, onNav, onSessionSaved, onSessionEnd, topics = [], profile, onStartDeferredOnboarding }: {
   sessionId: string;
   sessionTitle?: string;
   mode: ModeId;
   setMode: (m: ModeId) => void;
   tone: ToneId;
+  setTone: (t: ToneId) => void;
   onNav: (v: string) => void;
   onSessionSaved?: () => void;
   onSessionEnd?: (result: SessionEndResult) => void;
@@ -278,28 +320,27 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
     greetedRef.current = true;
     let cancelled = false;
     setBusy(true);
-    fetch('/api/mentor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
+    const fallback = "Let's get started — what do you want to tackle first?";
+    // NOTE: no session is created here — the greeting alone must not create a
+    // backend session. The session is created lazily on the user's first action.
+    streamMentor(
+      {
         topic: session.title,
         mode,
         tone,
         messages: [{ role: 'user', content: '[session_start] Open the session with a short, sharp first message based on my profile and goal. Do not repeat what I said in onboarding — just get started.' }],
-      }),
-    })
-      .then(r => r.json())
-      .then(({ text: reply, suggestions: chips }) => {
+      },
+      (full) => { if (!cancelled) setMsgs([{ who: 'mentor', text: full, label: voiceLabel, _id: 'greet0' }]); },
+    )
+      .then((full) => {
         if (cancelled) return;
-        setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
-        setSuggestions(Array.isArray(chips) ? chips : []);
-        // NOTE: no session is created here. The greeting alone must not create a
-        // backend session — that produced phantom empty sessions on every open.
-        // The session is created lazily on the user's first action (send/upload).
+        if (!full.trim()) setMsgs([{ who: 'mentor', text: fallback, label: voiceLabel, _id: 'greet0' }]);
+        setSuggestions([]);
       })
       .catch(() => {
         if (cancelled) return;
-        setMsgs([{ who: 'mentor', text: "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        setMsgs([{ who: 'mentor', text: fallback, _id: 'greet0' }]);
       })
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
@@ -373,6 +414,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
     setMsgs(prev => [...prev, userMsg]);
     setSuggestions([]);
     setBusy(true);
+    const mid = 'm' + Date.now();
+    const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
     try {
       const sid = backendSessionId || await ensureSession(text);
       const allHistory = [...msgs, userMsg]
@@ -381,15 +424,15 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       // Anthropic requires the first message to be from 'user' — drop any leading assistant turns
       const firstUser = allHistory.findIndex(m => m.role === 'user');
       const history = firstUser > 0 ? allHistory.slice(firstUser) : allHistory;
-      const res = await fetch('/api/mentor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: session.title, mode, tone, messages: history, sessionId: sid }),
-      });
-      const { text: reply, suggestions: chips } = await res.json();
-      setSuggestions(Array.isArray(chips) ? chips : []);
-      const mentorText = (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?";
-      setMsgs(prev => [...prev, { who: 'mentor', text: mentorText, _id: 'm' + Date.now() }]);
+
+      // Show an empty mentor bubble and stream tokens into it (issue #17)
+      setMsgs(prev => [...prev, { who: 'mentor', text: '', label: voiceLabel, _id: mid }]);
+      const full = await streamMentor(
+        { topic: session.title, mode, tone, messages: history, sessionId: sid },
+        (acc) => setMsgs(prev => prev.map(m => m._id === mid ? { ...m, text: acc } : m)),
+      );
+      const mentorText = full.trim() || "Let me think about that differently — can you say more about where you're stuck?";
+      setMsgs(prev => prev.map(m => m._id === mid ? { ...m, text: mentorText } : m));
 
       // Persist messages via the session persistence hook (Req 8.2)
       const now = new Date().toISOString();
@@ -397,7 +440,10 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
       const mentorPersistMsg: PersistenceMessage = { role: 'mentor', content: mentorText, timestamp: now };
       persistMessages(userPersistMsg, mentorPersistMsg);
     } catch {
-      setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble reaching my notes right now — try that again in a moment.", _id: 'm' + Date.now() }]);
+      const errText = "I'm having trouble reaching my notes right now — try that again in a moment.";
+      setMsgs(prev => prev.some(m => m._id === mid)
+        ? prev.map(m => m._id === mid ? { ...m, text: errText } : m)
+        : [...prev, { who: 'mentor', text: errText, _id: mid }]);
     } finally {
       setBusy(false);
     }
@@ -503,7 +549,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
           <div className="ph-sub">session · {session.cat.toLowerCase()} · {session.date}</div>
         </div>
         <div className="ph-right">
-          <ModeBar mode={mode} onMode={setMode} />
+          <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />
+          <ToneBar tone={tone} onTone={setTone} />
           <button className="btn btn-sm btn-ghost" onClick={endSession} disabled={isEnding} title="End session">
             {isEnding ? 'Ending…' : 'End'}
           </button>
@@ -532,7 +579,11 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
             </div>
           )}
           {msgs.map((m, i) =>
-            m.who === 'verdict'
+            // Don't render the empty mentor placeholder before the first streamed
+            // token — the typing dots cover that moment (issue #17).
+            m.who === 'mentor' && !m.text
+              ? null
+              : m.who === 'verdict'
               ? <VerdictMsg key={m._id || i} item={m as any} />
               : m.who === 'system'
               ? <div key={m._id || i} className="system-msg">
@@ -553,7 +604,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, onNav,
               onRefresh={uploadState.status === 'connection_lost' ? refreshUploadStatus : undefined}
             />
           )}
-          {busy && <Typing />}
+          {/* Show the typing dots only until the streamed reply starts filling in (issue #17) */}
+          {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && <Typing />}
           {/* Loading indicator during session-end processing (Req 8.9) */}
           {isEnding && (
             <div className="session-ending-indicator">

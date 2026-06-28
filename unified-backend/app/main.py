@@ -20,7 +20,6 @@ from app.routers import (
     mentor,
     onboarding,
     profile,
-    session_end,
     session_upload,
     sessions,
     skills,
@@ -102,7 +101,6 @@ app.add_middleware(
 app.include_router(profile.router)
 app.include_router(skills.router)
 app.include_router(sessions.router)
-app.include_router(session_end.router)
 app.include_router(session_upload.router)
 app.include_router(mentor.router)
 app.include_router(onboarding.router)

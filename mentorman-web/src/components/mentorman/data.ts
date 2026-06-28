@@ -26,12 +26,12 @@ export type Topic = {
   last: string;
   gap: number;
   level: string;
+  levelUp?: { from: string; to: string; up: boolean } | null;  // since-last-session delta (issue #16)
   strong: string[];
   weak: string[];
 };
 
 export type ModeId = 'planning' | 'topic' | 'doubt' | 'evaluation';
-export type ToneId = 'tough' | 'balanced' | 'encouraging';
 export type DensityId = 'compact' | 'cozy' | 'comfy';
 
 export const MODES: { id: ModeId; label: string; blurb: string }[] = [
@@ -40,6 +40,17 @@ export const MODES: { id: ModeId; label: string; blurb: string }[] = [
   { id: 'doubt',      label: 'Doubt',      blurb: 'Bring a specific problem. Quick unblock, no long detours.' },
   { id: 'evaluation', label: 'Evaluation', blurb: 'Get tested. Q → graded verdict → adjusted difficulty → score.' },
 ];
+
+// Single source of truth for mentor voice. Behavioral text lives backend-side
+// (prompt_store._TONE_INSTRUCTIONS); the UI only needs ids + labels for the picker.
+// Keep ids in sync with backend ToneId (models/chat.py).
+export const TONES = [
+  { id: 'tough',       label: 'Tough',       blurb: 'Blunt and demanding. Gaps named directly.' },
+  { id: 'balanced',    label: 'Balanced',    blurb: 'Supportive but honest. The default.' },
+  { id: 'encouraging', label: 'Encouraging', blurb: 'Warm. Frames gaps as progress.' },
+] as const;
+export type ToneId = typeof TONES[number]['id'];
+export const DEFAULT_TONE: ToneId = 'balanced';
 
 export const ACCENTS: Record<string, { ink: string }> = {
   '#34d399': { ink: '#04140d' },

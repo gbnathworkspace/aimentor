@@ -1,10 +1,21 @@
 """Chat request/response Pydantic models."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.session import Message
+
+# The four supported mentor session modes. Constraining the API boundary to this
+# set turns an unknown/corrupted mode into a 422 at request-validation time,
+# instead of an uncaught ValueError → 500 inside get_system_prompt (issue #6).
+MentorMode = Literal["planning", "topic", "doubt", "evaluation"]
+
+# Mentor voice. Same boundary contract as MentorMode: an unknown tone is a 422,
+# never a silently-dropped field. Behavioral text for each tone lives in
+# prompt_store._TONE_INSTRUCTIONS — this is just the id contract + default.
+ToneId = Literal["tough", "balanced", "encouraging"]
+DEFAULT_TONE: ToneId = "balanced"
 
 
 class MentorRequest(BaseModel):
@@ -13,7 +24,8 @@ class MentorRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     topic: str
-    mode: str = "topic"
+    mode: MentorMode = "topic"
+    tone: ToneId = DEFAULT_TONE
     messages: list[Message]
     session_id: Optional[str] = Field(None, alias="sessionId")
 

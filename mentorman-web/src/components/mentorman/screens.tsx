@@ -343,13 +343,19 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
 }
 
 // ---------- Session-end summary -----------------------------
-export function SessionEnd({ onFollow, onBack, title, summary }: {
+const _LEVEL_ORDER = ['beginner', 'intermediate', 'advanced', 'expert'];
+
+export function SessionEnd({ onFollow, onBack, title, summary, levelFrom, levelTo }: {
   onFollow: () => void;
   onBack: () => void;
   title?: string;
   summary?: string;
+  levelFrom?: string | null;
+  levelTo?: string | null;
 }) {
   const displayTitle = title || 'Session ended';
+  const changed = !!levelFrom && !!levelTo && levelFrom !== levelTo;
+  const up = changed && _LEVEL_ORDER.indexOf(levelTo!) > _LEVEL_ORDER.indexOf(levelFrom!);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -362,6 +368,11 @@ export function SessionEnd({ onFollow, onBack, title, summary }: {
             <div className="label">Session summary</div>
             <h2 className="title-lg">{displayTitle}</h2>
             <div className="meta">session ended</div>
+            {changed && (
+              <div className={`level-tag ${up ? 'up' : 'down'}`}>
+                {up ? '▲ Leveled up' : '▼ Level adjusted'}: {levelFrom} → {levelTo}
+              </div>
+            )}
           </div>
           <div className="se-summary">
             <div className="label">Summary</div>
@@ -375,6 +386,53 @@ export function SessionEnd({ onFollow, onBack, title, summary }: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- Data source upload ------------------------------
+// Native file input → POST /api/ingest (validates/stores/extracts server-side).
+// Server accepts PDF + CSV (résumé / LeetCode), 50MB max. The extracted chunks
+// are read back into the mentor context by context_assembler (issue #4).
+function DataSourceUpload() {
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [msg, setMsg] = useState('');
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStatus('uploading');
+    setMsg(file.name);
+    try {
+      const fd = new FormData();
+      fd.append('files', file);
+      const res = await fetch('/api/ingest', { method: 'POST', body: fd });
+      if (!res.ok) {
+        setStatus('error');
+        setMsg(res.status === 400 ? 'Unsupported file — use a PDF or CSV.' : 'Upload failed — try again.');
+      } else {
+        setStatus('done');
+        setMsg(`${file.name} uploaded — your mentor will use it shortly.`);
+      }
+    } catch {
+      setStatus('error');
+      setMsg('Connection error — try again.');
+    } finally {
+      e.target.value = ''; // allow re-selecting the same file
+    }
+  };
+
+  return (
+    <div style={{ padding: '8px 0' }}>
+      <label className="btn btn-sm btn-ghost" style={{ cursor: 'pointer' }}>
+        {status === 'uploading' ? 'Uploading…' : 'Upload résumé (PDF) or LeetCode (CSV)'}
+        <input type="file" accept=".pdf,.csv" onChange={onPick} disabled={status === 'uploading'} style={{ display: 'none' }} />
+      </label>
+      {status !== 'idle' && status !== 'uploading' && (
+        <div style={{ color: status === 'error' ? 'var(--danger)' : 'var(--muted)', fontSize: 12, marginTop: 6 }}>
+          {msg}
+        </div>
+      )}
     </div>
   );
 }
@@ -394,6 +452,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   const [goalVal, setGoalVal] = useState(profile?.goal ?? '');
   const [deadlineVal, setDeadlineVal] = useState(profile?.deadline ?? '');
   const [availVal, setAvailVal] = useState(profile?.daily_availability ?? '');
+  const [styleVal, setStyleVal] = useState((profile?.style_notes as string) ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -402,6 +461,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     setGoalVal(profile?.goal ?? '');
     setDeadlineVal(profile?.deadline ?? '');
     setAvailVal(profile?.daily_availability ?? '');
+    setStyleVal((profile?.style_notes as string) ?? '');
   }, [profile]);
 
   const save = async (field: Record<string, string>): Promise<boolean> => {
@@ -539,10 +599,28 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
           )}
 
           <div className="set-section">
-            <div className="set-label">Data sources</div>
-            <div style={{ color: 'var(--muted)', fontSize: 12, padding: '8px 0' }}>
-              File ingestion is not yet active. Resume and LeetCode uploads coming soon.
+            <div className="set-label">How should the mentor teach you?</div>
+            <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 0 8px' }}>
+              Tell the mentor how you learn best — it follows this in every reply.
             </div>
+            <textarea
+              value={styleVal}
+              onChange={e => setStyleVal(e.target.value)}
+              placeholder="e.g. I learn best with code examples. Keep explanations short. Use real-world analogies."
+              rows={3}
+              style={{ width: '100%', resize: 'vertical', fontSize: 13, padding: 8, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
+            />
+            <div style={{ marginTop: 6 }}>
+              <button className="btn btn-sm btn-primary" disabled={saving || styleVal === ((profile?.style_notes as string) ?? '')}
+                onClick={() => save({ style_notes: styleVal })}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+
+          <div className="set-section">
+            <div className="set-label">Data sources</div>
+            <DataSourceUpload />
           </div>
 
           <div className="set-section">

@@ -1,11 +1,11 @@
 """Unit tests for app/services/context_assembler.py — context assembly logic."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
-from app.services.context_assembler import assemble, _vector_search
+from app.services.context_assembler import assemble, _recent_episodes
 
 
 class TestAssemble:
@@ -26,7 +26,7 @@ class TestAssemble:
                 "app.services.context_assembler.skill_graph_col"
             ) as mock_skills,
             patch(
-                "app.services.context_assembler._vector_search",
+                "app.services.context_assembler._recent_episodes",
                 new_callable=AsyncMock,
                 return_value=mock_episodes,
             ),
@@ -67,7 +67,7 @@ class TestAssemble:
                 "app.services.context_assembler.skill_graph_col"
             ) as mock_skills,
             patch(
-                "app.services.context_assembler._vector_search",
+                "app.services.context_assembler._recent_episodes",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -96,7 +96,7 @@ class TestAssemble:
                 "app.services.context_assembler.skill_graph_col"
             ) as mock_skills,
             patch(
-                "app.services.context_assembler._vector_search",
+                "app.services.context_assembler._recent_episodes",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -109,90 +109,48 @@ class TestAssemble:
         assert result["skill"] == {}
 
 
-class TestVectorSearch:
-    """Verify _vector_search graceful degradation."""
+def _mock_sessions_returning(docs):
+    """Build a mock sessions_col whose find().sort().limit().to_list() yields docs."""
+    cursor = MagicMock()
+    cursor.sort.return_value.limit.return_value.to_list = AsyncMock(return_value=docs)
+    col = MagicMock()
+    col.find.return_value = cursor
+    return col
 
-    @pytest.mark.asyncio
-    async def test_returns_empty_on_embed_failure(self):
-        """If embed_text returns empty vector, return empty list."""
-        with patch(
-            "app.services.context_assembler.embed_text",
-            new_callable=AsyncMock,
-            return_value=[],
-        ):
-            result = await _vector_search("u1", "query", "topic", limit=3)
 
-        assert result == []
+class TestRecentEpisodes:
+    """Verify _recent_episodes recency fetch + graceful degradation (issue #5 deferral)."""
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_exception(self):
-        """If vector search pipeline raises, return empty list."""
-        with patch(
-            "app.services.context_assembler.embed_text",
-            new_callable=AsyncMock,
-            side_effect=Exception("Network error"),
-        ):
-            result = await _vector_search("u1", "query", "topic", limit=3)
-
+        """If the query raises, return empty list so the mentor still responds."""
+        col = MagicMock()
+        col.find.side_effect = Exception("DB down")
+        with patch("app.services.context_assembler.sessions_col", return_value=col):
+            result = await _recent_episodes("u1", "topic", limit=3)
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_successful_search_returns_results(self):
-        """Happy path: embedding + aggregation pipeline returns results."""
-        mock_vector = [0.1] * 128
-        mock_results = [
-            {"session_id": "s1", "title": "Session 1", "score": 0.95},
-            {"session_id": "s2", "title": "Session 2", "score": 0.87},
+    async def test_prefers_same_topic_then_recent(self):
+        """Same-topic sessions come first, then other recent ones; limit respected."""
+        docs = [
+            {"session_id": "s3", "topic": "Trees", "summary": "newest other"},
+            {"session_id": "s2", "topic": "Graphs", "summary": "mid same"},
+            {"session_id": "s1", "topic": "Graphs", "summary": "old same"},
         ]
-
-        # Create a mock cursor that has to_list
-        mock_cursor = AsyncMock()
-        mock_cursor.to_list = AsyncMock(return_value=mock_results)
-
-        with (
-            patch(
-                "app.services.context_assembler.embed_text",
-                new_callable=AsyncMock,
-                return_value=mock_vector,
-            ),
-            patch(
-                "app.services.context_assembler.sessions_col"
-            ) as mock_sessions,
-        ):
-            mock_sessions.return_value.aggregate = lambda pipeline: mock_cursor
-
-            result = await _vector_search("u1", "What is a matrix?", "linear-algebra", limit=3)
-
-        assert result == mock_results
+        col = _mock_sessions_returning(docs)
+        with patch("app.services.context_assembler.sessions_col", return_value=col):
+            result = await _recent_episodes("u1", "Graphs", limit=2)
+        assert [d["topic"] for d in result] == ["Graphs", "Graphs"]
         assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_search_without_topic_omits_topic_filter(self):
-        """When topic is None, the filter should not include topic."""
-        mock_vector = [0.1] * 128
-        mock_cursor = AsyncMock()
-        mock_cursor.to_list = AsyncMock(return_value=[])
-
-        captured_pipeline = []
-
-        def capture_aggregate(pipeline):
-            captured_pipeline.extend(pipeline)
-            return mock_cursor
-
-        with (
-            patch(
-                "app.services.context_assembler.embed_text",
-                new_callable=AsyncMock,
-                return_value=mock_vector,
-            ),
-            patch(
-                "app.services.context_assembler.sessions_col"
-            ) as mock_sessions,
-        ):
-            mock_sessions.return_value.aggregate = capture_aggregate
-
-            await _vector_search("u1", "query", None, limit=3)
-
-        # Check the $vectorSearch filter does not contain topic
-        vector_search_stage = captured_pipeline[0]["$vectorSearch"]
-        assert "topic" not in vector_search_stage["filter"]
+    async def test_query_filters_ended_with_summary(self):
+        """Only ended sessions with a non-empty summary are eligible."""
+        col = _mock_sessions_returning([])
+        with patch("app.services.context_assembler.sessions_col", return_value=col):
+            await _recent_episodes("u1", None, limit=3)
+        query = col.find.call_args.args[0]
+        assert query["user_id"] == "u1"
+        assert query["status"] == "ended"
+        assert query["summary"] == {"$nin": [None, ""]}

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.config.database import sessions_col
 from app.core.security import require_auth
+from app.models.chat import MentorMode
 from app.models.session import Message, SessionCreate, SessionDoc, SessionEndResult, SessionStatus
 from app.services.message_store import MessageStore, SessionNotActiveError
 from app.services.session_manager import SessionManager
@@ -29,7 +30,7 @@ class SessionUpdate(BaseModel):
 
     title: Optional[str] = None
     messages: Optional[list[Message]] = None
-    mode: Optional[str] = None
+    mode: Optional[MentorMode] = None
     topic: Optional[str] = None
     summary: Optional[str] = None
     status: Optional[str] = None

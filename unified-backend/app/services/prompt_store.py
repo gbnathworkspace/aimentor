@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.models.chat import DEFAULT_TONE, ToneId
+
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # In-memory cache: filename → raw template string
@@ -39,13 +41,19 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "- Focus on weak areas. Skip strong areas unless asked.\n"
         "- Teach through explanation + targeted questions. Don't monologue.\n"
         "- Use Socratic method: explain → apply → push edge cases.\n"
+        "- Attempt-first: pose a question and let them try before you explain. Give hints "
+        "as a ladder (nudge → hint → worked step → answer), and fade the ladder as the "
+        "Current Level rises — beginners get more rungs, advanced students get almost none.\n"
         "- Calibrate difficulty to the user's current level.\n"
         "- Track understanding as you go — name struggling concepts explicitly."
     ),
     "doubt": (
         "You are in DOUBT mode. The user has a specific doubt or confusion to resolve.\n"
         "- Let them state the doubt fully before responding.\n"
-        "- Give a clear, precise answer. Don't pad with unrequested background.\n"
+        "- Attempt-first: ask what they think or have tried before resolving it. Lead with a "
+        "hint, escalate only if they're still stuck (hint → worked step → answer), and fade "
+        "this ladder as the Current Level rises — advanced students get a direct answer faster.\n"
+        "- Give a clear, precise answer once they've engaged. Don't pad with unrequested background.\n"
         "- Reference relevant past sessions if applicable.\n"
         "- After resolving, ask one targeted question to confirm understanding.\n"
         "- If the doubt reveals a deeper gap, name it and suggest a dedicated session.\n"
@@ -59,6 +67,24 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "- After each answer, give a brief verdict: Strong / Partial / Weak.\n"
         "- After all levels, provide a final summary with gaps and strengths.\n"
         "- Do NOT confirm correct answers mid-evaluation."
+    ),
+}
+
+
+# Tone → voice instruction. The single source of truth for what each tone DOES.
+# Keyed by ToneId; the frontend only knows the ids (data.ts), never this text.
+_TONE_INSTRUCTIONS: dict[str, str] = {
+    "tough": (
+        "Adopt a TOUGH voice. Be blunt and demanding. Do not soften feedback or "
+        "cushion gaps — name them directly. Hold a high bar and expect rigour."
+    ),
+    "balanced": (
+        "Adopt a BALANCED voice. Be supportive but honest. Encourage effort, but "
+        "name weaknesses plainly. Neither harsh nor coddling."
+    ),
+    "encouraging": (
+        "Adopt an ENCOURAGING voice. Lead with warmth and affirmation. Frame gaps "
+        "as progress and next steps. Stay positive while still being truthful."
     ),
 }
 
@@ -89,6 +115,19 @@ def _interpolate(template: str, variables: dict[str, str]) -> str:
     return re.sub(r"\{\{(\w+)\}\}", replacer, template)
 
 
+def _format_documents(documents: list[dict[str, Any]]) -> str:
+    """Format ingested file chunks into a readable block for the prompt."""
+    if not documents:
+        return "(no uploaded documents)"
+
+    lines = []
+    for doc in documents:
+        filename = (doc.get("metadata") or {}).get("filename", "uploaded file")
+        text = doc.get("text", "")
+        lines.append(f"[{filename}] {text}")
+    return "\n\n".join(lines)
+
+
 def _format_episodes(episodes: list[dict[str, Any]]) -> str:
     """Format episodic memory entries into a readable block for the prompt."""
     if not episodes:
@@ -116,7 +155,9 @@ def _format_episodes(episodes: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)
 
 
-def _build_context_variables(context: dict[str, Any], mode: str) -> dict[str, str]:
+def _build_context_variables(
+    context: dict[str, Any], mode: str, tone: ToneId
+) -> dict[str, str]:
     """Extract template variables from the assembled context dict."""
     profile = context.get("profile", {})
     skill = context.get("skill", {})
@@ -128,6 +169,8 @@ def _build_context_variables(context: dict[str, Any], mode: str) -> dict[str, st
         "deadline": profile.get("deadline", "Not specified"),
         "overall_level": profile.get("overall_level", "beginner"),
         "daily_availability": profile.get("daily_availability", "Not specified"),
+        # User's "how to teach me" note (issue #14)
+        "style_notes": profile.get("style_notes") or "(none provided)",
         # L2 Skill fields
         "topic": skill.get("topic", context.get("topic", "General")),
         "required_level": skill.get("required_level", "Not assessed"),
@@ -135,18 +178,25 @@ def _build_context_variables(context: dict[str, Any], mode: str) -> dict[str, st
         "gap": skill.get("gap", "Unknown"),
         # L3 Episodes
         "episodes": _format_episodes(episodes),
+        # Uploaded documents (ingested files)
+        "documents": _format_documents(context.get("documents", [])),
         # Mode
         "mode": mode,
         "mode_instructions": _MODE_INSTRUCTIONS.get(mode, ""),
+        # Tone
+        "tone_instructions": _TONE_INSTRUCTIONS.get(tone, _TONE_INSTRUCTIONS[DEFAULT_TONE]),
     }
 
 
-def get_system_prompt(mode: str, context: dict[str, Any]) -> str:
+def get_system_prompt(
+    mode: str, context: dict[str, Any], tone: ToneId = DEFAULT_TONE
+) -> str:
     """Load and format the system prompt for a given mentor mode.
 
     Args:
         mode: One of "planning", "topic", "doubt", "evaluation".
         context: Dict with keys "profile", "skill", "episodes" from context_assembler.
+        tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.
 
     Returns:
         The fully interpolated system prompt string.
@@ -162,7 +212,7 @@ def get_system_prompt(mode: str, context: dict[str, Any]) -> str:
 
     template_file = _MODE_TEMPLATES[mode]
     template = _load_template(template_file)
-    variables = _build_context_variables(context, mode)
+    variables = _build_context_variables(context, mode, tone)
 
     return _interpolate(template, variables)
 

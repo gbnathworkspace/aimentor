@@ -31,6 +31,8 @@ export interface SessionEndResult {
   title: string;
   summary: string;
   skill_update: any | null;
+  level_from?: string | null;  // level before this session (issue #16)
+  level_to?: string | null;    // graded level after this session
   status: 'ended';
 }
 

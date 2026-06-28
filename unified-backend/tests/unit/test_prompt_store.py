@@ -127,6 +127,79 @@ class TestGetSystemPrompt:
         result = get_system_prompt("topic", context)
         assert "Graphs" in result
 
+    def test_tone_instructions_injected(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        assert "TOUGH" in get_system_prompt("topic", context, "tough")
+        assert "ENCOURAGING" in get_system_prompt("topic", context, "encouraging")
+
+    def test_tone_defaults_to_balanced(self):
+        # No tone arg → balanced voice, and the placeholder is always filled.
+        result = get_system_prompt("topic", context={"profile": {}, "skill": {}, "episodes": []})
+        assert "BALANCED" in result
+        assert "{{tone_instructions}}" not in result
+
+
+class TestStyleNotes:
+    """Issue #14: the user's 'how to teach me' note reaches the prompt."""
+
+    def test_style_notes_injected(self):
+        context = {"profile": {"style_notes": "Use code examples, be concise"}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "How to Teach This User" in result
+        assert "Use code examples, be concise" in result
+
+    def test_no_style_notes_placeholder(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "(none provided)" in result
+        assert "{{style_notes}}" not in result
+
+
+class TestAttemptFirstTeaching:
+    """Issue #12: attempt-first rule + mastery hint ladder in doubt/topic, not evaluation."""
+
+    def test_global_attempt_first_rule_present(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "attempt-first" in result.lower()
+        assert "do not hand over the full answer" in result.lower()
+
+    def test_topic_and_doubt_have_hint_ladder(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        for mode in ("topic", "doubt"):
+            result = get_system_prompt(mode, context)
+            assert "ladder" in result.lower(), mode
+            assert "Current Level" in result, mode  # ladder fades with the shown level
+
+    def test_evaluation_stays_hint_free(self):
+        # Evaluation must NOT gain a hint ladder — it withholds hints by design.
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("evaluation", context)
+        assert "Do not give hints" in result
+
+
+class TestUploadedDocuments:
+    """Issue #4: ingested file chunks must reach the mentor prompt."""
+
+    def test_documents_injected(self):
+        context = {
+            "profile": {},
+            "skill": {},
+            "episodes": [],
+            "documents": [
+                {"text": "5 years Python at Acme", "metadata": {"filename": "resume.pdf"}},
+            ],
+        }
+        result = get_system_prompt("topic", context)
+        assert "resume.pdf" in result
+        assert "5 years Python at Acme" in result
+        assert "{{documents}}" not in result
+
+    def test_no_documents_placeholder(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("topic", context)
+        assert "(no uploaded documents)" in result
+
 
 class TestGetOnboardingPrompt:
     """Tests for get_onboarding_prompt function."""

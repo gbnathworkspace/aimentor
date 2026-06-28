@@ -11,6 +11,27 @@ import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUploa
 import { useSessionPersistence, type Message as PersistenceMessage, type SessionEndResult } from '@/lib/session-persistence/useSessionPersistence';
 import type { CoreProfile, SkillNode } from '@/lib/mentorman-api';
 
+// POST /api/mentor and read the plain-text token stream (issue #17).
+// Calls onChunk with the accumulated text after each chunk; returns the full reply.
+async function streamMentor(body: object, onChunk: (full: string) => void): Promise<string> {
+  const res = await fetch('/api/mentor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`mentor request failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let acc = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    acc += decoder.decode(value, { stream: true });
+    onChunk(acc);
+  }
+  return acc;
+}
+
 function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
   // Mode is fixed once a chat starts: the whole system assumes one mode per chat,
   // so switching mid-chat caused cross-mode context bleed (issue #20). Switch = new chat.
@@ -299,28 +320,27 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
     greetedRef.current = true;
     let cancelled = false;
     setBusy(true);
-    fetch('/api/mentor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
+    const fallback = "Let's get started — what do you want to tackle first?";
+    // NOTE: no session is created here — the greeting alone must not create a
+    // backend session. The session is created lazily on the user's first action.
+    streamMentor(
+      {
         topic: session.title,
         mode,
         tone,
         messages: [{ role: 'user', content: '[session_start] Open the session with a short, sharp first message based on my profile and goal. Do not repeat what I said in onboarding — just get started.' }],
-      }),
-    })
-      .then(r => r.json())
-      .then(({ text: reply, suggestions: chips }) => {
+      },
+      (full) => { if (!cancelled) setMsgs([{ who: 'mentor', text: full, label: voiceLabel, _id: 'greet0' }]); },
+    )
+      .then((full) => {
         if (cancelled) return;
-        setMsgs([{ who: 'mentor', text: (reply || '').trim() || "Let's get started — what do you want to tackle first?", label: `${TONES.find(t => t.id === tone)?.label ?? tone} voice`, _id: 'greet0' }]);
-        setSuggestions(Array.isArray(chips) ? chips : []);
-        // NOTE: no session is created here. The greeting alone must not create a
-        // backend session — that produced phantom empty sessions on every open.
-        // The session is created lazily on the user's first action (send/upload).
+        if (!full.trim()) setMsgs([{ who: 'mentor', text: fallback, label: voiceLabel, _id: 'greet0' }]);
+        setSuggestions([]);
       })
       .catch(() => {
         if (cancelled) return;
-        setMsgs([{ who: 'mentor', text: "Let's get started — what do you want to tackle first?", _id: 'greet0' }]);
+        setMsgs([{ who: 'mentor', text: fallback, _id: 'greet0' }]);
       })
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
@@ -394,6 +414,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
     setMsgs(prev => [...prev, userMsg]);
     setSuggestions([]);
     setBusy(true);
+    const mid = 'm' + Date.now();
+    const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
     try {
       const sid = backendSessionId || await ensureSession(text);
       const allHistory = [...msgs, userMsg]
@@ -402,16 +424,15 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
       // Anthropic requires the first message to be from 'user' — drop any leading assistant turns
       const firstUser = allHistory.findIndex(m => m.role === 'user');
       const history = firstUser > 0 ? allHistory.slice(firstUser) : allHistory;
-      const res = await fetch('/api/mentor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: session.title, mode, tone, messages: history, sessionId: sid }),
-      });
-      const { text: reply, suggestions: chips } = await res.json();
-      setSuggestions(Array.isArray(chips) ? chips : []);
-      const mentorText = (reply || '').trim() || "Let me think about that differently — can you say more about where you're stuck?";
-      const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
-      setMsgs(prev => [...prev, { who: 'mentor', text: mentorText, label: voiceLabel, _id: 'm' + Date.now() }]);
+
+      // Show an empty mentor bubble and stream tokens into it (issue #17)
+      setMsgs(prev => [...prev, { who: 'mentor', text: '', label: voiceLabel, _id: mid }]);
+      const full = await streamMentor(
+        { topic: session.title, mode, tone, messages: history, sessionId: sid },
+        (acc) => setMsgs(prev => prev.map(m => m._id === mid ? { ...m, text: acc } : m)),
+      );
+      const mentorText = full.trim() || "Let me think about that differently — can you say more about where you're stuck?";
+      setMsgs(prev => prev.map(m => m._id === mid ? { ...m, text: mentorText } : m));
 
       // Persist messages via the session persistence hook (Req 8.2)
       const now = new Date().toISOString();
@@ -419,7 +440,10 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
       const mentorPersistMsg: PersistenceMessage = { role: 'mentor', content: mentorText, timestamp: now };
       persistMessages(userPersistMsg, mentorPersistMsg);
     } catch {
-      setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble reaching my notes right now — try that again in a moment.", _id: 'm' + Date.now() }]);
+      const errText = "I'm having trouble reaching my notes right now — try that again in a moment.";
+      setMsgs(prev => prev.some(m => m._id === mid)
+        ? prev.map(m => m._id === mid ? { ...m, text: errText } : m)
+        : [...prev, { who: 'mentor', text: errText, _id: mid }]);
     } finally {
       setBusy(false);
     }

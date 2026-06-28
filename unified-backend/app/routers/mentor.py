@@ -4,11 +4,12 @@ import logging
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.config.database import immediate_contexts_col
 from app.config.settings import get_settings
 from app.core.security import require_auth
-from app.models.chat import MentorRequest, MentorResponse
+from app.models.chat import MentorRequest
 from app.services import context_assembler
 from app.services.prompt_store import get_system_prompt
 from app.services.token_budget import (
@@ -41,18 +42,17 @@ def _window_messages(messages: list, limit: int = _MAX_HISTORY_MESSAGES) -> list
     return [{"role": m.role, "content": m.content} for m in windowed]
 
 
-@router.post("", response_model=MentorResponse)
+@router.post("")
 async def mentor_chat(
     body: MentorRequest,
     user_id: str = Depends(require_auth),
-) -> MentorResponse:
-    """Handle a mentor chat request.
+) -> StreamingResponse:
+    """Handle a mentor chat request, streaming the reply token-by-token (issue #17).
 
     1. Assemble context (L1 profile, L2 skill, L3 episodes) — raises 400 if no profile.
     2. Build system prompt from mode template + context.
     3. If sessionId provided, append ImmediateContext (uploaded file content).
-    4. Call Anthropic API with system prompt + user messages.
-    5. Return the assistant's text response.
+    4. Stream the assistant's reply as plain-text chunks via Anthropic's stream API.
     """
     settings = get_settings()
 
@@ -120,23 +120,27 @@ async def mentor_chat(
                 )
                 system_prompt += file_section
 
-    # Step 4: Call Anthropic API
+    # Step 4: Stream the assistant reply as plain-text chunks.
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
     api_messages = _window_messages(body.messages)
 
-    try:
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=system_prompt,
-            messages=api_messages,
-        )
-    except Exception:
-        logger.exception("Anthropic API call failed for user=%s topic=%s mode=%s", user_id, body.topic, body.mode)
-        raise
+    async def token_stream():
+        try:
+            async with client.messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                system=system_prompt,
+                messages=api_messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+        except Exception:
+            # The stream has already started (200 sent), so we can't switch to a
+            # 500 — emit a visible marker the client appends, and log for triage.
+            logger.exception(
+                "Anthropic stream failed for user=%s topic=%s mode=%s",
+                user_id, body.topic, body.mode,
+            )
+            yield "\n\n[error: the mentor response was interrupted — please try again]"
 
-    # Step 5: Extract and return assistant text
-    response_text = response.content[0].text if response.content else ""
-
-    return MentorResponse(text=response_text)
+    return StreamingResponse(token_stream(), media_type="text/plain; charset=utf-8")

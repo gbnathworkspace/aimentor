@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.config.database import immediate_contexts_col
 from app.config.settings import get_settings
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 from app.models.chat import MentorRequest
 from app.services import context_assembler
 from app.services.prompt_store import get_system_prompt

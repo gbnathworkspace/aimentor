@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config.database import sessions_col
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 from app.models.episodic import EpisodicEntry, SearchQuery
 from app.services.embedder import embed_text
 

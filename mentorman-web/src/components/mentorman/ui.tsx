@@ -1,7 +1,7 @@
 'use client';
 
 import React, { Fragment, useState, useEffect } from 'react';
-import { useClerk } from '@clerk/clerk-react';
+import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
 import { MODES, type Session } from './data';
 import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
@@ -201,7 +201,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
     }
   };
 
-  const { signOut } = useClerk();
+  const { logout } = useAuth();
   const days = daysLeft(profile?.deadline ?? undefined);
   const displayName = userName || profile?.email?.split('@')[0] || 'You';
   const initial = displayName[0]?.toUpperCase() ?? 'Y';
@@ -289,7 +289,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
         <button
           className="icon-btn"
           title="Sign out"
-          onClick={() => signOut({ redirectUrl: '/sign-in' })}
+          onClick={() => logout()}
           style={{ flexShrink: 0 }}
         >
           <Icon name="logout" />

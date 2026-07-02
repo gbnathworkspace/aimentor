@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useClerk } from '@clerk/clerk-react';
+import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
 import { Brand, Bubble, VerdictMsg, Typing, GapBar, fmt } from './ui';
 import { type MessageItem } from './data';
@@ -23,7 +23,7 @@ export interface OnboardingProps {
 }
 
 export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: OnboardingProps) {
-  const { signOut } = useClerk();
+  const { logout } = useAuth();
   const [apiMsgs,    setApiMsgs]    = useState<ApiMsg[]>([]);
   const [thread,     setThread]     = useState<MessageItem[]>([]);
   const [busy,       setBusy]       = useState(false);
@@ -243,7 +243,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
         ) : (
           <>
             <SkipButton onSkip={() => setShowSkipDialog(true)} disabled={busy && thread.length === 0} />
-            <button className="icon-btn" title="Sign out" onClick={() => signOut({ redirectUrl: '/sign-in' })}>
+            <button className="icon-btn" title="Sign out" onClick={() => logout()}>
               <Icon name="logout" />
             </button>
           </>

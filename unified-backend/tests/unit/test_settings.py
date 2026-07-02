@@ -48,7 +48,7 @@ class TestSettingsValidation:
                 Settings(_env_file=None)
 
     def test_missing_mentorman_api_key_is_allowed(self):
-        """MENTORMAN_API_KEY is now optional (legacy) — Clerk JWT is the primary auth.
+        """MENTORMAN_API_KEY is now optional (legacy) — self-hosted JWT is the primary auth.
 
         Its absence must NOT fail settings construction.
         """

@@ -60,8 +60,8 @@ The Next.js App Router route that handles the chat request.
 
 ```typescript
 export async function POST(req: Request) {
-  // 1. verify Clerk JWT — reject if invalid
-  const { userId } = await auth()
+  // 1. verify JWT — reject if invalid
+  const { userId } = await requireAuth()
 
   // 2. assemble context
   const input = await req.json()  // { sessionId, message, topic }
@@ -222,7 +222,7 @@ No separate route, no separate hook — just different prompt + different tool n
 
 | Failure | Behaviour |
 |---|---|
-| Clerk JWT invalid | 401 before stream opens — client redirects to login |
+| JWT invalid | 401 before stream opens — client redirects to login |
 | Context assembly fails | 500 before stream opens — client shows error state |
 | Claude API error mid-stream | Emit `error` event with `retryable: true`, close stream |
 | Claude API timeout | Emit `error` event with `retryable: true` after 30s |

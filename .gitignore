@@ -1,6 +1,5 @@
 .env
 .env.local
-.clerk/
 node_modules/
 .next/
 .vscode/

@@ -18,6 +18,9 @@ async def connect_db() -> None:
     # Session persistence compound indexes (stale cleanup + timeout sweep)
     from app.core.indexes import ensure_indexes as ensure_session_indexes
     await ensure_session_indexes()
+    # Auth collection indexes (users, refresh_tokens, otp_codes, oauth_states, rate_limits)
+    from app.auth.indexes import ensure_auth_indexes
+    await ensure_auth_indexes()
 
 
 async def disconnect_db() -> None:

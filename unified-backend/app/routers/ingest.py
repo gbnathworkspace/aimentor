@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from pydantic import BaseModel
 
 from app.config.database import ingestion_jobs_col
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 from app.models.ingestion import IngestionJobResponse
 from app.services.extraction import process_extraction
 from app.services.file_upload import store_file, validate_files

@@ -44,7 +44,7 @@ Tasks marked `[ ]*` are optional automated tests. Per project convention: backen
   - [x] 4.2 Parity-verify profile, skills, sessions, onboarding shapes
     - Catalogued: FastAPI returns camelCase + accepts snake_case input; frozen UI is snake_case. Resolution = API_Client normalizes responses camel→snake (built in Task 7). Backend contract unchanged.
     - _Requirements: 8.1, 8.2, 8.4, 8.5_
-  - [~]* 4.3 Parity harness tests for the Parity_Set
+  - [ ]* 4.3 Parity harness tests for the Parity_Set
     - DEFERRED (logged, not silent): a cross-implementation harness needs both stacks against one DB. Parity is instead enforced by the documented shape mapping + the API_Client casing adapter, and proven by end-to-end manual verification at Task 8.
     - **Validates: Requirements 8.1, 8.2, 8.5**
 

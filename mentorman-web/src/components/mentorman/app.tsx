@@ -27,7 +27,7 @@ export function MentorManApp() {
   const [chatKey, setChatKey] = useState(0);
   const [lastSessionEnd, setLastSessionEnd] = useState<{ title: string; summary: string; levelFrom?: string | null; levelTo?: string | null } | null>(null);
 
-  // Fetch user name from Clerk via /api/me
+  // Fetch user name via /api/me
   useEffect(() => {
     fetch('/api/me')
       .then(r => r.ok ? r.json() : null)

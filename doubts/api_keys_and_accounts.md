@@ -22,13 +22,12 @@ Everything needed before implementation starts.
 - Create a database user
 - Get the connection string
 
-## 4. Clerk
-- Create account at clerk.com
-- Create a new application (name it mentorman)
-- Enable Email + Google OAuth sign-in
-- Get:
-  - Publishable key (NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
-  - Secret key (CLERK_SECRET_KEY)
+## 4. Auth (Self-Hosted)
+- JWT_SECRET: Generate with `openssl rand -hex 32`
+- Google OAuth: Create at console.cloud.google.com → APIs & Services → Credentials
+  - Get: Client ID (GOOGLE_CLIENT_ID) and Client Secret (GOOGLE_CLIENT_SECRET)
+- GitHub OAuth: Create at github.com/settings/developers → OAuth Apps
+  - Get: Client ID (GITHUB_CLIENT_ID) and Client Secret (GITHUB_CLIENT_SECRET)
 
 ## 5. Gmail SMTP
 - Use an existing Google account
@@ -77,9 +76,12 @@ VOYAGE_API_KEY=
 # MongoDB
 MONGODB_URI=
 
-# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
+# Auth (Self-Hosted)
+JWT_SECRET=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
 
 # Gmail SMTP
 GMAIL_USER=

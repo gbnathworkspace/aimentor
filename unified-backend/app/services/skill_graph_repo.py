@@ -27,7 +27,7 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
     This keeps the session-end pipeline non-blocking.
 
     Args:
-        user_id: The authenticated user's Clerk ID.
+        user_id: The authenticated user's ID.
         skill_update: Validated skill update extracted from the session.
     """
     try:

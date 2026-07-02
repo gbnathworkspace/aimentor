@@ -91,7 +91,7 @@ The schema is LLM-generated per user at onboarding. Different goals produce diff
 |---|---|
 | **Frontend** | React + Vite (SPA) |
 | **Backend** | FastAPI (Python) |
-| **Auth** | Clerk (JWT verified networklessly via JWKS) |
+| **Auth** | Self-hosted (JWT + refresh tokens, OAuth, OTP) |
 | **LLM — main** | Claude Sonnet 4.6 — reasoning, responses, evals, summaries |
 | **LLM — lightweight** | Claude Haiku 4.5 — intent checks, drift detection, titles |
 | **Embeddings** | Voyage AI voyage-4-lite — 200M tokens/month free |

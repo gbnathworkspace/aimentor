@@ -24,7 +24,6 @@ def _env():
         "MENTORMAN_API_KEY": "the-correct-key",
         "ANTHROPIC_API_KEY": "sk-ant-test",
         "VOYAGE_API_KEY": "voy-test",
-        "CLERK_ISSUER": "https://test-app.clerk.accounts.dev",
         "LEGACY_AUTH_ENABLED": "true",
     }
     with patch.dict(os.environ, env, clear=True):

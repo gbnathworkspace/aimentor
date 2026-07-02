@@ -20,7 +20,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pypdf import PdfReader
 
 from app.config.database import immediate_contexts_col, ingestion_jobs_col
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 
 logger = logging.getLogger(__name__)
 

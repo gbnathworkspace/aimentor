@@ -7,7 +7,7 @@ Layer              Tech                      Notes
 ──────────────────────────────────────────────────────────────────
 Frontend           Next.js (App Router)      Chat UI, streaming
 UI Library         shadcn/ui                 Composable, own the code
-Auth               Clerk                     Drop-in Next.js auth
+Auth               Self-hosted (JWT + OAuth)  FastAPI + React
 Backend            FastAPI (Python)          Ingestion + LLM orchestration
 LLM (main)         Claude Sonnet 4.6         Reasoning + responses
 LLM (lightweight)  Claude Haiku 4.5          Intent check, titles, drift
@@ -92,9 +92,10 @@ Python is the right language for the ingestion pipeline:
 Next.js handles the UI and thin session management layer.
 FastAPI handles all heavy lifting.
 
-### Clerk for auth
-Drop-in Next.js integration. Handles email/password + Google OAuth.
-User management UI out of the box. Free tier covers v1.
+### Self-hosted auth
+Custom JWT + refresh token system built on FastAPI.
+Handles email/password, OTP, Google OAuth, and GitHub OAuth.
+Replaced Clerk to eliminate proxy issues and reduce external dependencies.
 
 ---
 
@@ -172,7 +173,7 @@ MongoDB Atlas M0     512MB storage, shared cluster — permanently free
 Voyage AI            200M tokens/month — permanently free
 AWS Lambda           1M requests/month — permanently free
 AWS SSM              Standard parameters — permanently free
-Clerk                10,000 MAU — free
+Clerk                10,000 MAU — removed, replaced with self-hosted auth
 Gmail SMTP           500 emails/day — free
 Railway              $5/month credit — chat API
 EC2 t2.micro         ~$8-10/month — already paying, no extra cost

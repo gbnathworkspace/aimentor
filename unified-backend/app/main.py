@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config.database import connect_db, disconnect_db
 from app.config.settings import get_settings
+from app.auth.admin_router import router as admin_router
+from app.auth.router import router as auth_router
 from app.routers import (
     ingest,
     memory,
@@ -98,6 +100,8 @@ app.add_middleware(
 )
 
 # Register routers
+app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(profile.router)
 app.include_router(skills.router)
 app.include_router(sessions.router)

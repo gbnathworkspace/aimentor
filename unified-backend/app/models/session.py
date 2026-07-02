@@ -115,7 +115,7 @@ class SessionDocument(BaseModel):
     )
 
     session_id: str = Field(..., description="UUID v4 session identifier")
-    user_id: str = Field(..., description="Clerk user ID")
+    user_id: str = Field(..., description="Authenticated user ID")
     title: str = Field(default="Untitled session")
     mode: str = Field(..., description="Session mode: topic | planning | doubt | evaluation")
     topic: Optional[str] = None

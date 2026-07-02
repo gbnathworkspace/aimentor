@@ -2,35 +2,30 @@
 // Installs a global fetch interceptor so the (frozen) UI keeps calling
 // `fetch('/api/...')` unchanged. For those calls the shim:
 //   1. Rewrites the URL to the FastAPI base (VITE_API_BASE; '' in same-origin prod).
-//   2. Attaches the Clerk session JWT as `Authorization: Bearer`.
+//   2. Attaches the session JWT as `Authorization: Bearer`.
 //   3. Normalizes response bodies to carry BOTH snake_case and camelCase keys, so
 //      components reading either casing (the DB/UI mix snake for profile/skills and
 //      camel for sessions) all resolve.
-//   4. Synthesizes `/api/me` from Clerk client-side (no backend endpoint needed).
+//   4. Synthesizes `/api/me` from the configured user info getter.
 //
 // Uses fetch (not EventSource) so SSE streaming can be layered on later.
 
 const BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
-declare global {
-  interface Window {
-    Clerk?: {
-      session?: { getToken: () => Promise<string | null> };
-      user?: {
-        firstName?: string | null;
-        lastName?: string | null;
-        primaryEmailAddress?: { emailAddress?: string } | null;
-      } | null;
-    };
-  }
+// ─── Configurable token source ──────────────────────────────────────────────
+// AuthProvider calls setTokenSource() on mount to wire up token retrieval.
+let _tokenGetter: () => string | null = () => null;
+
+/**
+ * Set the function used to retrieve the current access token.
+ * Called by AuthProvider to bridge the auth system with the legacy fetch shim.
+ */
+export function setTokenSource(getter: () => string | null): void {
+  _tokenGetter = getter;
 }
 
-async function getToken(): Promise<string | null> {
-  try {
-    return (await window.Clerk?.session?.getToken()) ?? null;
-  } catch {
-    return null;
-  }
+function getToken(): string | null {
+  return _tokenGetter();
 }
 
 const toSnake = (k: string): string => k.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
@@ -77,17 +72,27 @@ function adaptResponse(path: string, data: unknown): unknown {
   return data;
 }
 
-function meResponse(): Response {
-  const u = window.Clerk?.user;
-  const email = u?.primaryEmailAddress?.emailAddress ?? '';
-  const name = u?.firstName
-    ? u.lastName
-      ? `${u.firstName} ${u.lastName}`
-      : u.firstName
-    : email
-      ? email.split('@')[0]
-      : 'You';
-  return new Response(JSON.stringify({ name, email }), {
+// ─── /api/me handler ────────────────────────────────────────────────────────
+// With the self-hosted auth system, /api/me is fetched from the backend.
+// If the backend doesn't support it yet, we return a minimal fallback.
+let _realFetch: typeof window.fetch | null = null;
+
+async function meResponse(): Promise<Response> {
+  // Try fetching from the backend
+  if (_realFetch) {
+    const token = getToken();
+    const headers: HeadersInit = {};
+    if (token) (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+    try {
+      const res = await _realFetch(`${BASE}/api/me`, { headers });
+      if (res.ok) return res;
+    } catch {
+      // Fall through to fallback
+    }
+  }
+
+  // Fallback: return a generic user object
+  return new Response(JSON.stringify({ name: 'User', email: '' }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -95,6 +100,7 @@ function meResponse(): Response {
 
 export function installApiFetch(): void {
   const realFetch = window.fetch.bind(window);
+  _realFetch = realFetch;
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
@@ -108,12 +114,12 @@ export function installApiFetch(): void {
       return realFetch(input as RequestInfo | URL, init);
     }
 
-    // /api/me → synthesized from Clerk client-side.
+    // /api/me → handled specially
     if (url === '/api/me' || url.startsWith('/api/me?')) {
       return meResponse();
     }
 
-    const token = await getToken();
+    const token = getToken();
     const headers = new Headers(
       init?.headers ??
         (typeof input === 'object' && 'headers' in input ? (input as Request).headers : undefined),

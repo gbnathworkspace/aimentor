@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Feature Clarification Check",
+  "description": "On every prompt, checks if the request involves a new feature. If so, reminds the agent to ask 3-5 clarifying questions before proceeding with implementation or spec creation.",
+  "version": "1",
+  "when": {
+    "type": "promptSubmit"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Before proceeding, check if this user message is requesting a new feature or significant new functionality. If it is, you MUST ask 3-5 clarifying questions (about purpose, scope, user flow, edge cases, dependencies, data, existing patterns, or constraints) BEFORE writing any code or creating any spec documents. Only skip this if the user explicitly says \"just do it\" or the request is clearly a bug fix, question, or minor tweak."
+  }
+}

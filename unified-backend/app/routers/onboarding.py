@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.database import profiles_col, sessions_col
 from app.config.settings import get_settings
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 from app.models.chat import (
     OnboardingCompleteRequest,
     OnboardingCompleteResponse,

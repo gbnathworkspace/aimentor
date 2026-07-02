@@ -2,7 +2,7 @@
 
 from fastapi import Depends
 
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 
 
 async def get_current_user(user_id: str = Depends(require_auth)) -> str:

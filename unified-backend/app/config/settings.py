@@ -13,9 +13,21 @@ class Settings(BaseSettings):
     MONGODB_URI: str
     DATABASE_NAME: str = "mentorman"
 
-    # Auth — Clerk (primary: networkless JWKS verification of session JWTs)
-    CLERK_ISSUER: Optional[str] = None  # e.g. https://your-app.clerk.accounts.dev
-    CLERK_JWKS_URL: Optional[str] = None  # defaults to {issuer}/.well-known/jwks.json
+    # Auth — Self-hosted JWT
+    JWT_SECRET: str = "change-me-in-production"
+
+    # Auth — OAuth providers
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GITHUB_CLIENT_ID: Optional[str] = None
+    GITHUB_CLIENT_SECRET: Optional[str] = None
+    OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/oauth/callback"
+
+    # Auth — Email delivery
+    EMAIL_BACKEND: Literal["console", "api"] = "console"
+    EMAIL_API_URL: Optional[str] = None
+    EMAIL_API_KEY: Optional[str] = None
+    EMAIL_FROM: str = "noreply@mentorman.app"
 
     # Auth — legacy service-to-service (kept behind a flag during transition)
     MENTORMAN_API_KEY: Optional[str] = None
@@ -42,15 +54,6 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
-
-    @property
-    def clerk_jwks_url(self) -> Optional[str]:
-        """Resolve the JWKS URL, deriving it from the issuer if not set explicitly."""
-        if self.CLERK_JWKS_URL:
-            return self.CLERK_JWKS_URL
-        if self.CLERK_ISSUER:
-            return f"{self.CLERK_ISSUER.rstrip('/')}/.well-known/jwks.json"
-        return None
 
     @property
     def cors_origins_list(self) -> list[str]:

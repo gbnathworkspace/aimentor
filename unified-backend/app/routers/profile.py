@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
 
 from app.config.database import profiles_col
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 from app.models.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 
 logger = logging.getLogger(__name__)

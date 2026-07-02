@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.database import skill_graph_col
-from app.core.security import require_auth
+from app.auth.dependencies import require_auth
 from app.models.skill import SkillNode, SkillUpdate
 
 logger = logging.getLogger(__name__)

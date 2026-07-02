@@ -33,7 +33,7 @@ Changes to the UI should never require touching the data layer. Changes to the L
 
 **Rules:**
 - UI components receive typed props only — no raw DB shapes ever reach a component
-- Clerk JWT is validated at every API route before any service call
+- JWT is validated at every API route before any service call
 - Design tokens (colors, spacing, typography) live in `globals.css` — never hardcoded in components
 
 ---

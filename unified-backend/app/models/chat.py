@@ -42,13 +42,20 @@ class OnboardingRequest(BaseModel):
     messages: list[Message]
 
 
+class OnboardingSuggestion(BaseModel):
+    """A single tappable reply option offered during onboarding."""
+
+    title: str
+    description: str
+
+
 class OnboardingResponse(BaseModel):
     """Response body for POST /api/onboarding/chat."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     text: str
-    suggestions: list[str] = []
+    suggestions: list[OnboardingSuggestion] = []
     complete: bool = False
     # Key is `profile` to match the frontend/Next contract (read as `profile`).
     profile: Optional[dict] = None

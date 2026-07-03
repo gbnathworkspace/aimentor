@@ -7,14 +7,14 @@ import { ArchivedTopics } from './ArchivedTopics';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
 import { Onboarding, Settings } from './screens';
-import { ACCENTS, DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
+import { DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 type View = 'chat' | 'dashboard' | 'settings' | 'onboarding' | 'deferred-onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
-  const t = { accent: '#34d399', density: 'cozy' };
+  const t = { density: 'cozy' };
   const [view, setView] = useState<View>('chat');
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
   const [mode, setMode] = useState<ModeId>('topic');
@@ -57,13 +57,6 @@ export function MentorManApp() {
       .then(data => { if (Array.isArray(data)) setTopics(data); })
       .catch(() => {});
   }, []);
-
-  // apply accent + ink to :root
-  useEffect(() => {
-    const ink = (ACCENTS[t.accent] || ACCENTS['#34d399']).ink;
-    document.documentElement.style.setProperty('--accent', t.accent);
-    document.documentElement.style.setProperty('--accent-ink-2', ink);
-  }, [t.accent]);
 
   // clear one-shot entrance animations once finished
   useEffect(() => {

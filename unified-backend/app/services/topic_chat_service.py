@@ -18,6 +18,7 @@ from app.config.settings import get_settings
 from app.services import context_assembler
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
+from app.services.response_parsing import extract_suggestions
 from app.services.token_counter import TokenCounter
 from app.services.topic_service import TopicService
 
@@ -101,12 +102,17 @@ class TopicChatService:
                 "error": "The assistant response could not be generated. Please try again."
             }
 
+        # Step 5b: Strip any quick-reply suggestions block out of the visible text
+        # before persisting — the stored history (and future LLM calls) should
+        # never see the raw JSON fence.
+        clean_content, suggestions = extract_suggestions(assistant_content)
+
         # Step 6: Append assistant message (Req 4.5)
         assistant_msg = {
             "type": "message",
             "id": str(uuid.uuid4()),
             "role": "assistant",
-            "content": assistant_content,
+            "content": clean_content,
             "timestamp": datetime.utcnow(),
         }
         await self._topic_service.append_message(topic_id, user_id, assistant_msg)
@@ -114,7 +120,7 @@ class TopicChatService:
         # Step 7: Post-turn hook — async compaction check (Req 6.4, 14.1)
         asyncio.create_task(self._post_turn_hook(topic_id, user_id))
 
-        return {"response": assistant_content}
+        return {"response": clean_content, "suggestions": suggestions}
 
     async def _call_llm(self, system_prompt: str, messages: list[dict]) -> str:
         """Call Anthropic Claude with the assembled context.

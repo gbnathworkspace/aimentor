@@ -9,6 +9,7 @@ import type { CoreProfile } from '@/lib/mentorman-api';
 import { SkipButton } from './SkipButton';
 import { SkipConfirmationDialog } from './SkipConfirmationDialog';
 import { CompleteSetupSection } from './CompleteSetupSection';
+import { MentorQuestionCard, QuickReplyOptions, type QuickReplyOption } from './QuestionCard';
 
 // ---------- Onboarding (conversational AI agent) ----------------
 
@@ -31,7 +32,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
   const [profile,    setProfile]    = useState<CompletedProfile | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [input,       setInput]       = useState('');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<QuickReplyOption[]>([]);
 
   // Skip state
   const [showSkipDialog, setShowSkipDialog] = useState(false);
@@ -262,9 +263,9 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
 
       <div className="onb-stage" ref={bodyRef}>
         <div className="onb-thread">
-          {thread.map((m, i) => (
-            i === 0 && m.who === 'mentor'
-              ? <div key={m._id} className="onb-q fade-up">{fmt(m.text)}</div>
+          {thread.map(m => (
+            m.who === 'mentor'
+              ? <MentorQuestionCard key={m._id} text={m.text} />
               : <Bubble key={m._id} who={m.who as 'mentor' | 'user'} item={m} />
           ))}
           {busy && <Typing />}
@@ -303,11 +304,11 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
         <div className="onb-composer">
           <div className="onb-composer-inner">
             {!busy && suggestions.length > 0 && (
-              <div className="onb-suggestions">
-                {suggestions.map(r => (
-                  <button key={r} className="onb-suggestion" onClick={() => sendText(r)}>{r}</button>
-                ))}
-              </div>
+              <QuickReplyOptions
+                options={suggestions}
+                onSelect={sendText}
+                onTypeOwn={() => textaRef.current?.focus()}
+              />
             )}
             <div className="composer-box">
               <textarea

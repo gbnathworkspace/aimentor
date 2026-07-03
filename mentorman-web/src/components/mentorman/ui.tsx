@@ -3,13 +3,13 @@
 import React, { Fragment, useState, useEffect } from 'react';
 import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
+import { SpeakButton } from './SpeakButton';
 import { MODES, type Session } from './data';
 import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
 
 // ---- tiny inline markdown: **bold**, `code`, \n ------------
-export function fmt(text: string | null | undefined): React.ReactNode {
-  if (text == null) return null;
-  const lines = String(text).split('\n');
+function fmtInline(text: string): React.ReactNode {
+  const lines = text.split('\n');
   return lines.map((line, li) => {
     const parts: React.ReactNode[] = [];
     let rest = line;
@@ -27,6 +27,48 @@ export function fmt(text: string | null | undefined): React.ReactNode {
     if (rest) parts.push(rest);
     return <Fragment key={li}>{li > 0 && <br />}{parts}</Fragment>;
   });
+}
+
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className="codeblock">
+      <div className="codeblock-head">
+        <span className="codeblock-lang">{lang || 'text'}</span>
+        <button className="codeblock-copy" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+      </div>
+      <pre><code>{code}</code></pre>
+    </div>
+  );
+}
+
+// Splits on fenced ```lang\n...\n``` blocks and renders each as a CodeBlock,
+// running everything else through the inline **bold**/`code` handling above.
+const FENCE_RE = /```(\w*)\n([\s\S]*?)```/g;
+
+export function fmt(text: string | null | undefined): React.ReactNode {
+  if (text == null) return null;
+  const str = String(text);
+  if (!str.includes('```')) return fmtInline(str);
+
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  FENCE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = FENCE_RE.exec(str))) {
+    if (m.index > lastIndex) nodes.push(<Fragment key={key++}>{fmtInline(str.slice(lastIndex, m.index))}</Fragment>);
+    nodes.push(<CodeBlock key={key++} lang={m[1]} code={m[2].replace(/\n$/, '')} />);
+    lastIndex = FENCE_RE.lastIndex;
+  }
+  if (lastIndex < str.length) nodes.push(<Fragment key={key++}>{fmtInline(str.slice(lastIndex))}</Fragment>);
+  return nodes;
 }
 
 // ---- Brand -------------------------------------------------
@@ -71,13 +113,13 @@ export function Bubble({ who, item, delay }: {
       )}
       <div className="bubble">
         {fmt(item.text)}
-        {item.code && <div className="codeblock" dangerouslySetInnerHTML={{ __html: item.code }} />}
         {item.nudge && (
           <div className="nudge">
             <div className="label">Nudge</div>
             {fmt(item.nudge)}
           </div>
         )}
+        {who === 'mentor' && item.text && <SpeakButton text={item.text} className="bubble-speak" />}
       </div>
     </Msg>
   );

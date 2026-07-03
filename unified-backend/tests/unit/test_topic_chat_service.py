@@ -177,7 +177,7 @@ class TestHandleMessageHappyPath:
                 "topic-abc", "user-123", "Hi"
             )
 
-        assert result == {"response": "LLM says hello"}
+        assert result == {"response": "LLM says hello", "suggestions": []}
 
 
 class TestHandleMessageLLMTimeout:
@@ -379,7 +379,7 @@ class TestPostTurnHook:
         await asyncio.sleep(0.05)
 
         # Main response is still successful
-        assert result == {"response": "All good"}
+        assert result == {"response": "All good", "suggestions": []}
 
     @pytest.mark.asyncio
     async def test_post_turn_hook_direct_call_logs_error(

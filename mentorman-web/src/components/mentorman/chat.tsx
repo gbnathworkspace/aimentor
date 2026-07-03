@@ -7,6 +7,7 @@ import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } 
 import { OnboardingBanner } from './OnboardingBanner';
 import { TopicCreation, TopicRenameInput } from './TopicCreation';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
+import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
@@ -40,14 +41,12 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled, suggestions, onSuggestionClick }: {
+function Composer({ mode, tone, onSend, busy, disabled }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
-  suggestions?: string[];
-  onSuggestionClick?: (text: string) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
@@ -67,23 +66,16 @@ function Composer({ mode, tone, onSend, busy, disabled, suggestions, onSuggestio
   };
 
   const isEval = mode === 'evaluation';
-  const showChips = !busy && !isEval && suggestions && suggestions.length > 0 && !val;
   return (
     <div className="composer">
       {isEval && (
         <div className="eval-flag"><span className="dot" /> Evaluation mode — your answer is graded</div>
       )}
-      {showChips && (
-        <div className="suggestions">
-          {suggestions.map(s => (
-            <button key={s} className="suggestion-chip" onClick={() => onSuggestionClick?.(s)}>{s}</button>
-          ))}
-        </div>
-      )}
       <div className="composer-inner">
         <div className={`composer-box ${focus ? 'focus' : ''}`}>
           <textarea
             ref={ref} value={val} rows={1}
+            id="composer-textarea"
             disabled={disabled}
             placeholder={isEval ? 'Type your answer…' : 'Reply to your mentor…'}
             onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
@@ -161,7 +153,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
 }) {
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<QuickReplyOption[]>([]);
   const [topicTitle, setTopicTitle] = useState<string>('New Topic');
   const bodyRef = useRef<HTMLDivElement>(null);
   const greetedRef = useRef(false);
@@ -246,6 +238,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         setMsgs(prev => [...prev, { who: 'mentor', text: data.error, _id: 'err' + Date.now() }]);
       } else {
         setMsgs(prev => [...prev, { who: 'mentor', text: data.response, _id: 'm' + Date.now() }]);
+        setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
       }
     } catch {
       setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() }]);
@@ -311,19 +304,29 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
               ? <div key={m._id || i} className="system-msg">
                   <span className="system-msg-text">{m.text}</span>
                 </div>
+              : m.who === 'mentor' && looksLikeQuestion(m.text)
+              ? <MentorQuestionCard key={m._id || i} text={m.text} />
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
           {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && <Typing />}
         </div>
       </div>
 
+      {!busy && suggestions.length > 0 && (
+        <div className="chat-options">
+          <QuickReplyOptions
+            options={suggestions}
+            onSelect={send}
+            onTypeOwn={() => document.getElementById('composer-textarea')?.focus()}
+          />
+        </div>
+      )}
+
       <Composer
         mode={mode}
         tone={tone}
         onSend={send}
         busy={busy}
-        suggestions={suggestions}
-        onSuggestionClick={send}
       />
     </div>
   );

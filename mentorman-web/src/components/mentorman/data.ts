@@ -8,6 +8,7 @@ export type MessageItem = {
   code?: string;
   tone?: 'strong' | 'partial' | 'weak';
   _id?: string;
+  suggestions?: { title: string; description: string }[];
   summaryBlock?: {
     type: 'summary';
     id: string;
@@ -59,14 +60,6 @@ export const TONES = [
 ] as const;
 export type ToneId = typeof TONES[number]['id'];
 export const DEFAULT_TONE: ToneId = 'balanced';
-
-export const ACCENTS: Record<string, { ink: string }> = {
-  '#34d399': { ink: '#04140d' },
-  '#5b9bff': { ink: '#04122e' },
-  '#a78bfa': { ink: '#180a36' },
-  '#fbbf24': { ink: '#2e1f02' },
-  '#fb7185': { ink: '#2e0712' },
-};
 
 export const catToMode: Record<string, ModeId> = {
   Topic: 'topic', Doubt: 'doubt', Planning: 'planning', Eval: 'evaluation'

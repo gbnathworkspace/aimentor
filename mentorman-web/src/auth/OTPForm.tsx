@@ -95,8 +95,8 @@ export function OTPForm({ onSuccess }: OTPFormProps) {
   const buttonStyle: React.CSSProperties = {
     width: '100%',
     padding: '10px 16px',
-    background: '#34d399',
-    color: '#000',
+    background: 'var(--accent)',
+    color: 'var(--accent-ink-2)',
     border: 'none',
     borderRadius: 6,
     fontSize: 14,
@@ -134,7 +134,7 @@ export function OTPForm({ onSuccess }: OTPFormProps) {
   return (
     <form onSubmit={handleVerifyOTP} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {message && (
-        <p style={{ color: '#34d399', fontSize: 13, margin: 0 }}>{message}</p>
+        <p style={{ color: 'var(--accent)', fontSize: 13, margin: 0 }}>{message}</p>
       )}
 
       <label style={{ color: '#9ca3af', fontSize: 13 }}>

@@ -220,8 +220,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     borderRadius: 8,
     border: 'none',
-    background: '#34d399',
-    color: '#08080a',
+    background: 'var(--accent)',
+    color: 'var(--accent-ink-2)',
     cursor: 'pointer',
   },
   buttonDisabled: {
@@ -235,7 +235,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#888',
   },
   link: {
-    color: '#34d399',
+    color: 'var(--accent)',
     textDecoration: 'none',
   },
 };

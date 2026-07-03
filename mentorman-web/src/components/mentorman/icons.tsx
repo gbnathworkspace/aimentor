@@ -5,7 +5,8 @@ import React from 'react';
 type IconName =
   | 'plus' | 'chart' | 'gear' | 'send' | 'arrowUp' | 'check'
   | 'upload' | 'code' | 'spark' | 'warn' | 'x' | 'arrowR'
-  | 'back' | 'target' | 'clock' | 'bolt' | 'doc' | 'dots' | 'logout';
+  | 'back' | 'target' | 'clock' | 'bolt' | 'doc' | 'dots' | 'logout'
+  | 'volume' | 'stop';
 
 const I: Record<IconName, React.ReactNode> = {
   plus:    <path d="M8 3v10M3 8h10" />,
@@ -27,6 +28,8 @@ const I: Record<IconName, React.ReactNode> = {
   doc:     <g><path d="M4 2.5h5l3 3v8H4z" /><path d="M9 2.5v3h3" /></g>,
   dots:    <g><circle cx="3.5" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="12.5" cy="8" r="1" /></g>,
   logout:  <g><path d="M6 3H3.5a1 1 0 00-1 1v8a1 1 0 001 1H6M10 11l3-3-3-3M13 8H6" /></g>,
+  volume:  <g><path d="M2 6h2.5L8 3.2v9.6L4.5 10H2z" /><path d="M10.8 5.5a3.5 3.5 0 010 5" /><path d="M12.6 3.7a6 6 0 010 8.6" /></g>,
+  stop:    <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />,
 };
 
 export function Icon({ name, size = 16, style }: { name: IconName; size?: number; style?: React.CSSProperties }) {

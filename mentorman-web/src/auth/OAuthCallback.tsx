@@ -36,7 +36,7 @@ export function OAuthCallback() {
           width: 32,
           height: 32,
           borderRadius: '50%',
-          border: '3px solid #34d399',
+          border: '3px solid var(--accent)',
           borderTopColor: 'transparent',
           animation: 'spin 0.7s linear infinite',
         }}

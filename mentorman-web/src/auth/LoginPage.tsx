@@ -353,8 +353,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '10px 16px',
     borderRadius: 8,
     border: 'none',
-    background: '#34d399',
-    color: '#08080a',
+    background: 'var(--accent)',
+    color: 'var(--accent-ink-2)',
     fontWeight: 600,
     fontSize: 14,
     cursor: 'pointer',
@@ -402,7 +402,7 @@ const styles: Record<string, React.CSSProperties> = {
   backBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#34d399',
+    color: 'var(--accent)',
     fontSize: 13,
     cursor: 'pointer',
     marginTop: 8,
@@ -417,7 +417,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 0,
   },
   link: {
-    color: '#34d399',
+    color: 'var(--accent)',
     textDecoration: 'none',
   },
 };

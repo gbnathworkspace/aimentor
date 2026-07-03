@@ -24,6 +24,7 @@ from app.models.chat import (
 )
 from app.services.onboarding_bootstrap import bootstrap_skills
 from app.services.prompt_store import get_onboarding_prompt
+from app.services.response_parsing import extract_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +33,13 @@ router = APIRouter(prefix="/api/onboarding", tags=["Onboarding"])
 
 def parse_onboarding_response(text: str) -> dict:
     """Parse LLM response for suggestion chips and onboarding_complete blocks."""
-    suggestions: list[str] = []
+    clean_text, suggestions = extract_suggestions(text)
     complete = False
     profile_data = None
 
-    # Extract suggestions block
-    suggestions_match = re.search(
-        r"```json suggestions\s*\n(.*?)\n```", text, re.DOTALL
-    )
-    if suggestions_match:
-        try:
-            suggestions = json.loads(suggestions_match.group(1))
-        except json.JSONDecodeError:
-            pass
-
     # Extract onboarding_complete block
     complete_match = re.search(
-        r"```json onboarding_complete\s*\n(.*?)\n```", text, re.DOTALL
+        r"```json onboarding_complete\s*\n(.*?)\n```", clean_text, re.DOTALL
     )
     if complete_match:
         try:
@@ -57,11 +48,11 @@ def parse_onboarding_response(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # Clean the text (remove the fenced blocks)
+    # Clean the onboarding_complete block out too
     clean_text = re.sub(
-        r"```json (?:suggestions|onboarding_complete)\s*\n.*?\n```",
+        r"```json onboarding_complete\s*\n.*?\n```",
         "",
-        text,
+        clean_text,
         flags=re.DOTALL,
     ).strip()
 

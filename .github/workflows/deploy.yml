@@ -94,9 +94,18 @@ jobs:
               "$IMAGE_TAG"
 
             echo "==> Health check"
-            sleep 6
-            docker exec mentorman \
-              python -c "import httpx; r = httpx.get('http://127.0.0.1:8000/health'); assert r.status_code == 200, r.status_code"
+            for i in $(seq 1 10); do
+              if docker exec mentorman python -c "import httpx; httpx.get('http://127.0.0.1:8000/health').raise_for_status()" 2>/dev/null; then
+                echo "Healthy after ${i} attempt(s)"
+                break
+              fi
+              if [ "$i" -eq 10 ]; then
+                echo "Health check failed after 10 attempts — last container logs:"
+                docker logs --tail 50 mentorman
+                exit 1
+              fi
+              sleep 3
+            done
 
             echo "==> Pruning old images"
             docker image prune -a -f --filter "until=24h"

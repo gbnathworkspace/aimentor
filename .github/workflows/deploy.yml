@@ -96,7 +96,7 @@ jobs:
             echo "==> Health check"
             sleep 6
             docker exec mentorman \
-              python -c "import httpx; r = httpx.get('http://localhost:8000/health'); assert r.status_code == 200, r.status_code"
+              python -c "import httpx; r = httpx.get('http://127.0.0.1:8000/health'); assert r.status_code == 200, r.status_code"
 
             echo "==> Pruning old images"
             docker image prune -a -f --filter "until=24h"

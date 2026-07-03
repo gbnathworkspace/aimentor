@@ -143,5 +143,3 @@ npm run dev
 | Full evaluation loop with skill graph updates | Planned |
 
 ---
-
-*Personal project · Solo build · Target: 20 LPA SWE role by Aug 2026*

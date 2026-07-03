@@ -60,8 +60,8 @@ jobs:
           # Pass only the image tag; all secrets are fetched from SSM on the EC2
           # host using its IAM instance role — nothing sensitive travels over SSH.
           envs: IMAGE_TAG
-          script_stop: true
           script: |
+            set -euo pipefail
             IMAGE_TAG="${{ env.IMAGE }}:${{ github.sha }}"
 
             echo "==> Pulling $IMAGE_TAG"
@@ -99,6 +99,6 @@ jobs:
               python -c "import httpx; r = httpx.get('http://localhost:8000/health'); assert r.status_code == 200, r.status_code"
 
             echo "==> Pruning old images"
-            docker image prune -f --filter "until=24h"
+            docker image prune -a -f --filter "until=24h"
 
             echo "==> Deploy complete"

@@ -2,30 +2,30 @@
 
 import React, { useState, useEffect } from 'react';
 import { Icon } from './icons';
-import { Sidebar } from './ui';
+import { TopicSidebar } from './TopicSidebar';
+import { ArchivedTopics } from './ArchivedTopics';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
-import { Onboarding, SessionEnd, Settings } from './screens';
-import { ACCENTS, catToMode, DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
+import { Onboarding, Settings } from './screens';
+import { ACCENTS, DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'summary' | 'settings' | 'onboarding' | 'deferred-onboarding';
+type View = 'chat' | 'dashboard' | 'settings' | 'onboarding' | 'deferred-onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
   const t = { accent: '#34d399', density: 'cozy' };
   const [view, setView] = useState<View>('chat');
-  const [activeSession, setActiveSession] = useState('new');
+  const [activeTopic, setActiveTopic] = useState<string | null>(null);
   const [mode, setMode] = useState<ModeId>('topic');
   const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
   const [profile, setProfile] = useState<CoreProfile | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [userName, setUserName] = useState('');
   const [topics, setTopics] = useState<Topic[]>([]);
-  const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
-  const [sessionsVersion, setSessionsVersion] = useState(0);
+  const [topicsVersion, setTopicsVersion] = useState(0);
   const [chatKey, setChatKey] = useState(0);
-  const [lastSessionEnd, setLastSessionEnd] = useState<{ title: string; summary: string; levelFrom?: string | null; levelTo?: string | null } | null>(null);
+  const [sidebarView, setSidebarView] = useState<'topics' | 'archived'>('topics');
 
   // Fetch user name via /api/me
   useEffect(() => {
@@ -35,23 +35,13 @@ export function MentorManApp() {
       .catch(() => {});
   }, []);
 
-  // Fetch profile — auto-route to onboarding if none exists, resume draft if one exists
+  // Fetch profile — auto-route to onboarding if none exists
   useEffect(() => {
     fetch('/api/profile')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) {
           setProfile(data);
-          try {
-            const raw = localStorage.getItem('mentorman_draft');
-            if (raw) {
-              const draft = JSON.parse(raw);
-              if (draft?.msgs?.length > 0) {
-                setActiveSession('new');
-                if (draft.title) setActiveSessionTitle(draft.title);
-              }
-            }
-          } catch {}
         } else {
           setView('onboarding');
         }
@@ -94,23 +84,29 @@ export function MentorManApp() {
       .catch(() => {});
   };
 
-  const pickSession = (id: string, type?: string, title?: string) => {
-    setActiveSession(id);
-    if (title) setActiveSessionTitle(title);
-    const cat = type ?? 'Topic';
-    setMode(catToMode[cat] || 'topic');
-    setView('chat');
-  };
-
-  const startTopic = () => {
-    localStorage.removeItem('mentorman_draft');
-    setActiveSession('new');
-    setActiveSessionTitle(null);
+  const startTopic = (_t?: Topic) => {
+    setActiveTopic(null);
     setMode('topic');
     setView('chat');
+    setChatKey(k => k + 1);
   };
 
   const fullScreen = view === 'onboarding' || view === 'deferred-onboarding';
+
+  const sidebarContent = sidebarView === 'archived' ? (
+    <ArchivedTopics
+      onSelectTopic={(topicId) => { setActiveTopic(topicId); setView('chat'); setSidebarView('topics'); }}
+      onBack={() => setSidebarView('topics')}
+    />
+  ) : (
+    <TopicSidebar
+      selectedTopicId={activeTopic ?? undefined}
+      onSelectTopic={(topicId) => { setActiveTopic(topicId); setView('chat'); }}
+      onNewTopic={() => { setActiveTopic(null); setView('chat'); setChatKey(k => k + 1); }}
+      onViewArchived={() => setSidebarView('archived')}
+      refreshKey={topicsVersion}
+    />
+  );
 
   return (
     <div className={`app ${fullScreen ? 'full' : ''} density-${t.density}`}>
@@ -120,63 +116,63 @@ export function MentorManApp() {
           deferred
           onFinish={(goal) => {
             refreshProfile();
-            setActiveSession('new');
-            setActiveSessionTitle(goal || null);
-            setMode('topic');
-            setView('chat');
+            if (goal) {
+              fetch('/api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: goal.slice(0, 100) }) })
+                .then(r => r.json())
+                .then(data => {
+                  const topicId = data.topicId || data.topic_id || data.id;
+                  setActiveTopic(topicId);
+                  setView('chat');
+                  setTopicsVersion(v => v + 1);
+                })
+                .catch(() => { setActiveTopic(null); setView('chat'); });
+            } else {
+              setActiveTopic(null);
+              setView('chat');
+            }
             setChatKey(k => k + 1);
           }}
           onAbandon={() => setView('settings')}
         />
       ) : fullScreen ? (
         <Onboarding userName={userName} onFinish={(goal) => {
-          localStorage.removeItem('mentorman_draft');
           refreshProfile();
-          setActiveSession('new');
-          setActiveSessionTitle(goal || null);
-          setMode('topic');
-          setView('chat');
+          if (goal) {
+            fetch('/api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: goal.slice(0, 100) }) })
+              .then(r => r.json())
+              .then(data => {
+                const topicId = data.topicId || data.topic_id || data.id;
+                setActiveTopic(topicId);
+                setView('chat');
+                setTopicsVersion(v => v + 1);
+              })
+              .catch(() => { setActiveTopic(null); setView('chat'); });
+          } else {
+            setActiveTopic(null);
+            setView('chat');
+          }
         }} />
       ) : !profileLoaded ? (
         <>
-          <Sidebar
-            view={view}
-            activeSession={activeSession}
-            onPickSession={pickSession}
-            onNav={(v) => setView(v as View)}
-            onNew={() => {}}
-            profile={null}
-            userName={userName}
-            refreshKey={-1}
-          />
+          {sidebarContent}
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
             <div style={{ width: 28, height: 28, borderRadius: '50%', border: '3px solid var(--accent)', borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} />
           </div>
         </>
       ) : (
         <>
-          <Sidebar
-            view={view}
-            activeSession={activeSession}
-            onPickSession={pickSession}
-            onNav={(v) => setView(v as View)}
-            onNew={() => { localStorage.removeItem('mentorman_draft'); setActiveSession('new'); setActiveSessionTitle(null); setMode('topic'); setView('chat'); setChatKey(k => k + 1); }}
-            profile={profile}
-            userName={userName}
-            refreshKey={sessionsVersion}
-          />
+          {sidebarContent}
           {view === 'chat' && (
             <ChatPanel
               key={chatKey}
-              sessionId={activeSession}
-              sessionTitle={activeSessionTitle ?? undefined}
+              topicId={activeTopic}
               mode={mode}
               setMode={setMode}
               tone={tone}
               setTone={setTone}
               onNav={(v) => setView(v as View)}
-              onSessionSaved={() => setSessionsVersion(v => v + 1)}
-              onSessionEnd={(result) => setLastSessionEnd({ title: result.title, summary: result.summary, levelFrom: result.level_from, levelTo: result.level_to })}
+              onTopicUpdated={() => setTopicsVersion(v => v + 1)}
+              onTopicCreated={(topicId) => { setActiveTopic(topicId); setTopicsVersion(v => v + 1); }}
               topics={topics}
               profile={profile}
               onStartDeferredOnboarding={() => setView('deferred-onboarding')}
@@ -184,16 +180,6 @@ export function MentorManApp() {
           )}
           {view === 'dashboard' && (
             <Dashboard onStartTopic={startTopic} profile={profile} />
-          )}
-          {view === 'summary' && (
-            <SessionEnd
-              title={lastSessionEnd?.title}
-              summary={lastSessionEnd?.summary}
-              levelFrom={lastSessionEnd?.levelFrom}
-              levelTo={lastSessionEnd?.levelTo}
-              onFollow={() => { setActiveSession('new'); setMode('topic'); setView('chat'); }}
-              onBack={() => { setActiveSession('new'); setView('chat'); }}
-            />
           )}
           {view === 'settings' && (
             <Settings

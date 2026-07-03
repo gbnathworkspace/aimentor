@@ -1,13 +1,21 @@
 // MentorMan — data, types, constants
 
 export type MessageItem = {
-  who: 'mentor' | 'user' | 'verdict' | 'system';
+  who: 'mentor' | 'user' | 'verdict' | 'system' | 'summary';
   text: string;
   label?: string;
   nudge?: string;
   code?: string;
   tone?: 'strong' | 'partial' | 'weak';
   _id?: string;
+  summaryBlock?: {
+    type: 'summary';
+    id: string;
+    summary: string;
+    compactedRange: { from: string | Date; to: string | Date };
+    messageCount: number;
+    tokenCount: number;
+  };
 };
 
 export type Session = {

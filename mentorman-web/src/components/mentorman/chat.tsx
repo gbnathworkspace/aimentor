@@ -4,37 +4,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
 import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
-import { ChatUploadButton } from './chat/ChatUploadButton';
-import { UploadMessage } from './chat/UploadMessage';
 import { OnboardingBanner } from './OnboardingBanner';
-import { useFileUpload, type UploadStatus } from '@/lib/chat-upload/useFileUpload';
-import { useSessionPersistence, type Message as PersistenceMessage, type SessionEndResult } from '@/lib/session-persistence/useSessionPersistence';
-import type { CoreProfile, SkillNode } from '@/lib/mentorman-api';
-
-// POST /api/mentor and read the plain-text token stream (issue #17).
-// Calls onChunk with the accumulated text after each chunk; returns the full reply.
-async function streamMentor(body: object, onChunk: (full: string) => void): Promise<string> {
-  const res = await fetch('/api/mentor', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok || !res.body) throw new Error(`mentor request failed: ${res.status}`);
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let acc = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    acc += decoder.decode(value, { stream: true });
-    onChunk(acc);
-  }
-  return acc;
-}
+import { TopicCreation, TopicRenameInput } from './TopicCreation';
+import { SummaryBlockIndicator } from './SummaryBlockIndicator';
+import type { CoreProfile } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
-  // Mode is fixed once a chat starts: the whole system assumes one mode per chat,
-  // so switching mid-chat caused cross-mode context bleed (issue #20). Switch = new chat.
   return (
     <div className="modes" role="tablist" aria-label="Session mode">
       <span className="bar-label">mode</span>
@@ -43,7 +18,7 @@ function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) =
              className={`mode-tab ${mode === m.id ? 'active' : ''} ${locked ? 'locked' : ''}`}
              onClick={() => { if (!locked) onMode(m.id); }}
              aria-disabled={locked || undefined}
-             title={locked ? 'Mode is fixed for this chat — start a new session to change it' : m.blurb}>
+             title={locked ? 'Mode is fixed for this chat — start a new topic to change it' : m.blurb}>
           {m.label}
         </div>
       ))}
@@ -65,13 +40,12 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled, uploadElement, suggestions, onSuggestionClick }: {
+function Composer({ mode, tone, onSend, busy, disabled, suggestions, onSuggestionClick }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
-  uploadElement?: React.ReactNode;
   suggestions?: string[];
   onSuggestionClick?: (text: string) => void;
 }) {
@@ -117,7 +91,6 @@ function Composer({ mode, tone, onSend, busy, disabled, uploadElement, suggestio
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
           />
           <div className="composer-tools">
-            {uploadElement}
             <button className="tool-btn" title="Code block">{'</>'}</button>
             <div className="spacer" />
             <span className="tag" style={{ marginRight: 2 }}>mode: {mode}</span>
@@ -173,387 +146,148 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
   );
 }
 
-const DRAFT_KEY = 'mentorman_draft';
-
-export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTone, onNav, onSessionSaved, onSessionEnd, topics = [], profile, onStartDeferredOnboarding }: {
-  sessionId: string;
-  sessionTitle?: string;
+export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, onStartDeferredOnboarding }: {
+  topicId: string | null;
   mode: ModeId;
   setMode: (m: ModeId) => void;
   tone: ToneId;
   setTone: (t: ToneId) => void;
   onNav: (v: string) => void;
-  onSessionSaved?: () => void;
-  onSessionEnd?: (result: SessionEndResult) => void;
+  onTopicUpdated?: () => void;
+  onTopicCreated?: (topicId: string) => void;
   topics?: Topic[];
   profile?: CoreProfile | null;
   onStartDeferredOnboarding?: () => void;
 }) {
-  const fallback = { id: sessionId, title: 'New session', cat: 'Topic', date: 'now' };
-  const session = sessionTitle ? { ...fallback, title: sessionTitle } : fallback;
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
+  const [topicTitle, setTopicTitle] = useState<string>('New Topic');
   const bodyRef = useRef<HTMLDivElement>(null);
-
-  // Upload state: track whether an upload is in progress for non-blocking verification
-  const [uploadActive, setUploadActive] = useState(false);
-
-  // Session persistence hook — manages session lifecycle, message persistence, recovery
-  const {
-    sessionId: persistenceSessionId,
-    isEnding,
-    error: persistenceError,
-    createSession: persistenceCreateSession,
-    persistMessages,
-    endSession: persistenceEndSession,
-    recoverOrphanedMessages,
-    retryCreateSession,
-  } = useSessionPersistence();
-
-  // File upload hook — manages submission, polling, retries independently of chat
-  const {
-    state: uploadState,
-    submit: submitUpload,
-    retry: retryUpload,
-    refreshStatus: refreshUploadStatus,
-    reset: resetUpload,
-  } = useFileUpload({
-    sessionId: backendSessionId ?? '',
-    onReady: (info) => {
-      // Insert system message when extraction is ready (Req 6.9)
-      const systemMsg: MessageItem = {
-        who: 'system',
-        text: `📎 ${info.filename} is now available to your mentor. ${info.summary}`,
-        _id: 'sys-upload-' + info.jobId,
-      };
-      setMsgs(prev => [...prev, systemMsg]);
-    },
-    onStatusChange: (status) => {
-      const activeStatuses = new Set<UploadStatus>(['uploading', 'pending', 'processing', 'ready']);
-      setUploadActive(activeStatuses.has(status));
-    },
-  });
-
-  // Track the selected file for submission
-  const pendingFileRef = useRef<File | null>(null);
-
   const greetedRef = useRef(false);
 
-  // Recover orphaned messages from localStorage on mount (Req 3.5, 3.6, 3.7)
+  // Load messages when topicId changes
   useEffect(() => {
-    recoverOrphanedMessages();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Sync persistence hook's sessionId into local backendSessionId state
-  useEffect(() => {
-    if (persistenceSessionId && !backendSessionId) {
-      setBackendSessionId(persistenceSessionId);
-    }
-  }, [persistenceSessionId, backendSessionId]);
-
-  useEffect(() => {
-    greetedRef.current = false;
-
-    // Fresh session: resume an unsaved draft if present, else let the auto-greet run.
-    if (sessionId === 'new') {
-      try {
-        const raw = localStorage.getItem(DRAFT_KEY);
-        if (raw) {
-          const draft = JSON.parse(raw) as { msgs: MessageItem[]; backendSessionId?: string };
-          if (draft.msgs?.length > 0) {
-            setMsgs(draft.msgs);
-            if (draft.backendSessionId) setBackendSessionId(draft.backendSessionId);
-            greetedRef.current = true; // skip greeting — conversation already started
-            return;
-          }
-        }
-      } catch {}
+    if (!topicId) {
       setMsgs([]);
+      setTopicTitle('New Topic');
+      greetedRef.current = false;
       return;
     }
-
-    // Existing backend session — fetch stored messages
     let cancelled = false;
-    setMsgs([]);
     setBusy(true);
-    fetch(`/api/sessions/${sessionId}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to load session');
-        return r.json();
+    greetedRef.current = true;
+
+    // Fetch topic metadata for title
+    fetch(`/api/topic/${topicId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!cancelled && data?.title) setTopicTitle(data.title);
       })
+      .catch(() => {});
+
+    // Fetch messages
+    fetch(`/api/topic/${topicId}/messages?limit=50`)
+      .then(r => r.json())
       .then(data => {
         if (cancelled) return;
-        if (data.messages && data.messages.length > 0) {
-          const loaded: MessageItem[] = data.messages.map((m: { id?: string; role: string; content: string }, i: number) => ({
+        const messages = data.messages || [];
+        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number }, i: number) => {
+          if (m.type === 'summary') {
+            return {
+              who: 'summary' as const,
+              text: m.summary || '',
+              _id: m.id || `summary${i}`,
+              summaryBlock: {
+                type: 'summary' as const,
+                id: m.id || `summary${i}`,
+                summary: m.summary || '',
+                compactedRange: m.compactedRange || { from: new Date().toISOString(), to: new Date().toISOString() },
+                messageCount: m.messageCount || 0,
+                tokenCount: m.tokenCount || 0,
+              },
+            };
+          }
+          return {
             who: (m.role === 'assistant' || m.role === 'mentor') ? 'mentor' as const : 'user' as const,
-            text: m.content,
+            text: m.content || '',
             _id: m.id || `loaded${i}`,
-          }));
-          setMsgs(loaded);
-          setBackendSessionId(sessionId);
-          greetedRef.current = true; // skip auto-greet — history loaded
-        } else if (data.status === 'ended') {
-          // Ended session with no saved messages — show placeholder, suppress auto-greet
-          setMsgs([{ who: 'system' as const, text: 'This session ended with no saved messages.', _id: 'empty-ended' }]);
-          setBackendSessionId(sessionId);
-          greetedRef.current = true;
-        }
+          };
+        });
+        setMsgs(loaded);
       })
-      .catch(() => {
-        // If fetch fails (session not saved yet), let auto-greet handle it
-        if (!cancelled) setMsgs([]);
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [sessionId]);
-
-  // Auto-greet: only runs for fresh sessions (sessionId === 'new'), never for sidebar-loaded sessions
-  useEffect(() => {
-    if (greetedRef.current) return;
-    if (sessionId !== 'new') return; // existing sessions show their stored history, not a new greeting
-    greetedRef.current = true;
-    let cancelled = false;
-    setBusy(true);
-    const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
-    const fallback = "Let's get started — what do you want to tackle first?";
-    // NOTE: no session is created here — the greeting alone must not create a
-    // backend session. The session is created lazily on the user's first action.
-    streamMentor(
-      {
-        topic: session.title,
-        mode,
-        tone,
-        messages: [{ role: 'user', content: '[session_start] Open the session with a short, sharp first message based on my profile and goal. Do not repeat what I said in onboarding — just get started.' }],
-      },
-      (full) => { if (!cancelled) setMsgs([{ who: 'mentor', text: full, label: voiceLabel, _id: 'greet0' }]); },
-    )
-      .then((full) => {
-        if (cancelled) return;
-        if (!full.trim()) setMsgs([{ who: 'mentor', text: fallback, label: voiceLabel, _id: 'greet0' }]);
-        setSuggestions([]);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMsgs([{ who: 'mentor', text: fallback, _id: 'greet0' }]);
-      })
+      .catch(() => { if (!cancelled) setMsgs([]); })
       .finally(() => { if (!cancelled) setBusy(false); });
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
 
+    return () => { cancelled = true; };
+  }, [topicId]);
+
+  // Auto-scroll on new messages
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs, busy]);
 
-  // Persist active session to localStorage after every exchange so it survives a crash or reload
-  useEffect(() => {
-    if (sessionId !== 'new' || msgs.length === 0) return;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({
-        title: session.title,
-        cat: session.cat,
-        msgs,
-        backendSessionId, // resume the same backend session after a reload
-        savedAt: new Date().toISOString(),
-      }));
-    } catch {}
-  }, [msgs, sessionId, session.title, session.cat, backendSessionId]);
-
-  // Auto-save the conversation to the backend after every exchange (debounced),
-  // so history persists even if the user never clicks "End session".
-  useEffect(() => {
-    if (!backendSessionId || msgs.length === 0) return;
-    const apiMessages = msgs
-      .filter(m => m.who === 'mentor' || m.who === 'user')
-      .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
-    // Derive a readable chat name from the first user message (fallback to topic).
-    const firstUser = msgs.find(m => m.who === 'user')?.text?.trim();
-    const derivedTitle = firstUser
-      ? (firstUser.length > 48 ? firstUser.slice(0, 48) + '…' : firstUser)
-      : session.title;
-    const t = setTimeout(() => {
-      fetch(`/api/sessions/${backendSessionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, topic: session.title, title: derivedTitle }),
-      }).catch(() => {});
-    }, 800);
-    return () => clearTimeout(t);
-  }, [msgs, backendSessionId, session.title]);
-
-  // Create the backend session exactly once, lazily, on the user's first action.
-  const creatingRef = useRef(false);
-  const ensureSession = useCallback(async (firstUserText?: string): Promise<string | null> => {
-    if (backendSessionId) return backendSessionId;
-    if (creatingRef.current) return null; // a creation is already in flight
-    creatingRef.current = true;
-    try {
-      // Use the persistence hook's createSession which handles retry + localStorage + error state
-      const id = await persistenceCreateSession(mode, session.title);
-      if (id) {
-        setBackendSessionId(id);
-        onSessionSaved?.(); // refresh the sidebar so the new chat appears
-      }
-      return id;
-    } catch {
-      return null;
-    } finally {
-      creatingRef.current = false;
-    }
-  }, [backendSessionId, mode, session.title, onSessionSaved, persistenceCreateSession]);
-
+  // Send a message to the topic
   const send = useCallback(async (text: string) => {
+    if (!topicId) return;
     const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now() };
     setMsgs(prev => [...prev, userMsg]);
     setSuggestions([]);
     setBusy(true);
-    const mid = 'm' + Date.now();
-    const voiceLabel = `${TONES.find(t => t.id === tone)?.label ?? tone} voice`;
     try {
-      const sid = backendSessionId || await ensureSession(text);
-      const allHistory = [...msgs, userMsg]
-        .filter(m => m.who === 'mentor' || m.who === 'user')
-        .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
-      // Anthropic requires the first message to be from 'user' — drop any leading assistant turns
-      const firstUser = allHistory.findIndex(m => m.role === 'user');
-      const history = firstUser > 0 ? allHistory.slice(firstUser) : allHistory;
-
-      // Show an empty mentor bubble and stream tokens into it (issue #17)
-      setMsgs(prev => [...prev, { who: 'mentor', text: '', label: voiceLabel, _id: mid }]);
-      const full = await streamMentor(
-        { topic: session.title, mode, tone, messages: history, sessionId: sid },
-        (acc) => setMsgs(prev => prev.map(m => m._id === mid ? { ...m, text: acc } : m)),
-      );
-      const mentorText = full.trim() || "Let me think about that differently — can you say more about where you're stuck?";
-      setMsgs(prev => prev.map(m => m._id === mid ? { ...m, text: mentorText } : m));
-
-      // Persist messages via the session persistence hook (Req 8.2)
-      const now = new Date().toISOString();
-      const userPersistMsg: PersistenceMessage = { role: 'user', content: text, timestamp: now };
-      const mentorPersistMsg: PersistenceMessage = { role: 'mentor', content: mentorText, timestamp: now };
-      persistMessages(userPersistMsg, mentorPersistMsg);
+      const res = await fetch(`/api/topic/${topicId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text, mode }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setMsgs(prev => [...prev, { who: 'mentor', text: data.error, _id: 'err' + Date.now() }]);
+      } else {
+        setMsgs(prev => [...prev, { who: 'mentor', text: data.response, _id: 'm' + Date.now() }]);
+      }
     } catch {
-      const errText = "I'm having trouble reaching my notes right now — try that again in a moment.";
-      setMsgs(prev => prev.some(m => m._id === mid)
-        ? prev.map(m => m._id === mid ? { ...m, text: errText } : m)
-        : [...prev, { who: 'mentor', text: errText, _id: mid }]);
+      setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() }]);
     } finally {
       setBusy(false);
     }
-  }, [msgs, mode, tone, session.title, backendSessionId, ensureSession, persistMessages]);
+  }, [topicId, mode]);
 
-  const endSession = useCallback(async () => {
-    localStorage.removeItem(DRAFT_KEY);
-    if (msgs.length < 2) { onNav('summary'); return; }
-
-    // Use the persistence hook's endSession which handles loading state, timeout, and cleanup (Req 8.4, 8.5, 8.9)
-    // Pass backendSessionId as fallback for restored sessions where sessionIdRef.current is null
-    const result = await persistenceEndSession(backendSessionId ?? undefined);
-
-    if (result) {
-      // Update sidebar with the completed session title from SessionEndResult (Req 8.5)
-      onSessionSaved?.();
-      onSessionEnd?.(result);
-      // Clear session_id from state and localStorage on successful end
-      setBackendSessionId(null);
-    } else {
-      // If endSession returned null, the hook sets its own error state.
-      // We still do a fallback save for the messages if we have a backendSessionId.
-      if (backendSessionId) {
-        const apiMessages = msgs
-          .filter(m => m.who === 'mentor' || m.who === 'user')
-          .map(m => ({ role: m.who === 'mentor' ? 'assistant' : 'user', content: m.text }));
-        await fetch(`/api/sessions/${backendSessionId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: apiMessages, mode, topic: session.title }),
-        }).catch(() => {});
-      }
-      // Don't navigate on failure — let user retry via error state
-      return;
-    }
-
-    // Note: Ending the session does NOT cancel the ingestion pipeline.
-    // If an upload is still being processed, the pipeline continues to completion
-    // in the background (Requirement 7.7). The JobRecord and ImmediateContext
-    // operations are independent of session state.
-    onNav('summary');
-  }, [msgs, session, mode, onNav, onSessionSaved, onSessionEnd, backendSessionId, persistenceEndSession]);
-
-  /**
-   * Handle file selection from the ChatUploadButton.
-   * Stores the file reference for submission with the next message or immediately.
-   */
-  const handleFileSelected = useCallback((file: File) => {
-    pendingFileRef.current = file;
-    if (backendSessionId) {
-      submitUpload(file);
-      pendingFileRef.current = null;
-    } else {
-      // No session yet — create one; the effect below submits the pending file
-      // once the upload hook re-renders with the new session id.
-      ensureSession();
-    }
-  }, [backendSessionId, submitUpload, ensureSession]);
-
-  // Submit a file that was selected before the session existed, once it does.
-  useEffect(() => {
-    if (backendSessionId && pendingFileRef.current) {
-      const f = pendingFileRef.current;
-      pendingFileRef.current = null;
-      submitUpload(f);
-    }
-  }, [backendSessionId, submitUpload]);
-
-  /**
-   * Handle file removal from the ChatUploadButton preview chip.
-   */
-  const handleFileRemoved = useCallback(() => {
-    pendingFileRef.current = null;
-    if (uploadState.status === 'idle') {
-      resetUpload();
-    }
-  }, [uploadState.status, resetUpload]);
-
-  /**
-   * Determine if the attachment button should be disabled.
-   * Disabled while an upload is in progress (uploading or polling).
-   * Re-enabled on terminal states, retries exhausted, or idle.
-   */
-  const isAttachmentDisabled = (() => {
-    if (!backendSessionId) return true; // No session yet
-    if (uploadState.status === 'idle') return false;
-    if (uploadState.retriesExhausted) return false;
-    if (uploadState.status === 'failed' && !uploadState.isActive) return false;
-    if (uploadState.status === 'done' || uploadState.status === 'timeout' || uploadState.status === 'connection_lost') return false;
-    return uploadState.isActive;
-  })();
-
-  /**
-   * Whether to show the retry button on the UploadMessage.
-   */
-  const showRetryButton = uploadState.status === 'failed' && !uploadState.retriesExhausted;
+  // If no topicId, show topic creation screen
+  if (!topicId) {
+    return (
+      <div className="panel">
+        <div className="panel-head">
+          <div className="ph-left">
+            <div className="ph-title">New Topic</div>
+            <div className="ph-sub">create a topic to start chatting</div>
+          </div>
+        </div>
+        <div className="chat-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <TopicCreation
+            onTopicCreated={(id) => { onTopicCreated?.(id); }}
+            onCancel={() => {}}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="panel">
       <div className="panel-head">
         <div className="ph-left">
-          <div className="ph-title">{session.title}</div>
-          <div className="ph-sub">session · {session.cat.toLowerCase()} · {session.date}</div>
+          <TopicRenameInput
+            topicId={topicId}
+            currentTitle={topicTitle}
+            onRenamed={(newTitle) => { setTopicTitle(newTitle); onTopicUpdated?.(); }}
+          />
+          <div className="ph-sub">topic · {mode}</div>
         </div>
         <div className="ph-right">
           <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />
           <ToneBar tone={tone} onTone={setTone} />
-          <button className="btn btn-sm btn-ghost" onClick={endSession} disabled={isEnding} title="End session">
-            {isEnding ? 'Ending…' : 'End'}
-          </button>
           <span className="pill ok"><span className="ind" /> active</span>
         </div>
       </div>
@@ -566,22 +300,10 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
 
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">
-          {/* Session creation error state with retry button (Req 8.8) */}
-          {persistenceError && (
-            <div className="session-error">
-              <div className="session-error-text">
-                <Icon name="warn" size={16} />
-                <span>{persistenceError}</span>
-              </div>
-              <button className="btn btn-sm btn-ghost" onClick={retryCreateSession}>
-                Retry
-              </button>
-            </div>
-          )}
           {msgs.map((m, i) =>
-            // Don't render the empty mentor placeholder before the first streamed
-            // token — the typing dots cover that moment (issue #17).
-            m.who === 'mentor' && !m.text
+            m.who === 'summary'
+              ? <SummaryBlockIndicator key={m._id || i} summaryBlock={m.summaryBlock!} />
+              : m.who === 'mentor' && !m.text
               ? null
               : m.who === 'verdict'
               ? <VerdictMsg key={m._id || i} item={m as any} />
@@ -591,28 +313,7 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
                 </div>
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
-          {/* Upload message in the conversation timeline (Req 1.6) */}
-          {uploadState.status !== 'idle' && uploadState.filename && uploadState.fileType && (
-            <UploadMessage
-              jobId={uploadState.jobId ?? ''}
-              filename={uploadState.filename}
-              fileType={uploadState.fileType}
-              status={uploadState.status as Exclude<UploadStatus, 'idle'>}
-              summary={uploadState.summary ?? undefined}
-              error={uploadState.error ?? undefined}
-              onRetry={showRetryButton ? retryUpload : undefined}
-              onRefresh={uploadState.status === 'connection_lost' ? refreshUploadStatus : undefined}
-            />
-          )}
-          {/* Show the typing dots only until the streamed reply starts filling in (issue #17) */}
           {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && <Typing />}
-          {/* Loading indicator during session-end processing (Req 8.9) */}
-          {isEnding && (
-            <div className="session-ending-indicator">
-              <Typing />
-              <span className="session-ending-text">Ending session and generating summary…</span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -621,17 +322,8 @@ export function ChatPanel({ sessionId, sessionTitle, mode, setMode, tone, setTon
         tone={tone}
         onSend={send}
         busy={busy}
-        disabled={isEnding || !!persistenceError}
         suggestions={suggestions}
         onSuggestionClick={send}
-        uploadElement={
-          <ChatUploadButton
-            sessionId={backendSessionId ?? ''}
-            disabled={isAttachmentDisabled}
-            onFileSelected={handleFileSelected}
-            onFileRemoved={handleFileRemoved}
-          />
-        }
       />
     </div>
   );

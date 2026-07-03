@@ -21,6 +21,9 @@ async def connect_db() -> None:
     # Auth collection indexes (users, refresh_tokens, otp_codes, oauth_states, rate_limits)
     from app.auth.indexes import ensure_auth_indexes
     await ensure_auth_indexes()
+    # Topic and compaction_events collection indexes
+    from app.topics.indexes import ensure_topic_indexes
+    await ensure_topic_indexes()
 
 
 async def disconnect_db() -> None:
@@ -62,6 +65,14 @@ def embeddings_col():
 
 def immediate_contexts_col():
     return get_db()["immediate_contexts"]
+
+
+def topics_col():
+    return get_db()["topics"]
+
+
+def compaction_events_col():
+    return get_db()["compaction_events"]
 
 
 async def _ensure_indexes() -> None:

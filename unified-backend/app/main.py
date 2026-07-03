@@ -25,6 +25,7 @@ from app.routers import (
     session_upload,
     sessions,
     skills,
+    topics,
 )
 from app.services.session_manager import SessionManager
 
@@ -110,6 +111,7 @@ app.include_router(mentor.router)
 app.include_router(onboarding.router)
 app.include_router(ingest.router)
 app.include_router(memory.router)
+app.include_router(topics.router)
 
 
 @app.get("/health")

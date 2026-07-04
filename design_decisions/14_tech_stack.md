@@ -86,7 +86,7 @@ Local dev uses a password-based Atlas user (gopi-dev) with URI stored in .env on
 Python is the right language for the ingestion pipeline:
 - PyMuPDF for PDF extraction
 - pandas for CSV parsing
-- LangChain / direct Anthropic SDK for LLM orchestration
+- Direct Anthropic SDK for LLM orchestration (no LangChain — see 15_llm_orchestration.md)
 - Cleaner separation of concerns as complexity grows
 
 Next.js handles the UI and thin session management layer.

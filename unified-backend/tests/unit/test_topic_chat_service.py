@@ -135,6 +135,11 @@ class TestHandleMessageHappyPath:
         assert assistant_msg["role"] == "assistant"
         assert assistant_msg["content"] == "Here's my response about graphs."
 
+        # The exact L1/L2/L3-assembled prompt for this turn is stored on the
+        # message — context drifts over time, so it's only recoverable if
+        # captured live, not reconstructable later from current profile/skill state.
+        assert assistant_msg["systemPrompt"] == "You are a mentor."
+
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
@@ -389,7 +394,7 @@ class TestPostTurnHook:
         mock_compaction_service.should_compact.side_effect = RuntimeError("connection lost")
 
         # Should not raise
-        await chat_service._post_turn_hook("topic-abc", "user-123")
+        await chat_service._post_turn_hook("topic-abc", "user-123", 2)
 
         # Verify should_compact was called (it raised but was caught)
         mock_compaction_service.should_compact.assert_called_once()

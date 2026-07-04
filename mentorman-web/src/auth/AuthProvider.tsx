@@ -77,6 +77,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().finally(() => setLoading(false));
   }, [refresh]);
 
+  // Best-effort skill checkpoint on tab/browser close — pagehide only fires on
+  // real page teardown (close/navigate-away), not SPA route changes or tab
+  // backgrounding. sendBeacon (not fetch) survives the page unload.
+  useEffect(() => {
+    const onPageHide = () => {
+      if (tokenRef.current) navigator.sendBeacon(`${BASE}/api/auth/checkpoint`);
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
   if (loading) {
     return (
       <div

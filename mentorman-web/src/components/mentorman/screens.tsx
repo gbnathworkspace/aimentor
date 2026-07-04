@@ -307,7 +307,8 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
               <QuickReplyOptions
                 options={suggestions}
                 onSelect={sendText}
-                onTypeOwn={() => textaRef.current?.focus()}
+                onTypeOwn={() => { setSuggestions([]); textaRef.current?.focus(); }}
+                onClose={() => setSuggestions([])}
               />
             )}
             <div className="composer-box">
@@ -448,14 +449,18 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   const [editGoal, setEditGoal] = useState(false);
   const [editDeadline, setEditDeadline] = useState(false);
   const [editAvail, setEditAvail] = useState(false);
+  const [editName, setEditName] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
   const [goalVal, setGoalVal] = useState(profile?.goal ?? '');
   const [deadlineVal, setDeadlineVal] = useState(profile?.deadline ?? '');
   const [availVal, setAvailVal] = useState(profile?.daily_availability ?? '');
   const [styleVal, setStyleVal] = useState((profile?.style_notes as string) ?? '');
+  const [nameVal, setNameVal] = useState(profile?.name ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Sync form values when profile loads / changes
   useEffect(() => {
@@ -463,6 +468,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     setDeadlineVal(profile?.deadline ?? '');
     setAvailVal(profile?.daily_availability ?? '');
     setStyleVal((profile?.style_notes as string) ?? '');
+    setNameVal(profile?.name ?? '');
   }, [profile]);
 
   const save = async (field: Record<string, string>): Promise<boolean> => {
@@ -487,6 +493,32 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
       setSaving(false);
     }
   };
+
+  const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+
+  const onAvatarPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    setAvatarError(null);
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Please choose an image file.');
+      return;
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      setAvatarError('Image is too large (max 2MB).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUri = reader.result as string;
+      save({ avatar: dataUri }).then(ok => { if (!ok) setAvatarError('Upload failed — please try again.'); });
+    };
+    reader.onerror = () => setAvatarError('Could not read that file — please try again.');
+    reader.readAsDataURL(file);
+  };
+
+  const removeAvatar = () => { save({ avatar: '' }); };
 
   const handleReset = async () => {
     setSaving(true);
@@ -524,6 +556,54 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
               {saveError}
             </div>
           )}
+
+          <div className="set-section">
+            <div className="set-label">Profile</div>
+
+            <div className="set-row" style={{ gap: 16 }}>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                {profile?.avatar ? (
+                  <img src={profile.avatar} alt="Profile" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover' }} />
+                ) : (
+                  <div className="avatar" style={{ width: 56, height: 56, fontSize: 22 }}>
+                    {(profile?.name || profile?.email || 'Y')[0]?.toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => avatarInputRef.current?.click()}>
+                    {profile?.avatar ? 'Change photo' : 'Upload photo'}
+                  </button>
+                  {profile?.avatar && (
+                    <button className="btn btn-sm btn-ghost" disabled={saving} onClick={removeAvatar}>Remove</button>
+                  )}
+                </div>
+                <input ref={avatarInputRef} type="file" accept="image/*" onChange={onAvatarPick} style={{ display: 'none' }} />
+                {avatarError && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{avatarError}</div>}
+              </div>
+            </div>
+
+            <div className="set-row">
+              <div className="k">Name</div>
+              {editName ? (
+                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="num-input" style={{ flex: 1 }}
+                    value={nameVal}
+                    onChange={e => setNameVal(e.target.value)}
+                  />
+                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditName(false); setNameVal(profile?.name ?? ''); }}>Cancel</button>
+                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ name: nameVal })) setEditName(false); }}>Save</button>
+                </div>
+              ) : (
+                <>
+                  <div className="v">{profile?.name || '—'}</div>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setEditName(true)}>Edit</button>
+                </>
+              )}
+            </div>
+          </div>
 
           <div className="set-section">
             <div className="set-label">Goal</div>
@@ -644,6 +724,107 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
             </div>
           </div>
 
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Admin: user management ---------------------------
+interface AdminUser {
+  user_id: string;
+  email?: string;
+  auth_method?: string;
+  is_active?: boolean;
+  is_admin?: boolean;
+  created_at?: string;
+}
+
+const PAGE_SIZE = 20;
+
+export function AdminUsers() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`/api/admin/users?page=${page}&page_size=${PAGE_SIZE}`)
+      .then(r => {
+        if (r.status === 403) throw new Error('Admins only — you don’t have access to this page.');
+        if (!r.ok) throw new Error('Failed to load users.');
+        return r.json();
+      })
+      .then(data => { setUsers(data.users ?? []); setTotal(data.total ?? 0); })
+      .catch(e => setError(e.message || 'Failed to load users.'))
+      .finally(() => setLoading(false));
+  }, [page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleActive = async (u: AdminUser) => {
+    setPendingId(u.user_id);
+    try {
+      const action = u.is_active ? 'deactivate' : 'activate';
+      const res = await fetch(`/api/admin/users/${u.user_id}/${action}`, { method: 'POST' });
+      if (res.ok) setUsers(prev => prev.map(x => x.user_id === u.user_id ? { ...x, is_active: !u.is_active } : x));
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div className="ph-left"><div className="ph-title">Users</div><div className="ph-sub">{total} total</div></div>
+      </div>
+      <div className="set-body">
+        <div className="set-inner">
+          {error ? (
+            <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', background: 'rgba(248,113,113,0.08)', borderRadius: 6 }}>
+              {error}
+            </div>
+          ) : loading ? (
+            <div style={{ color: 'var(--muted)', fontSize: 13, padding: 12 }}>Loading users…</div>
+          ) : (
+            <div className="set-section">
+              {users.map(u => (
+                <div key={u.user_id} className="set-row" style={{ alignItems: 'center' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="v" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {u.email || u.user_id}
+                      {u.is_admin && <span className="pill info">admin</span>}
+                      <span className={`pill ${u.is_active ? 'ok' : 'warn'}`}><span className="ind" />{u.is_active ? 'active' : 'inactive'}</span>
+                    </div>
+                  </div>
+                  <button
+                    className={u.is_active ? 'danger-btn' : 'btn btn-sm btn-primary'}
+                    disabled={pendingId === u.user_id}
+                    onClick={() => toggleActive(u)}
+                  >
+                    {u.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
+              ))}
+              {users.length === 0 && (
+                <div style={{ color: 'var(--muted)', fontSize: 13, padding: 12 }}>No users found.</div>
+              )}
+            </div>
+          )}
+
+          {!error && totalPages > 1 && (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', padding: '12px 0' }}>
+              <button className="btn btn-sm btn-ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>{page} / {totalPages}</span>
+              <button className="btn btn-sm btn-ghost" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
+            </div>
+          )}
         </div>
       </div>
     </div>

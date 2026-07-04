@@ -16,6 +16,8 @@ export interface CoreProfile {
   daily_availability: string;
   email?: string;
   profile_status?: 'complete' | 'skipped';
+  name?: string;
+  avatar?: string | null;
   [key: string]: any;
 }
 

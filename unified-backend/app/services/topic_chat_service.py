@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 LLM_TIMEOUT_SECONDS = 30
 
+# Compaction only extracts skill updates as a side effect of reclaiming context
+# space — a topic that never grows big enough to compact never touches the skill
+# graph. This runs a lightweight skill-only check every N messages regardless.
+# ponytail: cadence is total-array-length modulo, which drifts after compaction
+# shrinks the array (a summary block collapses many messages into one) — good
+# enough for a periodic progress signal, not a precise per-turn counter.
+SKILL_CHECK_EVERY_N_MESSAGES = 16  # 8 user+assistant exchanges
+
 
 class TopicChatService:
     """Orchestrates per-turn LLM calls within topic threads.
@@ -108,17 +116,22 @@ class TopicChatService:
         clean_content, suggestions = extract_suggestions(assistant_content)
 
         # Step 6: Append assistant message (Req 4.5)
+        # systemPrompt records the exact L1/L2/L3-assembled prompt sent for this
+        # turn — context (profile/skill/episodes) changes over time, so this is
+        # only reconstructable historically if stored per-turn, not on demand.
         assistant_msg = {
             "type": "message",
             "id": str(uuid.uuid4()),
             "role": "assistant",
             "content": clean_content,
             "timestamp": datetime.utcnow(),
+            "systemPrompt": system_prompt,
         }
         await self._topic_service.append_message(topic_id, user_id, assistant_msg)
 
-        # Step 7: Post-turn hook — async compaction check (Req 6.4, 14.1)
-        asyncio.create_task(self._post_turn_hook(topic_id, user_id))
+        # Step 7: Post-turn hook — async compaction / skill-checkpoint check (Req 6.4, 14.1)
+        total_messages = len(messages) + 1  # messages already includes the user turn
+        asyncio.create_task(self._post_turn_hook(topic_id, user_id, total_messages))
 
         return {"response": clean_content, "suggestions": suggestions}
 
@@ -190,11 +203,14 @@ class TopicChatService:
 
         return api_messages
 
-    async def _post_turn_hook(self, topic_id: str, user_id: str) -> None:
-        """Post-turn compaction check (Req 6.4, 14.1).
+    async def _post_turn_hook(self, topic_id: str, user_id: str, total_messages: int) -> None:
+        """Post-turn compaction / skill-checkpoint check (Req 6.4, 14.1).
 
-        Runs asynchronously after the response is returned to the user.
-        Checks if compaction is needed and triggers it if so.
+        Runs asynchronously after the response is returned to the user. Checks if
+        compaction is needed and triggers it if so — compaction already extracts
+        skill updates as part of its flow. Otherwise, every SKILL_CHECK_EVERY_N_MESSAGES
+        messages, runs a skill-only checkpoint so topics that never grow large enough
+        to compact still contribute to the skill graph.
         """
         try:
             should_compact = await self._compaction_service.should_compact(
@@ -202,6 +218,8 @@ class TopicChatService:
             )
             if should_compact:
                 await self._compaction_service.compact(topic_id, user_id)
+            elif total_messages > 0 and total_messages % SKILL_CHECK_EVERY_N_MESSAGES == 0:
+                await self._compaction_service.extract_skill_updates_only(topic_id, user_id)
         except Exception as e:
             logger.error(
                 "Post-turn hook failed for topic %s: %s", topic_id, str(e)

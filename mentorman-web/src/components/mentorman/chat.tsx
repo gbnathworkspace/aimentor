@@ -27,16 +27,51 @@ function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) =
   );
 }
 
+// Collapsed by default — the mode bar already takes a lot of header space,
+// and voice is changed far less often than mode. Click to reveal the options.
 function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = TONES.find(t => t.id === tone) ?? TONES[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [open]);
+
   return (
-    <div className="modes" role="tablist" aria-label="Mentor tone">
-      <span className="bar-label">voice</span>
-      {TONES.map(t => (
-        <div key={t.id} className={`mode-tab ${tone === t.id ? 'active' : ''}`}
-             onClick={() => onTone(t.id)} title={t.blurb}>
-          {t.label}
+    <div className="tone-select" ref={ref}>
+      <button
+        className={`tone-select-trigger ${open ? 'open' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        title={current.blurb}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="bar-label">voice</span>
+        <span className="tone-select-current">{current.label}</span>
+        <Icon name="chevronDown" size={11} />
+      </button>
+      {open && (
+        <div className="tone-select-menu" role="listbox" aria-label="Mentor tone">
+          {TONES.map(t => (
+            <div
+              key={t.id}
+              role="option"
+              aria-selected={tone === t.id}
+              className={`tone-select-option ${tone === t.id ? 'active' : ''}`}
+              onClick={() => { onTone(t.id); setOpen(false); }}
+            >
+              <span className="tone-select-option-label">{t.label}</span>
+              <span className="tone-select-option-blurb">{t.blurb}</span>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -247,6 +282,69 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     }
   }, [topicId, mode]);
 
+  // Export the full topic transcript (all messages, not just the loaded page)
+  // as a local .md file for offline analysis.
+  const [exporting, setExporting] = useState(false);
+  const exportTranscript = useCallback(async () => {
+    if (!topicId || exporting) return;
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/topic/${topicId}`);
+      if (!res.ok) throw new Error('failed to load topic');
+      const topic = await res.json();
+      const entries: Array<Record<string, any>> = topic.messages || [];
+
+      const lines: string[] = [
+        `# ${topic.title || 'Topic'}`,
+        '',
+        `- Mode: ${topic.mode || mode}`,
+        `- Created: ${topic.createdAt || ''}`,
+        `- Exported: ${new Date().toISOString()}`,
+        '',
+        '---',
+        '',
+      ];
+      for (const e of entries) {
+        if (e.type === 'summary') {
+          const from = e.compactedRange?.from ?? '';
+          const to = e.compactedRange?.to ?? '';
+          lines.push(`> **[Compacted summary — ${e.messageCount ?? '?'} messages, ${from} to ${to}]**`, '');
+          lines.push(e.summary || '', '');
+        } else {
+          const who = e.role === 'assistant' ? 'Mentor' : 'User';
+          lines.push(`**${who}** _(${e.timestamp || ''})_`, '');
+          lines.push(e.content || '', '');
+          if (e.systemPrompt) {
+            lines.push(
+              '<details><summary>System prompt sent to the LLM (L1/L2/L3 context)</summary>',
+              '',
+              '```',
+              e.systemPrompt,
+              '```',
+              '',
+              '</details>',
+              ''
+            );
+          }
+        }
+      }
+
+      const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeName = (topic.title || 'topic').replace(/[^a-z0-9-_ ]/gi, '').trim() || 'topic';
+      a.href = url;
+      a.download = `${safeName}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Best-effort feature — silently no-op on failure rather than
+      // interrupting the chat with an error the user can't act on.
+    } finally {
+      setExporting(false);
+    }
+  }, [topicId, mode, exporting]);
+
   // If no topicId, show topic creation screen
   if (!topicId) {
     return (
@@ -281,6 +379,15 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         <div className="ph-right">
           <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />
           <ToneBar tone={tone} onTone={setTone} />
+          <button
+            className="icon-btn"
+            title="Download full transcript (.md)"
+            aria-label="Download full transcript"
+            disabled={exporting || msgs.length === 0}
+            onClick={exportTranscript}
+          >
+            <Icon name="download" />
+          </button>
           <span className="pill ok"><span className="ind" /> active</span>
         </div>
       </div>
@@ -317,7 +424,8 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           <QuickReplyOptions
             options={suggestions}
             onSelect={send}
-            onTypeOwn={() => document.getElementById('composer-textarea')?.focus()}
+            onTypeOwn={() => { setSuggestions([]); document.getElementById('composer-textarea')?.focus(); }}
+            onClose={() => setSuggestions([])}
           />
         </div>
       )}

@@ -6,7 +6,7 @@ type IconName =
   | 'plus' | 'chart' | 'gear' | 'send' | 'arrowUp' | 'check'
   | 'upload' | 'code' | 'spark' | 'warn' | 'x' | 'arrowR'
   | 'back' | 'target' | 'clock' | 'bolt' | 'doc' | 'dots' | 'logout'
-  | 'volume' | 'stop';
+  | 'volume' | 'stop' | 'download' | 'chevronDown' | 'users';
 
 const I: Record<IconName, React.ReactNode> = {
   plus:    <path d="M8 3v10M3 8h10" />,
@@ -30,6 +30,9 @@ const I: Record<IconName, React.ReactNode> = {
   logout:  <g><path d="M6 3H3.5a1 1 0 00-1 1v8a1 1 0 001 1H6M10 11l3-3-3-3M13 8H6" /></g>,
   volume:  <g><path d="M2 6h2.5L8 3.2v9.6L4.5 10H2z" /><path d="M10.8 5.5a3.5 3.5 0 010 5" /><path d="M12.6 3.7a6 6 0 010 8.6" /></g>,
   stop:    <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />,
+  download: <g><path d="M8 2v8.5M5 7.5l3 3 3-3" /><path d="M3 12.5v1.5h10v-1.5" /></g>,
+  chevronDown: <path d="M4 6l4 4 4-4" />,
+  users:   <g><circle cx="5.5" cy="6" r="2.2" /><path d="M1.5 13v-1a3 3 0 013-3h2a3 3 0 013 3v1" /><circle cx="11.5" cy="6.5" r="1.8" /><path d="M10.3 8.5a3 3 0 012.7 3v.7" /></g>,
 };
 
 export function Icon({ name, size = 16, style }: { name: IconName; size?: number; style?: React.CSSProperties }) {

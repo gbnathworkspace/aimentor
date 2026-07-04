@@ -6,11 +6,11 @@ import { TopicSidebar } from './TopicSidebar';
 import { ArchivedTopics } from './ArchivedTopics';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
-import { Onboarding, Settings } from './screens';
+import { Onboarding, Settings, AdminUsers } from './screens';
 import { DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'settings' | 'onboarding' | 'deferred-onboarding';
+type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'onboarding' | 'deferred-onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
@@ -22,6 +22,7 @@ export function MentorManApp() {
   const [profile, setProfile] = useState<CoreProfile | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [userName, setUserName] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [topicsVersion, setTopicsVersion] = useState(0);
   const [chatKey, setChatKey] = useState(0);
@@ -31,7 +32,10 @@ export function MentorManApp() {
   useEffect(() => {
     fetch('/api/me')
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.name) setUserName(data.name); })
+      .then(data => {
+        if (data?.name) setUserName(data.name);
+        setIsAdmin(!!data?.is_admin);
+      })
       .catch(() => {});
   }, []);
 
@@ -98,6 +102,11 @@ export function MentorManApp() {
       onNewTopic={() => { setActiveTopic(null); setView('chat'); setChatKey(k => k + 1); }}
       onViewArchived={() => setSidebarView('archived')}
       refreshKey={topicsVersion}
+      view={view}
+      onNav={(v) => setView(v as View)}
+      profile={profile}
+      userName={userName}
+      isAdmin={isAdmin}
     />
   );
 
@@ -182,6 +191,7 @@ export function MentorManApp() {
               onSaved={refreshProfile}
             />
           )}
+          {view === 'admin' && <AdminUsers />}
         </>
       )}
     </div>

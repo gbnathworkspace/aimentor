@@ -40,6 +40,9 @@ MAX_CONSECUTIVE_FAILURES = 3
 MAX_SKILL_UPDATE_RETRIES = 3
 """Maximum retry attempts for skill graph updates."""
 
+SKILL_CHECK_MESSAGE_WINDOW = 20
+"""How many recent messages to feed the periodic (non-compaction) skill checkpoint."""
+
 _LLM_TIMEOUT_SECONDS = 30
 """Timeout for the summarization LLM call."""
 
@@ -435,6 +438,37 @@ class CompactionService:
     # ------------------------------------------------------------------
     # Compaction orchestration (Req 7.3, 7.4, 7.5, 7.6, 10.3)
     # ------------------------------------------------------------------
+
+    async def extract_skill_updates_only(self, topic_id: str, user_id: str) -> None:
+        """Periodic skill-graph checkpoint, independent of the compaction token threshold.
+
+        Compaction only extracts skill updates as a side effect of reclaiming context
+        space, so a topic that never grows big enough to compact never updates the
+        skill graph. This runs the same summarization LLM call on the most recent
+        messages and applies any skill updates, without touching the topic's messages
+        (no summary block, no version bump) — the topic itself is unaffected.
+
+        Best-effort: any failure is logged and swallowed, same as compaction's own
+        skill-update path.
+        """
+        topic = await topics_col().find_one({"topicId": topic_id, "userId": user_id}, {"_id": 0})
+        if not topic:
+            return
+        recent = [m for m in topic.get("messages", []) if m.get("type") == "message"][
+            -SKILL_CHECK_MESSAGE_WINDOW:
+        ]
+        if not recent:
+            return
+
+        try:
+            llm_result = await self._call_summarization_llm(recent)
+        except Exception as e:
+            logger.error("Skill checkpoint LLM call failed for topic %s: %s", topic_id, str(e))
+            return
+
+        skill_updates = llm_result.get("skill_updates")
+        if skill_updates:
+            await self._apply_skill_updates(user_id, skill_updates)
 
     async def compact(self, topic_id: str, user_id: str) -> dict | None:
         """Execute compaction for a topic.

@@ -29,10 +29,10 @@ Backend changes are test-first; frontend is manually verified (project conventio
   - [x] 3.3 Delete `SEEDS`/`SESSIONS`/`TOPICS`/`EVAL_SEED`/`EVAL_DONE_EXTRA` from `data.ts` (keep config + types)
     - _Requirements: 4.1, 7.3_
 
-- [~] 4. Frontend: fix NaN days + empty states
+- [ ] 4. Frontend: fix NaN days + empty states
   - [x] 4.1 Guard `daysLeft`/`weeksLeft`/`deadlineText` against NaN (ui.tsx, dashboard.tsx)
     - _Requirements: 3.2, 3.3, 3.4_
-  - [~] 4.2 Add Empty_States — DEFERRED (no crash on empty; polished empty-state copy pending)
+  - [ ] 4.2 Add Empty_States — DEFERRED (no crash on empty; polished empty-state copy pending)
     - _Requirements: 6.1, 6.2, 6.4_
 
 - [ ] 5. Checkpoint - build + bundle scan

@@ -12,6 +12,18 @@ from app.models.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/profile", tags=["Profile"])
 
+# Avatar is stored inline as a data URI; cap the encoded string to keep documents small.
+MAX_AVATAR_CHARS = 2_800_000  # ~2MB image, base64-inflated
+
+
+def _validate_avatar(avatar: str | None) -> None:
+    if not avatar:  # None or "" (empty string clears the avatar)
+        return
+    if not avatar.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="Avatar must be an image data URI")
+    if len(avatar) > MAX_AVATAR_CHARS:
+        raise HTTPException(status_code=400, detail="Avatar image is too large (max ~2MB)")
+
 
 @router.get("", response_model=ProfileResponse)
 async def get_profile(user_id: str = Depends(require_auth)):
@@ -27,6 +39,7 @@ async def create_profile(
     data: ProfileCreate, user_id: str = Depends(require_auth)
 ):
     """Create a new profile for the authenticated user."""
+    _validate_avatar(data.avatar)
     doc = data.model_dump()
     doc["user_id"] = user_id
     try:
@@ -49,6 +62,7 @@ async def update_profile(
     data: ProfileUpdate, user_id: str = Depends(require_auth)
 ):
     """Update the profile for the authenticated user."""
+    _validate_avatar(data.avatar)
     update_data = data.model_dump(exclude_none=True)
     if not update_data:
         # Nothing to update — just return existing profile

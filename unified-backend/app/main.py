@@ -7,14 +7,15 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config.database import connect_db, disconnect_db
+from app.config.database import connect_db, disconnect_db, get_db
 from app.config.settings import get_settings
 from app.auth.admin_router import router as admin_router
+from app.auth.dependencies import require_auth
 from app.auth.router import router as auth_router
 from app.routers import (
     ingest,
@@ -118,6 +119,14 @@ app.include_router(topics.router)
 async def health():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/api/me")
+async def me(user_id: str = Depends(require_auth)):
+    """Return the authenticated user's own record (used by the frontend to gate the admin nav)."""
+    db = get_db()
+    user = await db["users"].find_one({"user_id": user_id}, {"_id": 0, "hashed_password": 0})
+    return user or {"user_id": user_id}
 
 
 # ─── Serve the built React SPA (same-origin production) ────────────────────────

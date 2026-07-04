@@ -1,5 +1,7 @@
 """Auth router — registration, login, OTP, OAuth, refresh, and logout endpoints."""
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -20,8 +22,11 @@ from app.auth.schemas import (
     TokenResponse,
 )
 from app.auth.token_manager import TokenManager
-from app.config.database import get_db
+from app.config.database import get_db, topics_col
 from app.config.settings import get_settings
+from app.services.compaction_service import CompactionService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -30,6 +35,7 @@ _token_manager = TokenManager()
 _password_service = PasswordService()
 _otp_service = OTPService()
 _oauth_handler = OAuthHandler()
+_compaction_service = CompactionService()
 _login_limiter = RateLimiter(max_attempts=5, window_minutes=15)
 _otp_request_limiter = RateLimiter(max_attempts=5, window_minutes=15)
 _otp_verify_limiter = RateLimiter(max_attempts=5, window_minutes=15)
@@ -356,15 +362,56 @@ async def refresh_token(request: Request, response: Response):
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(request: Request, response: Response):
-    """Invalidate refresh token and clear cookie."""
+    """Invalidate refresh token, clear cookie, and fire a best-effort skill checkpoint."""
     # Extract refresh token from cookie
     token_value = request.cookies.get(REFRESH_COOKIE_NAME)
 
     if token_value:
+        user_id = await _user_id_from_refresh_cookie(token_value)
         # Revoke the refresh token in the database
         await _token_manager.revoke_refresh_token(token_value)
+        if user_id:
+            asyncio.create_task(_skill_checkpoint_for_user(user_id))
 
     # Clear the cookie regardless
     _clear_refresh_cookie(response)
 
     return MessageResponse(message="Logged out successfully")
+
+
+@router.post("/checkpoint", response_model=MessageResponse)
+async def checkpoint(request: Request):
+    """Fire-and-forget skill checkpoint for an unexpected tab/browser close.
+
+    Called via navigator.sendBeacon on pagehide — unlike /logout, this does NOT
+    revoke the session, it only catches skill-graph progress the periodic
+    in-session checkpoint hasn't reached yet. sendBeacon can't carry a bearer
+    token, so — like /logout — this identifies the user via the refresh-token
+    cookie, which sendBeacon sends automatically for a same-origin request.
+    """
+    token_value = request.cookies.get(REFRESH_COOKIE_NAME)
+    if token_value:
+        user_id = await _user_id_from_refresh_cookie(token_value)
+        if user_id:
+            asyncio.create_task(_skill_checkpoint_for_user(user_id))
+    return MessageResponse(message="ok")
+
+
+async def _user_id_from_refresh_cookie(token_value: str) -> str | None:
+    token_doc = await get_db()["refresh_tokens"].find_one(
+        {"token": token_value}, {"user_id": 1}
+    )
+    return token_doc.get("user_id") if token_doc else None
+
+
+async def _skill_checkpoint_for_user(user_id: str) -> None:
+    """Fire-and-forget: catch any active topics' progress the periodic
+    per-message checkpoint hasn't reached yet before the session ends."""
+    try:
+        topics = await topics_col().find(
+            {"userId": user_id, "status": "active"}, {"topicId": 1, "_id": 0}
+        ).to_list(length=None)
+        for t in topics:
+            await _compaction_service.extract_skill_updates_only(t["topicId"], user_id)
+    except Exception as e:
+        logger.error("Skill checkpoint failed for user %s: %s", user_id, str(e))

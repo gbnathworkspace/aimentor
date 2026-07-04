@@ -7,26 +7,167 @@ import { SpeakButton } from './SpeakButton';
 import { MODES, type Session } from './data';
 import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
 
-// ---- tiny inline markdown: **bold**, `code`, \n ------------
-function fmtInline(text: string): React.ReactNode {
+// ---- tiny inline markdown: **bold**, *italic*, ~~strike~~, `code`, [links](url) ----
+// Order matters: bold before italic so `**x**` isn't half-matched as italic first.
+// No underscore-italic (_text_) — CommonMark disables intraword underscore emphasis
+// for exactly the reason we'd otherwise hit: snake_case_variable would italicize.
+const INLINE_RE = /(\*\*[^*]+\*\*|~~[^~]+~~|`[^`]+`|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)\s]+\))/;
+
+function renderInlineSpans(line: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let rest = line;
+  let key = 0;
+  let m: RegExpMatchArray | null;
+  while ((m = rest.match(INLINE_RE))) {
+    const idx = m.index!;
+    if (idx > 0) parts.push(rest.slice(0, idx));
+    const tok = m[0];
+    if (tok.startsWith('**')) parts.push(<strong key={key++}>{tok.slice(2, -2)}</strong>);
+    else if (tok.startsWith('~~')) parts.push(<del key={key++}>{tok.slice(2, -2)}</del>);
+    else if (tok.startsWith('`')) parts.push(<code key={key++}>{tok.slice(1, -1)}</code>);
+    else if (tok.startsWith('[')) {
+      const linkMatch = tok.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/)!;
+      parts.push(<a key={key++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">{linkMatch[1]}</a>);
+    } else parts.push(<em key={key++}>{tok.slice(1, -1)}</em>);
+    rest = rest.slice(idx + tok.length);
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+function joinLines(lines: string[]): React.ReactNode {
+  return lines.map((l, li) => (
+    <Fragment key={li}>{li > 0 && <br />}{renderInlineSpans(l)}</Fragment>
+  ));
+}
+
+const HR_RE = /^(-{3,}|\*{3,}|_{3,})$/;
+const HEADER_RE = /^(#{1,6})\s+(.*)$/;
+const UL_RE = /^[-*]\s+(.*)$/;
+const OL_RE = /^\d+\.\s+(.*)$/;
+const QUOTE_RE = /^>\s?(.*)$/;
+const TABLE_SEP_CELL_RE = /^:?-{2,}:?$/;
+
+// GFM tables: | a | b |  \n  |---|---|  \n  | 1 | 2 |
+function splitTableRow(line: string): string[] {
+  let l = line.trim();
+  if (l.startsWith('|')) l = l.slice(1);
+  if (l.endsWith('|')) l = l.slice(0, -1);
+  return l.split('|').map(c => c.trim());
+}
+function isTableSeparatorRow(line: string): boolean {
+  if (!line.includes('|') && !line.includes('-')) return false;
+  const cells = splitTableRow(line);
+  return cells.length > 0 && cells.every(c => TABLE_SEP_CELL_RE.test(c));
+}
+
+// ---- block-level markdown: headers, lists, tables, blockquotes, hr, paragraphs ----
+function renderBlocks(text: string): React.ReactNode {
   const lines = text.split('\n');
-  return lines.map((line, li) => {
-    const parts: React.ReactNode[] = [];
-    let rest = line;
-    let key = 0;
-    const re = /(\*\*[^*]+\*\*|`[^`]+`)/;
-    let m: RegExpMatchArray | null;
-    while ((m = rest.match(re))) {
-      const idx = m.index!;
-      if (idx > 0) parts.push(rest.slice(0, idx));
-      const tok = m[0];
-      if (tok.startsWith('**')) parts.push(<strong key={key++}>{tok.slice(2, -2)}</strong>);
-      else parts.push(<code key={key++}>{tok.slice(1, -1)}</code>);
-      rest = rest.slice(idx + tok.length);
+  const nodes: React.ReactNode[] = [];
+  let key = 0;
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim() === '') { i++; continue; }
+
+    if (HR_RE.test(line.trim())) {
+      nodes.push(<hr key={key++} />);
+      i++;
+      continue;
     }
-    if (rest) parts.push(rest);
-    return <Fragment key={li}>{li > 0 && <br />}{parts}</Fragment>;
-  });
+
+    const header = line.match(HEADER_RE);
+    if (header) {
+      const Tag = `h${Math.min(header[1].length + 2, 6)}` as 'h3' | 'h4' | 'h5' | 'h6';
+      nodes.push(<Tag key={key++}>{renderInlineSpans(header[2])}</Tag>);
+      i++;
+      continue;
+    }
+
+    if (QUOTE_RE.test(line)) {
+      const quoted: string[] = [];
+      while (i < lines.length && QUOTE_RE.test(lines[i])) {
+        quoted.push(lines[i].replace(QUOTE_RE, '$1'));
+        i++;
+      }
+      nodes.push(<blockquote key={key++}>{joinLines(quoted)}</blockquote>);
+      continue;
+    }
+
+    if (UL_RE.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && UL_RE.test(lines[i])) {
+        items.push(lines[i].match(UL_RE)![1]);
+        i++;
+      }
+      nodes.push(
+        <ul key={key++} className="task-aware">
+          {items.map((it, li) => {
+            const task = it.match(/^\[([ xX])\]\s+(.*)$/);
+            if (!task) return <li key={li}>{renderInlineSpans(it)}</li>;
+            const checked = task[1].toLowerCase() === 'x';
+            return (
+              <li key={li} className="task-item">
+                <input type="checkbox" checked={checked} disabled readOnly />
+                <span className={checked ? 'task-done' : undefined}>{renderInlineSpans(task[2])}</span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+      continue;
+    }
+
+    if (OL_RE.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && OL_RE.test(lines[i])) {
+        items.push(lines[i].match(OL_RE)![1]);
+        i++;
+      }
+      nodes.push(<ol key={key++}>{items.map((it, li) => <li key={li}>{renderInlineSpans(it)}</li>)}</ol>);
+      continue;
+    }
+
+    // Table: a row containing `|` immediately followed by a `|---|---|` separator row
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparatorRow(lines[i + 1])) {
+      const header = splitTableRow(line);
+      i += 2; // skip header + separator
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].trim() !== '' && lines[i].includes('|')) {
+        rows.push(splitTableRow(lines[i]));
+        i++;
+      }
+      nodes.push(
+        <table key={key++}>
+          <thead><tr>{header.map((c, ci) => <th key={ci}>{renderInlineSpans(c)}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri}>{r.map((c, ci) => <td key={ci}>{renderInlineSpans(c)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      continue;
+    }
+
+    // Paragraph: consecutive plain lines until a blank line or a block starts
+    const paraLines: string[] = [];
+    while (
+      i < lines.length && lines[i].trim() !== '' &&
+      !HR_RE.test(lines[i].trim()) && !HEADER_RE.test(lines[i]) &&
+      !QUOTE_RE.test(lines[i]) && !UL_RE.test(lines[i]) && !OL_RE.test(lines[i]) &&
+      !(lines[i].includes('|') && i + 1 < lines.length && isTableSeparatorRow(lines[i + 1]))
+    ) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    nodes.push(<p key={key++}>{joinLines(paraLines)}</p>);
+  }
+
+  return nodes;
 }
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
@@ -49,13 +190,13 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 }
 
 // Splits on fenced ```lang\n...\n``` blocks and renders each as a CodeBlock,
-// running everything else through the inline **bold**/`code` handling above.
+// running everything else through the block-level markdown handling above.
 const FENCE_RE = /```(\w*)\n([\s\S]*?)```/g;
 
 export function fmt(text: string | null | undefined): React.ReactNode {
   if (text == null) return null;
   const str = String(text);
-  if (!str.includes('```')) return fmtInline(str);
+  if (!str.includes('```')) return renderBlocks(str);
 
   const nodes: React.ReactNode[] = [];
   let lastIndex = 0;
@@ -63,11 +204,11 @@ export function fmt(text: string | null | undefined): React.ReactNode {
   FENCE_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = FENCE_RE.exec(str))) {
-    if (m.index > lastIndex) nodes.push(<Fragment key={key++}>{fmtInline(str.slice(lastIndex, m.index))}</Fragment>);
+    if (m.index > lastIndex) nodes.push(<Fragment key={key++}>{renderBlocks(str.slice(lastIndex, m.index))}</Fragment>);
     nodes.push(<CodeBlock key={key++} lang={m[1]} code={m[2].replace(/\n$/, '')} />);
     lastIndex = FENCE_RE.lastIndex;
   }
-  if (lastIndex < str.length) nodes.push(<Fragment key={key++}>{fmtInline(str.slice(lastIndex))}</Fragment>);
+  if (lastIndex < str.length) nodes.push(<Fragment key={key++}>{renderBlocks(str.slice(lastIndex))}</Fragment>);
   return nodes;
 }
 

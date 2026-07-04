@@ -34,31 +34,30 @@ export function MentorQuestionCard({ text }: { text: string }) {
 
 /** The tappable option rows below a question card. Always ends with a
  *  "type your own answer" row (the free-text equivalent of AskUserQuestion's
- *  "Other") so a discrete option list never forecloses an open-ended reply. */
+ *  "Other") so a discrete option list never forecloses an open-ended reply.
+ *  A close button lets the user dismiss the whole box without picking one. */
 export function QuickReplyOptions({
-  options, onSelect, onTypeOwn,
+  options, onSelect, onTypeOwn, onClose,
 }: {
   options: QuickReplyOption[];
   onSelect: (title: string) => void;
   onTypeOwn: () => void;
+  onClose: () => void;
 }) {
   return (
     <div className="onb-options">
+      <button className="onb-options-close" title="Dismiss suggestions" aria-label="Dismiss suggestions" onClick={onClose}>
+        <Icon name="x" size={12} />
+      </button>
       {options.map(s => (
-        <button key={s.title} className="onb-option" onClick={() => onSelect(s.title)}>
-          <span className="onb-option-text">
-            <span className="onb-option-title">{s.title}</span>
-            <span className="onb-option-desc">{s.description}</span>
-          </span>
-          <Icon name="arrowR" size={16} />
+        <button key={s.title} className="onb-option" title={s.description} onClick={() => onSelect(s.title)}>
+          <span className="onb-option-title">{s.title}</span>
+          <Icon name="arrowR" size={14} />
         </button>
       ))}
-      <button className="onb-option onb-option-custom" onClick={onTypeOwn}>
-        <span className="onb-option-text">
-          <span className="onb-option-title">Type your own answer</span>
-          <span className="onb-option-desc">None of these fit — write a custom reply.</span>
-        </span>
-        <Icon name="arrowR" size={16} />
+      <button className="onb-option onb-option-custom" title="None of these fit — write a custom reply." onClick={onTypeOwn}>
+        <span className="onb-option-title">Type your own answer</span>
+        <Icon name="arrowR" size={14} />
       </button>
     </div>
   );

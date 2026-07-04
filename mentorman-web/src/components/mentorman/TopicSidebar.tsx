@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
 import { relativeTime } from '../../lib/topics/relativeTime';
 import type { TopicListItem } from '../../lib/topics/types';
+import type { CoreProfile } from '@/lib/mentorman-api';
 
 export interface TopicSidebarProps {
   selectedTopicId?: string;
@@ -11,6 +13,11 @@ export interface TopicSidebarProps {
   onNewTopic: () => void;
   onViewArchived?: () => void;
   refreshKey?: number; // increment to trigger re-fetch
+  view?: string;
+  onNav?: (v: string) => void;
+  profile?: CoreProfile | null;
+  userName?: string;
+  isAdmin?: boolean;
 }
 
 /** Truncate text to maxLen characters, appending "..." if truncated. */
@@ -60,7 +67,13 @@ export function TopicSidebar({
   onNewTopic,
   onViewArchived,
   refreshKey,
+  view,
+  onNav,
+  profile,
+  userName,
+  isAdmin,
 }: TopicSidebarProps) {
+  const { logout } = useAuth();
   const [topics, setTopics] = useState<TopicListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -102,6 +115,18 @@ export function TopicSidebar({
             Mentor<span className="dim">Man</span>
           </div>
         </div>
+        {onNav && (
+          <div style={{ display: 'flex', gap: 4 }}>
+            {isAdmin && (
+              <button className={`icon-btn ${view === 'admin' ? 'on' : ''}`} title="Manage users" onClick={() => onNav('admin')}>
+                <Icon name="users" />
+              </button>
+            )}
+            <button className={`icon-btn ${view === 'settings' ? 'on' : ''}`} title="Settings" onClick={() => onNav('settings')}>
+              <Icon name="gear" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* New Topic button */}
@@ -109,6 +134,11 @@ export function TopicSidebar({
         <button className="new-session" onClick={onNewTopic}>
           <Icon name="plus" size={15} /> New Topic
         </button>
+        {onNav && (
+          <button className={`sb-nav-icon ${view === 'dashboard' ? 'on' : ''}`} title="Skill graph" onClick={() => onNav('dashboard')}>
+            <Icon name="chart" size={17} />
+          </button>
+        )}
       </div>
 
       {/* Section label */}
@@ -218,6 +248,30 @@ export function TopicSidebar({
           >
             <Icon name="clock" size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />
             View Archived
+          </button>
+        </div>
+      )}
+
+      {/* Account footer → Profile / Settings + sign out */}
+      {onNav && (
+        <div className="sb-foot" style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+          <button
+            onClick={() => onNav('settings')}
+            title="View profile & settings"
+            style={{ cursor: 'pointer', background: 'none', border: 'none', flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: 0, minWidth: 0 }}
+          >
+            {profile?.avatar ? (
+              <img src={profile.avatar} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+            ) : (
+              <div className="avatar">{(profile?.name || userName || profile?.email || 'Y')[0].toUpperCase()}</div>
+            )}
+            <div style={{ minWidth: 0 }}>
+              <div className="who">{profile?.name || userName || profile?.email?.split('@')[0] || 'You'}</div>
+              <div className="sub">{profile?.goal ?? '—'}</div>
+            </div>
+          </button>
+          <button className="icon-btn" title="Sign out" onClick={() => logout()} style={{ flexShrink: 0 }}>
+            <Icon name="logout" />
           </button>
         </div>
       )}

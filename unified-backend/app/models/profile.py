@@ -20,6 +20,9 @@ class ProfileCreate(BaseModel):
     # User-written "how to teach me" note, injected into the mentor prompt (issue #14)
     style_notes: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"
+    name: Optional[str] = None
+    # Profile picture as a data URI (data:image/...;base64,...); see MAX_AVATAR_BYTES.
+    avatar: Optional[str] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -35,6 +38,8 @@ class ProfileUpdate(BaseModel):
     email: Optional[str] = None
     style_notes: Optional[str] = None
     profile_status: Optional[Literal["complete", "skipped"]] = None
+    name: Optional[str] = None
+    avatar: Optional[str] = None
 
 
 class ProfileResponse(BaseModel):
@@ -51,3 +56,5 @@ class ProfileResponse(BaseModel):
     email: Optional[str] = None
     style_notes: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"
+    name: Optional[str] = None
+    avatar: Optional[str] = None

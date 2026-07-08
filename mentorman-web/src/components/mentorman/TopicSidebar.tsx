@@ -18,6 +18,8 @@ export interface TopicSidebarProps {
   profile?: CoreProfile | null;
   userName?: string;
   isAdmin?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 /** Truncate text to maxLen characters, appending "..." if truncated. */
@@ -72,6 +74,8 @@ export function TopicSidebar({
   profile,
   userName,
   isAdmin,
+  collapsed,
+  onToggleCollapse,
 }: TopicSidebarProps) {
   const { logout } = useAuth();
   const [topics, setTopics] = useState<TopicListItem[]>([]);
@@ -106,7 +110,7 @@ export function TopicSidebar({
   }, [refreshKey]);
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       {/* Header */}
       <div className="sb-head">
         <div className="brand">
@@ -115,26 +119,31 @@ export function TopicSidebar({
             Mentor<span className="dim">Man</span>
           </div>
         </div>
-        {onNav && (
-          <div style={{ display: 'flex', gap: 4 }}>
-            {isAdmin && (
-              <button className={`icon-btn ${view === 'admin' ? 'on' : ''}`} title="Manage users" onClick={() => onNav('admin')}>
-                <Icon name="users" />
-              </button>
-            )}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {onNav && !collapsed && isAdmin && (
+            <button className={`icon-btn ${view === 'admin' ? 'on' : ''}`} title="Manage users" onClick={() => onNav('admin')}>
+              <Icon name="users" />
+            </button>
+          )}
+          {onNav && !collapsed && (
             <button className={`icon-btn ${view === 'settings' ? 'on' : ''}`} title="Settings" onClick={() => onNav('settings')}>
               <Icon name="gear" />
             </button>
-          </div>
-        )}
+          )}
+          {onToggleCollapse && (
+            <button className="icon-btn" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={onToggleCollapse}>
+              <Icon name={collapsed ? 'arrowR' : 'back'} size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* New Topic button */}
       <div className="sb-actions">
-        <button className="new-session" onClick={onNewTopic}>
-          <Icon name="plus" size={15} /> New Topic
+        <button className="new-session" title="New Topic" onClick={onNewTopic}>
+          <Icon name="plus" size={15} /> <span className="label">New Topic</span>
         </button>
-        {onNav && (
+        {onNav && !collapsed && (
           <button className={`sb-nav-icon ${view === 'dashboard' ? 'on' : ''}`} title="Skill graph" onClick={() => onNav('dashboard')}>
             <Icon name="chart" size={17} />
           </button>
@@ -232,7 +241,7 @@ export function TopicSidebar({
 
       {/* View Archived link */}
       {onViewArchived && (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--card-3)' }}>
+        <div className="sb-archived-link" style={{ padding: '8px 12px', borderTop: '1px solid var(--card-3)' }}>
           <button
             onClick={onViewArchived}
             style={{

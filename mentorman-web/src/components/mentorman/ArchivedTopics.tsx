@@ -8,6 +8,8 @@ import type { TopicListItem } from '../../lib/topics/types';
 export interface ArchivedTopicsProps {
   onSelectTopic: (topicId: string) => void;
   onBack: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 /** Truncate text to maxLen characters, appending "..." if truncated. */
@@ -51,7 +53,7 @@ function ArchivedTopicSkeleton() {
   );
 }
 
-export function ArchivedTopics({ onSelectTopic, onBack }: ArchivedTopicsProps) {
+export function ArchivedTopics({ onSelectTopic, onBack, collapsed, onToggleCollapse }: ArchivedTopicsProps) {
   const [topics, setTopics] = useState<TopicListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -84,7 +86,7 @@ export function ArchivedTopics({ onSelectTopic, onBack }: ArchivedTopicsProps) {
   }, []);
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       {/* Header */}
       <div className="sb-head">
         <div className="brand">
@@ -93,12 +95,17 @@ export function ArchivedTopics({ onSelectTopic, onBack }: ArchivedTopicsProps) {
             Mentor<span className="dim">Man</span>
           </div>
         </div>
+        {onToggleCollapse && (
+          <button className="icon-btn" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={onToggleCollapse}>
+            <Icon name={collapsed ? 'arrowR' : 'back'} size={14} />
+          </button>
+        )}
       </div>
 
       {/* Back button */}
       <div className="sb-actions">
-        <button className="new-session" onClick={onBack}>
-          <Icon name="back" size={15} /> Back to Topics
+        <button className="new-session" title="Back to Topics" onClick={onBack}>
+          <Icon name="back" size={15} /> <span className="label">Back to Topics</span>
         </button>
       </div>
 

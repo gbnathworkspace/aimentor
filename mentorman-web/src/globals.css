@@ -49,7 +49,7 @@
   --sh-3: 0 18px 48px -12px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4);
   --sh-pop: 0 24px 60px -16px rgba(0,0,0,0.78), 0 2px 8px rgba(0,0,0,0.5);
 
-  --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --sans: 'Clash Grotesk', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
 
   --gap-unit: 20px;
@@ -98,12 +98,30 @@ body {
 /* ---- Sidebar ---- */
 .sidebar {
   width: 270px; flex-shrink: 0;
-  background: linear-gradient(180deg, var(--panel), var(--bg-2));
+  background: linear-gradient(180deg, #1a1a1e, #131316);
   border-right: 1px solid var(--border-soft);
   display: flex; flex-direction: column;
   position: relative;
   z-index: 2;
+  transition: width .16s ease;
+  overflow: hidden;
 }
+.sidebar.collapsed { width: 68px; }
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .sb-section,
+.sidebar.collapsed .session-list,
+.sidebar.collapsed .sb-archived-link,
+.sidebar.collapsed .new-session .label,
+.sidebar.collapsed .sb-foot .who,
+.sidebar.collapsed .sb-foot .sub {
+  display: none;
+}
+.sidebar.collapsed .sb-head { justify-content: center; padding: 0 8px; gap: 4px; }
+.sidebar.collapsed .brand { gap: 0; }
+.sidebar.collapsed .sb-actions { padding: 14px 8px 6px; }
+.sidebar.collapsed .new-session { flex: none; width: 40px; padding: 0; }
+.sidebar.collapsed .sb-foot { flex-direction: column; gap: 8px; padding: 12px 8px; margin-top: auto; }
+.sidebar.collapsed .sb-foot > button:first-child { flex: none; }
 .sb-head {
   height: 60px; flex-shrink: 0;
   padding: 0 16px;

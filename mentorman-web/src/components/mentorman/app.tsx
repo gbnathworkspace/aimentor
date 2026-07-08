@@ -27,6 +27,7 @@ export function MentorManApp() {
   const [topicsVersion, setTopicsVersion] = useState(0);
   const [chatKey, setChatKey] = useState(0);
   const [sidebarView, setSidebarView] = useState<'topics' | 'archived'>('topics');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch user name via /api/me
   useEffect(() => {
@@ -94,6 +95,8 @@ export function MentorManApp() {
     <ArchivedTopics
       onSelectTopic={(topicId) => { setActiveTopic(topicId); setView('chat'); setSidebarView('topics'); }}
       onBack={() => setSidebarView('topics')}
+      collapsed={sidebarCollapsed}
+      onToggleCollapse={() => setSidebarCollapsed(c => !c)}
     />
   ) : (
     <TopicSidebar
@@ -107,6 +110,8 @@ export function MentorManApp() {
       profile={profile}
       userName={userName}
       isAdmin={isAdmin}
+      collapsed={sidebarCollapsed}
+      onToggleCollapse={() => setSidebarCollapsed(c => !c)}
     />
   );
 

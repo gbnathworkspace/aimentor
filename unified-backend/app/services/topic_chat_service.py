@@ -10,7 +10,7 @@ Requirements: 4.3, 4.4, 4.5, 4.6, 6.4, 14.1
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import anthropic
 
@@ -73,7 +73,7 @@ class TopicChatService:
             Dict with "response" (assistant content) on success,
             or "error" key on failure.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Step 1: Create and append user message (Req 4.1)
         user_msg = {
@@ -124,7 +124,7 @@ class TopicChatService:
             "id": str(uuid.uuid4()),
             "role": "assistant",
             "content": clean_content,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "systemPrompt": system_prompt,
         }
         await self._topic_service.append_message(topic_id, user_id, assistant_msg)

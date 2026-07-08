@@ -12,7 +12,7 @@ async def connect_db() -> None:
     """Connect to MongoDB and set up indexes."""
     global _client, _db
     settings = get_settings()
-    _client = AsyncIOMotorClient(settings.MONGODB_URI)
+    _client = AsyncIOMotorClient(settings.MONGODB_URI, tz_aware=True)
     _db = _client[settings.DATABASE_NAME]
     await _ensure_indexes()
     # Session persistence compound indexes (stale cleanup + timeout sweep)

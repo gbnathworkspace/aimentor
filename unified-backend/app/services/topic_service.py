@@ -6,7 +6,7 @@ Also handles message append with optimistic concurrency and pagination.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
@@ -44,7 +44,7 @@ class TopicService:
         """
         validated_title = self._validate_title(title)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         topic_id = str(uuid.uuid4())
 
         doc = {
@@ -320,7 +320,7 @@ class TopicService:
             current_estimate = topic.get("metadata", {}).get("currentTokenEstimate", 0)
             new_estimate = current_estimate + token_count
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             appended_message = message
 
             return {

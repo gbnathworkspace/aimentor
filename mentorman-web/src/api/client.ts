@@ -15,6 +15,8 @@ const BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 // ─── Configurable token source ──────────────────────────────────────────────
 // AuthProvider calls setTokenSource() on mount to wire up token retrieval.
 let _tokenGetter: () => string | null = () => null;
+let _refresh: () => Promise<string | null> = async () => null;
+let _logout: () => void = () => {};
 
 /**
  * Set the function used to retrieve the current access token.
@@ -22,6 +24,15 @@ let _tokenGetter: () => string | null = () => null;
  */
 export function setTokenSource(getter: () => string | null): void {
   _tokenGetter = getter;
+}
+
+/**
+ * Wire up refresh/logout so the shim can recover from an expired access
+ * token instead of leaving every /api/* call 401ing until the next reload.
+ */
+export function setAuthHandlers(refresh: () => Promise<string | null>, logout: () => void): void {
+  _refresh = refresh;
+  _logout = logout;
 }
 
 function getToken(): string | null {
@@ -126,10 +137,22 @@ export function installApiFetch(): void {
     );
     if (token) headers.set('Authorization', `Bearer ${token}`);
 
-    const res = await realFetch(`${BASE}${url}`, { ...init, headers });
+    let res = await realFetch(`${BASE}${url}`, { ...init, headers });
+
+    // On 401, attempt one silent refresh + retry (except for the auth
+    // endpoints themselves, to avoid recursing into a retry loop).
+    const path = url.split('?')[0];
+    if (res.status === 401 && path !== '/api/auth/refresh' && path !== '/api/auth/logout') {
+      const newToken = await _refresh();
+      if (newToken) {
+        headers.set('Authorization', `Bearer ${newToken}`);
+        res = await realFetch(`${BASE}${url}`, { ...init, headers });
+      } else {
+        _logout();
+      }
+    }
 
     // Patch json(): dual-case, then apply any per-endpoint shape adapter.
-    const path = url.split('?')[0];
     const originalJson = res.json.bind(res);
     (res as Response & { json: () => Promise<unknown> }).json = async () =>
       adaptResponse(path, withBothCasings(await originalJson()));

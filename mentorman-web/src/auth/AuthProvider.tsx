@@ -7,7 +7,7 @@ import {
   useRef,
   ReactNode,
 } from 'react';
-import { setTokenSource } from '../api/client';
+import { setTokenSource, setAuthHandlers } from '../api/client';
 import { configureApiClient } from './api-client';
 
 const BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const getToken = () => tokenRef.current;
     setTokenSource(getToken);
+    setAuthHandlers(refresh, logout);
     configureApiClient(getToken, refresh, logout);
   }, [refresh, logout]);
 

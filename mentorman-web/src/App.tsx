@@ -6,13 +6,19 @@ import { RegisterPage } from './auth/RegisterPage';
 import { OAuthCallback } from './auth/OAuthCallback';
 import { MentorManApp } from './components/mentorman/app';
 import { LandingPage } from './marketing/LandingPage';
+import { useAuth } from './auth/useAuth';
+
+function Home() {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <MentorManApp /> : <LandingPage />;
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<Home />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/auth/callback" element={<OAuthCallback />} />

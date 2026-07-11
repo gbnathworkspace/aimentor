@@ -75,9 +75,13 @@ jobs:
             MONGODB_URI=$(fetch /mentorman/mongodb-uri)
             ANTHROPIC_API_KEY=$(fetch /claude-proxy/anthropic-api-key)
             VOYAGE_API_KEY=$(fetch /voyageapikey)
+            GOOGLE_CLIENT_ID=$(fetch /mentorman/google-client-id)
+            GOOGLE_CLIENT_SECRET=$(fetch /mentorman/google-client-secret)
 
             # Optional: Clerk issuer for JWT verification (skip if not set)
             CLERK_ISSUER=$(fetch /mentorman/clerk-issuer 2>/dev/null || true)
+            # Optional: real JWT signing secret (falls back to app default if unset)
+            JWT_SECRET=$(fetch /mentorman/jwt-secret 2>/dev/null || true)
 
             echo "==> Replacing container"
             docker stop mentorman 2>/dev/null || true
@@ -90,7 +94,12 @@ jobs:
               -e MONGODB_URI="$MONGODB_URI" \
               -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
               -e VOYAGE_API_KEY="$VOYAGE_API_KEY" \
+              -e GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+              -e GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
+              -e OAUTH_REDIRECT_URI="https://mentorman.co.in/api/auth/oauth/callback" \
+              -e FRONTEND_URL="https://mentorman.co.in" \
               ${CLERK_ISSUER:+-e CLERK_ISSUER="$CLERK_ISSUER"} \
+              ${JWT_SECRET:+-e JWT_SECRET="$JWT_SECRET"} \
               "$IMAGE_TAG"
 
             echo "==> Health check"

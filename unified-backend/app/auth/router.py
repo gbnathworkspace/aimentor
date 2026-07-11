@@ -70,13 +70,16 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-def _get_frontend_url() -> str:
-    """Get the frontend URL from settings (first CORS origin)."""
+def _get_frontend_url(request: Request) -> str:
+    """Base URL to send the browser back to after OAuth.
+
+    Defaults to the same origin that reached this callback — correct for the
+    same-origin deploy where the API serves the SPA. Override with FRONTEND_URL
+    when the SPA lives on a different origin (e.g. Vite dev on :5173).
+    """
     settings = get_settings()
-    origins = settings.cors_origins_list
-    if origins:
-        return origins[0].rstrip("/")
-    return "http://localhost:5173"
+    base = settings.FRONTEND_URL or str(request.base_url)
+    return base.rstrip("/")
 
 
 # ---------------------------------------------------------------------------
@@ -229,24 +232,10 @@ async def verify_otp(body: OTPVerifyBody, response: Response):
 # ---------------------------------------------------------------------------
 
 
-@router.get("/oauth/{provider}")
-async def oauth_initiate(provider: str):
-    """Redirect to OAuth provider authorization URL."""
-    try:
-        authorization_url = await _oauth_handler.get_authorization_url(provider)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-
-    return RedirectResponse(url=authorization_url, status_code=status.HTTP_302_FOUND)
-
-
 @router.get("/oauth/callback")
-async def oauth_callback(code: str, state: str):
+async def oauth_callback(code: str, state: str, request: Request):
     """Handle OAuth provider callback, issue tokens via redirect."""
-    frontend_url = _get_frontend_url()
+    frontend_url = _get_frontend_url(request)
 
     try:
         # Validate state, exchange code, fetch user profile
@@ -331,6 +320,25 @@ async def oauth_callback(code: str, state: str):
             url=f"{frontend_url}/login?error={quote(error_msg)}",
             status_code=status.HTTP_302_FOUND,
         )
+
+
+@router.get("/oauth/{provider}")
+async def oauth_initiate(provider: str):
+    """Redirect to OAuth provider authorization URL.
+
+    Declared after /oauth/callback so the static callback route matches first —
+    otherwise {provider} captures "callback" and OAuth returns from the provider
+    into the wrong handler.
+    """
+    try:
+        authorization_url = await _oauth_handler.get_authorization_url(provider)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    return RedirectResponse(url=authorization_url, status_code=status.HTTP_302_FOUND)
 
 
 # ---------------------------------------------------------------------------

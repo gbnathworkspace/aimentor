@@ -333,51 +333,6 @@ class TopicService:
         await self._optimistic_append(topic_id, user_id, update_fn)
         return appended_message
 
-    async def get_messages(
-        self, topic_id: str, user_id: str, limit: int = 50, before: str | None = None
-    ) -> list[dict]:
-        """Get messages from a topic with pagination.
-
-        Returns messages ordered by timestamp ascending.
-        If 'before' is provided, return messages with timestamp < before.
-        Ownership check via userId filter.
-
-        Args:
-            topic_id: The topic identifier.
-            user_id: The authenticated user's ID.
-            limit: Maximum number of messages to return (default 50).
-            before: ISO timestamp string; return messages before this time.
-
-        Returns:
-            List of message dicts ordered by timestamp ascending.
-
-        Raises:
-            HTTPException: 404 if topic not found or user doesn't own it.
-        """
-        topic = await topics_col().find_one(
-            {"topicId": topic_id, "userId": user_id},
-            {"_id": 0, "messages": 1},
-        )
-        if not topic:
-            raise HTTPException(status_code=404, detail="Topic not found")
-
-        messages = topic.get("messages", [])
-
-        # Filter by 'before' timestamp if provided
-        if before is not None:
-            if isinstance(before, str):
-                before_dt = datetime.fromisoformat(before)
-            else:
-                before_dt = before
-            messages = [m for m in messages if m.get("timestamp") < before_dt]
-
-        # Messages are stored in chronological order; return last `limit` items
-        # to get the most recent messages (still in ascending order)
-        if len(messages) > limit:
-            messages = messages[-limit:]
-
-        return messages
-
     async def get_messages_paginated(
         self, topic_id: str, user_id: str, limit: int = 50, skip: int = 0
     ) -> dict:

@@ -1267,7 +1267,7 @@ body {
 }
 
 .topic-rename-form {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 4px; width: min(440px, 60vw);
 }
 .topic-rename-row {
   display: flex; align-items: center; gap: 8px;

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_ID: Optional[str] = None
     GITHUB_CLIENT_SECRET: Optional[str] = None
     OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/oauth/callback"
+    # Where to send the browser after OAuth. Default: the same origin that served
+    # the callback (correct for the same-origin deploy). Set only when the SPA is on
+    # a different origin than the API (e.g. Vite dev on :5173).
+    FRONTEND_URL: Optional[str] = None
 
     # Auth — Email delivery
     EMAIL_BACKEND: Literal["console", "api"] = "console"

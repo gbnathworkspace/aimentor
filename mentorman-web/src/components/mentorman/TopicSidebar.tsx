@@ -114,10 +114,7 @@ export function TopicSidebar({
       {/* Header */}
       <div className="sb-head">
         <div className="brand">
-          <div className="brand-mark">M</div>
-          <div className="brand-name">
-            Mentor<span className="dim">Man</span>
-          </div>
+          <img src="/logo-full.svg" alt="MentorMan" className="brand-logo" />
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {onNav && !collapsed && isAdmin && (

@@ -377,8 +377,9 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           <div className="ph-sub">topic · {mode}</div>
         </div>
         <div className="ph-right">
-          <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />
-          <ToneBar tone={tone} onTone={setTone} />
+          {/* ponytail: mode + voice (tone) selectors hidden per request — remove `false &&` to re-enable; components/state kept intact. */}
+          {false && <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />}
+          {false && <ToneBar tone={tone} onTone={setTone} />}
           <button
             className="icon-btn"
             title="Download full transcript (.md)"

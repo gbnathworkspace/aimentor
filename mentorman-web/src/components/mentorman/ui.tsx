@@ -216,8 +216,7 @@ export function fmt(text: string | null | undefined): React.ReactNode {
 export function Brand({ small }: { small?: boolean }) {
   return (
     <div className="brand">
-      <img src="/logo-mark.svg" alt="" className="brand-mark" style={small ? { width: 24, height: 24 } : {}} />
-      {!small && <div className="brand-name">Mentor<span className="dim">Man</span></div>}
+      <img src="/logo-full.svg" alt="MentorMan" className="brand-logo" style={small ? { height: 20 } : {}} />
     </div>
   );
 }
@@ -232,7 +231,9 @@ export function Msg({ who, children, delay = 0, style }: {
   return (
     <div className={`msg ${who}`} style={{ animationDelay: `${delay}ms`, ...style }}>
       <div className="who">
-        <span className="av">{who === 'mentor' ? 'M' : 'Y'}</span>
+        {who === 'mentor'
+          ? <img src="/logo-mark.svg" alt="" className="av" />
+          : <span className="av">Y</span>}
         {who === 'mentor' ? 'Mentor' : 'You'}
       </div>
       {children}

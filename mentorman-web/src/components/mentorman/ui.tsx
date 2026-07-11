@@ -216,7 +216,7 @@ export function fmt(text: string | null | undefined): React.ReactNode {
 export function Brand({ small }: { small?: boolean }) {
   return (
     <div className="brand">
-      <div className="brand-mark" style={small ? { width: 24, height: 24, fontSize: 12 } : {}}>M</div>
+      <img src="/logo-mark.svg" alt="" className="brand-mark" style={small ? { width: 24, height: 24 } : {}} />
       {!small && <div className="brand-name">Mentor<span className="dim">Man</span></div>}
     </div>
   );

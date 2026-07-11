@@ -1,4 +1,5 @@
-# MentorMan
+<img src="mentorman-web/public/logo-full.svg" alt="MentorMan" height="60" />
+
 
 A goal-aware AI mentor for software engineering interview prep — built around one core insight: **the LLM is a stateless reasoning engine; the databases are its memory.**
 

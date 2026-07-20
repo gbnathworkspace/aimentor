@@ -1,6 +1,7 @@
 'use client';
 
-import React, { Fragment, useState, useEffect } from 'react';
+import React, { Fragment, useState, useEffect, useMemo } from 'react';
+import DOMPurify from 'dompurify';
 import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
 import { SpeakButton } from './SpeakButton';
@@ -189,13 +190,28 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
-// Splits on fenced ```lang\n...\n``` blocks and renders each as a CodeBlock,
-// running everything else through the block-level markdown handling above.
+// Renders a ```svg fenced block as an inline diagram. The mentor generates the
+// markup, so it's untrusted the same way any LLM output is — sanitize before
+// injecting rather than trusting it's free of <script>/event-handler payloads.
+function SvgBlock({ code }: { code: string }) {
+  const clean = useMemo(() => DOMPurify.sanitize(code, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    // foreignObject embeds arbitrary HTML; image can pull an external resource.
+    FORBID_TAGS: ['script', 'foreignObject', 'image'],
+  }), [code]);
+  return <div className="svg-block" dangerouslySetInnerHTML={{ __html: clean }} />;
+}
+
+// Splits on fenced ```lang\n...\n``` blocks and renders each as a CodeBlock
+// (or an SvgBlock for lang "svg"), running everything else through the
+// block-level markdown handling above.
 const FENCE_RE = /```(\w*)\n([\s\S]*?)```/g;
 
 export function fmt(text: string | null | undefined): React.ReactNode {
   if (text == null) return null;
-  const str = String(text);
+  // Normalize CRLF so FENCE_RE's `\n` after the lang tag always matches —
+  // source text (e.g. prompt files checked out with core.autocrlf) can carry \r\n.
+  const str = String(text).replace(/\r\n/g, '\n');
   if (!str.includes('```')) return renderBlocks(str);
 
   const nodes: React.ReactNode[] = [];
@@ -205,7 +221,12 @@ export function fmt(text: string | null | undefined): React.ReactNode {
   let m: RegExpExecArray | null;
   while ((m = FENCE_RE.exec(str))) {
     if (m.index > lastIndex) nodes.push(<Fragment key={key++}>{renderBlocks(str.slice(lastIndex, m.index))}</Fragment>);
-    nodes.push(<CodeBlock key={key++} lang={m[1]} code={m[2].replace(/\n$/, '')} />);
+    const code = m[2].replace(/\n$/, '');
+    nodes.push(
+      m[1] === 'svg'
+        ? <SvgBlock key={key++} code={code} />
+        : <CodeBlock key={key++} lang={m[1]} code={code} />
+    );
     lastIndex = FENCE_RE.lastIndex;
   }
   if (lastIndex < str.length) nodes.push(<Fragment key={key++}>{renderBlocks(str.slice(lastIndex))}</Fragment>);

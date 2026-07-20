@@ -150,13 +150,15 @@ class TopicChatService:
         api_messages = self._format_messages_for_api(messages)
 
         response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
+            model="claude-sonnet-5",
+            max_tokens=4096,
+            thinking={"type": "adaptive"},
+            output_config={"effort": "high"},
             system=system_prompt,
             messages=api_messages,
         )
 
-        return response.content[0].text
+        return next(block.text for block in response.content if block.type == "text")
 
     def _format_messages_for_api(self, messages: list[dict]) -> list[dict]:
         """Convert topic messages (including SummaryBlocks) to Anthropic API format.

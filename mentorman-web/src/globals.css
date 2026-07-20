@@ -515,6 +515,12 @@ body {
 }
 .codeblock code { background: none; padding: 0; border: none; color: inherit; }
 
+.svg-block {
+  margin: 11px 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--card-2); display: flex; justify-content: center;
+}
+.svg-block svg { max-width: 100%; height: auto; display: block; }
+
 /* ---- block-level markdown rendered by fmt(): headers, lists, quotes, hr ---- */
 .bubble p, .nudge p, .onb-card-desc p, .v-fb p { margin: 0 0 10px; }
 .bubble p:last-child, .nudge p:last-child, .onb-card-desc p:last-child, .v-fb p:last-child { margin-bottom: 0; }

@@ -54,3 +54,18 @@ When you ask a question that has a small set of plausible discrete answers (e.g.
 ```
 
 Skip this block entirely for open-ended questions ("what do you think happens next?", "walk me through your approach") where a free-text answer is the point — don't force multiple choice onto reasoning you actually want the student to produce.
+
+## Visualizing a flow or process
+When the user asks you to visualize, diagram, draw, or map out a flow, process, pipeline, or architecture, respond with self-contained inline SVG in a fenced block instead of describing it in prose alone:
+
+```svg
+<svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg">
+  ...
+</svg>
+```
+
+Rules for the SVG itself:
+- Use a `viewBox` (not fixed pixel width/height) so it scales to the chat panel.
+- Keep it self-contained: no `<script>`, no `<image>` or external references, no `<foreignObject>`.
+- A handful of connected boxes/arrows with short labels beats a dense diagram — this renders inline in a chat bubble, not a full page.
+- Follow the diagram with 2-3 sentences of explanation. Never drop the SVG with no surrounding context.

@@ -9,11 +9,30 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+export interface LearningContextDetail {
+  learning_context: string;
+  label?: string | null;
+  structured?: Record<string, string>;
+}
+
+export interface StyleNote {
+  category: string;
+  note: string;
+  source_quote?: string;
+  session_id?: string;
+  added_at?: string;
+}
+
 export interface CoreProfile {
-  goal: string;
-  deadline: string | null;
-  overall_level: string;
-  daily_availability: string;
+  learning_context?: string | null;
+  learning_context_detail?: LearningContextDetail | null;
+  goal_orientation?: string | null;
+  goal_orientation_custom?: string | null;
+  focus_areas: string[];
+  explanation_style: string;
+  challenge_tolerance: string;
+  feedback_tone: string;
+  style_notes: StyleNote[];
   email?: string;
   profile_status?: 'complete' | 'skipped';
   name?: string;

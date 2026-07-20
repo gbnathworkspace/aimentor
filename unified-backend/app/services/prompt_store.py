@@ -128,6 +128,31 @@ def _format_documents(documents: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)
 
 
+def _format_learning_context(profile: dict[str, Any]) -> str:
+    """Format the L1 learning_context + its free-text label for the prompt."""
+    context = profile.get("learning_context")
+    if not context:
+        return "Not specified"
+    label = (profile.get("learning_context_detail") or {}).get("label")
+    return f"{context} — {label}" if label else str(context)
+
+
+def _format_focus_areas(profile: dict[str, Any]) -> str:
+    """Format the L1 focus_areas list for the prompt."""
+    areas = profile.get("focus_areas") or []
+    return ", ".join(areas) if areas else "Not specified"
+
+
+def _format_style_notes(style_notes: list[dict[str, Any]]) -> str:
+    """Format observed StyleNote entries into a readable bullet list."""
+    if not style_notes:
+        return "(none observed yet)"
+    return "\n".join(
+        f"- [{note.get('category', 'context')}] {note.get('note', '')}"
+        for note in style_notes
+    )
+
+
 def _format_episodes(episodes: list[dict[str, Any]]) -> str:
     """Format episodic memory entries into a readable block for the prompt."""
     if not episodes:
@@ -165,12 +190,13 @@ def _build_context_variables(
 
     return {
         # L1 Profile fields
-        "goal": profile.get("goal", "Not specified"),
-        "deadline": profile.get("deadline", "Not specified"),
-        "overall_level": profile.get("overall_level", "beginner"),
-        "daily_availability": profile.get("daily_availability", "Not specified"),
-        # User's "how to teach me" note (issue #14)
-        "style_notes": profile.get("style_notes") or "(none provided)",
+        "learning_context": _format_learning_context(profile),
+        "focus_areas": _format_focus_areas(profile),
+        "explanation_style": profile.get("explanation_style", "hint-first"),
+        "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
+        "feedback_tone": profile.get("feedback_tone", "encouraging"),
+        # Observed teaching-style notes, grounded per-session (issue #14 evolution)
+        "style_notes": _format_style_notes(profile.get("style_notes") or []),
         # L2 Skill fields
         "topic": skill.get("topic", context.get("topic", "General")),
         "required_level": skill.get("required_level", "Not assessed"),
@@ -218,20 +244,8 @@ def get_system_prompt(
 
 
 def get_onboarding_prompt() -> str:
-    """Load the onboarding system prompt with today's date injected.
-
-    The date lets the model convert a relative timeframe ("3 months") into an
-    absolute ``YYYY-MM-DD`` deadline (parity with the original Next.js prompt).
-    """
-    import datetime
-
-    template = _load_template(_ONBOARDING_TEMPLATE)
-    today = datetime.date.today().isoformat()
-    return (
-        f"{template}\n\nToday's date is {today}. When the user gives a relative "
-        f"timeframe (e.g. \"3 months\"), compute and output `deadline` as an "
-        f"absolute YYYY-MM-DD date relative to today."
-    )
+    """Load the onboarding system prompt."""
+    return _load_template(_ONBOARDING_TEMPLATE)
 
 
 def clear_cache() -> None:

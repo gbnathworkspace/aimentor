@@ -213,40 +213,42 @@ async def _generate_topics_via_llm(goal: str) -> list[str]:
 
 
 async def bootstrap_skills(
-    user_id: str, goal: str, overall_level: str = "beginner"
+    user_id: str, focus_areas: list[str], learning_context_label: Optional[str] = None
 ) -> list[dict]:
-    """Generate and persist skill graph nodes for a user's goal.
+    """Generate and persist skill graph nodes for a user.
 
     Args:
         user_id: The authenticated user's ID
-        goal: The user's stated learning goal
-        overall_level: The user's self-assessed overall level (default "beginner")
+        focus_areas: Topics the user explicitly named during onboarding — used
+            directly as skill topics when present.
+        learning_context_label: Free-text recap of the user's situation (e.g.
+            "senior backend, 20 LPA"), used as a fallback goal description for
+            KB/LLM topic derivation when focus_areas is empty.
 
     Returns:
         List of skill node dicts that were upserted
     """
-    # Normalize goal
-    normalized_goal = goal.lower().strip()
-
-    # Look up in knowledge base (fuzzy match)
-    topics = _lookup_goal_in_kb(normalized_goal)
-
-    # If not found in KB, generate via LLM
-    if topics is None:
-        logger.info(f"Goal '{goal}' not in KB, generating topics via LLM")
-        topics = await _generate_topics_via_llm(goal)
+    if focus_areas:
+        topics = focus_areas[:6]
+    else:
+        goal_text = (learning_context_label or "").strip()
+        topics = _lookup_goal_in_kb(goal_text.lower()) if goal_text else None
+        if topics is None and goal_text:
+            logger.info(f"Context label '{goal_text}' not in KB, generating topics via LLM")
+            topics = await _generate_topics_via_llm(goal_text)
 
     if not topics:
-        logger.warning(f"No topics generated for goal '{goal}'")
+        logger.warning(f"No topics derived for user '{user_id}' (no focus areas or context label)")
         return []
 
-    # Determine required_level based on goal complexity (default "intermediate")
+    # required_level: hardcoded until the Goal Knowledge Base grows per-topic
+    # required levels instead of one flat default (unchanged from prior behavior).
     required_level = "intermediate"
 
-    # Current level comes from the user's overall_level input
-    current_level = overall_level.lower().strip() if overall_level else "beginner"
-    if current_level not in LEVEL_ORDER:
-        current_level = "beginner"
+    # ponytail: L1 no longer carries a self-reported overall_level (dropped per
+    # the L1 schema redesign) — seed every topic at "beginner" and let the
+    # evidence-based evaluation loop (issue #50) correct it from there.
+    current_level = "beginner"
 
     # Build skill nodes and upsert into DB
     skill_nodes = []
@@ -269,7 +271,5 @@ async def bootstrap_skills(
 
         skill_nodes.append(node)
 
-    logger.info(
-        f"Bootstrapped {len(skill_nodes)} skills for user '{user_id}' with goal '{goal}'"
-    )
+    logger.info(f"Bootstrapped {len(skill_nodes)} skills for user '{user_id}'")
     return skill_nodes

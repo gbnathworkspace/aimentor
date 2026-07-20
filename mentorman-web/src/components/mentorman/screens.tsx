@@ -14,7 +14,14 @@ import { MentorQuestionCard, QuickReplyOptions, type QuickReplyOption } from './
 // ---------- Onboarding (conversational AI agent) ----------------
 
 type ApiMsg = { role: 'user' | 'assistant'; content: string };
-type CompletedProfile = { goal: string; deadline: string | null; overall_level: string; daily_availability: string };
+type CompletedProfile = {
+  learning_context: string;
+  learning_context_label: string | null;
+  focus_areas: string[];
+  explanation_style: string;
+  challenge_tolerance: string;
+  feedback_tone: string;
+};
 
 export interface OnboardingProps {
   onFinish: (goal: string) => void;
@@ -39,12 +46,11 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
   const [skipLoading,    setSkipLoading]    = useState(false);
   const [skipError,      setSkipError]      = useState<string | null>(null);
 
-  // Deferred mode: load existing profile to know which phases to skip
+  // Deferred mode: load existing profile so the agent skips what's already known
   const [deferredState, setDeferredState] = useState<{
     loaded: boolean;
-    phasesToSkip: number[];
-    existingProfile: Record<string, string | null> | null;
-  }>({ loaded: !deferred, phasesToSkip: [], existingProfile: null });
+    knownParts: string[];
+  }>({ loaded: !deferred, knownParts: [] });
 
   useEffect(() => {
     if (!deferred) return;
@@ -53,18 +59,21 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
       try {
         const res = await fetch('/api/profile');
         if (!res.ok) {
-          if (!cancelled) setDeferredState({ loaded: true, phasesToSkip: [], existingProfile: null });
+          if (!cancelled) setDeferredState({ loaded: true, knownParts: [] });
           return;
         }
         const p = await res.json();
         if (cancelled) return;
-        const skip: number[] = [];
-        if (p.goal && p.goal !== 'exploring' && p.deadline !== null && p.deadline !== undefined && p.deadline !== '') skip.push(0);
-        if (p.overall_level && p.overall_level !== 'beginner') skip.push(1);
-        if (p.daily_availability && p.daily_availability !== '1 hour') skip.push(3);
-        setDeferredState({ loaded: true, phasesToSkip: skip, existingProfile: p });
+        const parts: string[] = [];
+        if (p.learning_context) parts.push(`learning context: ${p.learning_context}`);
+        if (p.learning_context_detail?.label) parts.push(`situation: ${p.learning_context_detail.label}`);
+        if (p.focus_areas?.length) parts.push(`focus areas: ${p.focus_areas.join(', ')}`);
+        if (p.explanation_style) parts.push(`explanation style: ${p.explanation_style}`);
+        if (p.challenge_tolerance) parts.push(`challenge tolerance: ${p.challenge_tolerance}`);
+        if (p.feedback_tone) parts.push(`feedback tone: ${p.feedback_tone}`);
+        setDeferredState({ loaded: true, knownParts: parts });
       } catch {
-        if (!cancelled) setDeferredState({ loaded: true, phasesToSkip: [], existingProfile: null });
+        if (!cancelled) setDeferredState({ loaded: true, knownParts: [] });
       }
     }
     loadProfile();
@@ -87,32 +96,18 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
     if (started.current) return;
     started.current = true;
 
-    if (deferred && deferredState.phasesToSkip.length > 0) {
-      const existing = deferredState.existingProfile;
-      const parts: string[] = [];
-      if (existing?.goal && existing.goal !== 'exploring') parts.push(`goal: ${existing.goal}`);
-      if (existing?.deadline) parts.push(`deadline: ${existing.deadline}`);
-      if (existing?.overall_level && existing.overall_level !== 'beginner') parts.push(`level: ${existing.overall_level}`);
-      if (existing?.daily_availability && existing.daily_availability !== '1 hour') parts.push(`availability: ${existing.daily_availability}`);
-      const contextMsg = parts.length > 0
-        ? `hi, I'm completing my profile. I already have: ${parts.join(', ')}. Please only ask about what's missing.`
-        : 'hi';
+    if (deferred && deferredState.knownParts.length > 0) {
+      const contextMsg = `hi, I'm completing my profile. I already have: ${deferredState.knownParts.join(', ')}. Please only ask about what's missing.`;
       callAgent([{ role: 'user', content: contextMsg }], []);
     } else {
       callAgent([{ role: 'user', content: 'hi' }], []);
     }
   }, [deferredState.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const extractPartialProfile = useCallback((): Record<string, string> | undefined => {
-    const userMsgs = apiMsgs.filter(m => m.role === 'user').slice(1);
-    if (userMsgs.length === 0) return undefined;
-    const partial: Record<string, string> = {};
-    if (userMsgs.length >= 1 && userMsgs[0].content) partial.goal = userMsgs[0].content;
-    if (userMsgs.length >= 2 && userMsgs[1].content) partial.overall_level = userMsgs[1].content;
-    if (userMsgs.length >= 4 && userMsgs[3].content) partial.daily_availability = userMsgs[3].content;
-    return Object.keys(partial).length > 0 ? partial : undefined;
-  }, [apiMsgs]);
-
+  // ponytail: no per-field partial-profile guess on skip — with the new prompt
+  // asking things in whatever order the model chooses, and learning_context now
+  // a strict enum, guessing a field from raw message text risks writing an
+  // invalid value that 500s on the next profile read. Backend defaults cover it.
   const handleSkipConfirm = useCallback(async () => {
     setSkipLoading(true);
     setSkipError(null);
@@ -120,7 +115,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
       const res = await fetch('/api/onboarding/skip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partialProfile: extractPartialProfile() }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -133,7 +128,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
       setSkipError('Connection failed — please check your network and try again.');
       setSkipLoading(false);
     }
-  }, [extractPartialProfile, onFinish]);
+  }, [onFinish]);
 
   const handleSkipCancel = useCallback(() => {
     if (skipLoading) return;
@@ -155,7 +150,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
     }
     setSaveFailed(false);
     if (deferred) {
-      setTimeout(() => onFinish(p.goal || 'exploring'), 600);
+      setTimeout(() => onFinish(p.focus_areas?.[0] || p.learning_context_label || 'exploring'), 600);
     } else {
       setTimeout(() => setDone(true), 400);
     }
@@ -288,11 +283,14 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
               <div className="badge"><span className="dot" /> Setup complete</div>
               <h3>You&apos;re all set.</h3>
               <div className="setup-lines">
-                <div className="setup-line"><span className="k">goal</span><span className="v">{profile.goal}</span></div>
-                <div className="setup-line"><span className="k">deadline</span><span className="v">{profile.deadline}</span></div>
-                <div className="setup-line"><span className="k">availability</span><span className="v">{profile.daily_availability}</span></div>
+                <div className="setup-line"><span className="k">context</span><span className="v">{profile.learning_context_label || profile.learning_context}</span></div>
+                <div className="setup-line"><span className="k">focus</span><span className="v">{profile.focus_areas.join(', ') || '—'}</span></div>
+                <div className="setup-line"><span className="k">style</span><span className="v">{profile.explanation_style} · {profile.challenge_tolerance} · {profile.feedback_tone}</span></div>
               </div>
-              <button className="btn btn-accent" style={{ width: '100%', height: 42 }} onClick={() => onFinish(profile.goal)}>
+              <button
+                className="btn btn-accent" style={{ width: '100%', height: 42 }}
+                onClick={() => onFinish(profile.focus_areas[0] || profile.learning_context_label || 'exploring')}
+              >
                 Start your first session <Icon name="arrowR" size={15} />
               </button>
             </div>
@@ -446,16 +444,15 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   onSaved: () => void;
   onStartDeferredOnboarding?: () => void;
 }) {
-  const [editGoal, setEditGoal] = useState(false);
-  const [editDeadline, setEditDeadline] = useState(false);
-  const [editAvail, setEditAvail] = useState(false);
   const [editName, setEditName] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
-  const [goalVal, setGoalVal] = useState(profile?.goal ?? '');
-  const [deadlineVal, setDeadlineVal] = useState(profile?.deadline ?? '');
-  const [availVal, setAvailVal] = useState(profile?.daily_availability ?? '');
-  const [styleVal, setStyleVal] = useState((profile?.style_notes as string) ?? '');
+  const [contextVal, setContextVal] = useState(profile?.learning_context ?? 'self_directed');
+  const [labelVal, setLabelVal] = useState(profile?.learning_context_detail?.label ?? '');
+  const [focusVal, setFocusVal] = useState((profile?.focus_areas ?? []).join(', '));
+  const [explanationVal, setExplanationVal] = useState(profile?.explanation_style ?? 'hint-first');
+  const [challengeVal, setChallengeVal] = useState(profile?.challenge_tolerance ?? 'medium');
+  const [toneVal, setToneVal] = useState(profile?.feedback_tone ?? 'encouraging');
   const [nameVal, setNameVal] = useState(profile?.name ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -464,14 +461,16 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
 
   // Sync form values when profile loads / changes
   useEffect(() => {
-    setGoalVal(profile?.goal ?? '');
-    setDeadlineVal(profile?.deadline ?? '');
-    setAvailVal(profile?.daily_availability ?? '');
-    setStyleVal((profile?.style_notes as string) ?? '');
+    setContextVal(profile?.learning_context ?? 'self_directed');
+    setLabelVal(profile?.learning_context_detail?.label ?? '');
+    setFocusVal((profile?.focus_areas ?? []).join(', '));
+    setExplanationVal(profile?.explanation_style ?? 'hint-first');
+    setChallengeVal(profile?.challenge_tolerance ?? 'medium');
+    setToneVal(profile?.feedback_tone ?? 'encouraging');
     setNameVal(profile?.name ?? '');
   }, [profile]);
 
-  const save = async (field: Record<string, string>): Promise<boolean> => {
+  const save = async (field: Record<string, unknown>): Promise<boolean> => {
     setSaving(true);
     setSaveError(null);
     try {
@@ -539,14 +538,10 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     }
   };
 
-  const deadlineDisplay = profile?.deadline
-    ? new Date(profile.deadline).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
-    : '—';
-
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="ph-left"><div className="ph-title">Profile &amp; Settings</div><div className="ph-sub">goal · availability · data</div></div>
+        <div className="ph-left"><div className="ph-title">Profile &amp; Settings</div><div className="ph-sub">context · focus · style</div></div>
       </div>
       <div className="set-body">
         <div className="set-inner">
@@ -606,72 +601,60 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
           </div>
 
           <div className="set-section">
-            <div className="set-label">Goal</div>
+            <div className="set-label">Learning context</div>
 
             <div className="set-row">
-              <div className="k">Goal</div>
-              {editGoal ? (
-                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    className="num-input" style={{ flex: 1 }}
-                    value={goalVal}
-                    onChange={e => setGoalVal(e.target.value)}
-                  />
-                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditGoal(false); setGoalVal(profile?.goal ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ goal: goalVal })) setEditGoal(false); }}>Save</button>
-                </div>
-              ) : (
-                <>
-                  <div className="v">{profile?.goal ?? '—'}</div>
-                  <button className="btn btn-sm btn-ghost" onClick={() => setEditGoal(true)}>Edit</button>
-                </>
-              )}
+              <div className="k">Context</div>
+              <select className="num-input" value={contextVal} onChange={e => setContextVal(e.target.value)}>
+                <option value="job_interview">Job interview</option>
+                <option value="high_stakes_exam">High-stakes exam</option>
+                <option value="competitive_test">Competitive test</option>
+                <option value="self_directed">Self-directed</option>
+                <option value="other">Other</option>
+              </select>
             </div>
 
             <div className="set-row">
-              <div className="k">Target date</div>
-              {editDeadline ? (
-                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    className="num-input" type="date" style={{ flex: 1 }}
-                    value={deadlineVal}
-                    onChange={e => setDeadlineVal(e.target.value)}
-                  />
-                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditDeadline(false); setDeadlineVal(profile?.deadline ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ deadline: deadlineVal })) setEditDeadline(false); }}>Save</button>
-                </div>
-              ) : (
-                <>
-                  <div className="v">{deadlineDisplay}</div>
-                  <button className="btn btn-sm btn-ghost" onClick={() => setEditDeadline(true)}>Edit</button>
-                </>
-              )}
+              <div className="k">Situation</div>
+              <input
+                className="num-input" style={{ flex: 1 }}
+                value={labelVal}
+                placeholder="e.g. senior backend roles, 20 LPA target"
+                onChange={e => setLabelVal(e.target.value)}
+              />
             </div>
+
+            <button
+              className="btn btn-sm btn-primary" style={{ marginTop: 6, alignSelf: 'flex-start' }}
+              disabled={saving || (
+                contextVal === (profile?.learning_context ?? 'self_directed') &&
+                labelVal === (profile?.learning_context_detail?.label ?? '')
+              )}
+              onClick={() => save({
+                learning_context: contextVal,
+                learning_context_detail: { learning_context: contextVal, label: labelVal || null, structured: {} },
+              })}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
           </div>
 
           <div className="set-section">
-            <div className="set-label">Availability</div>
-            <div className="avail-card">
-              <div className="avail-top">
-                <div className="main">{profile?.daily_availability ?? '—'}</div>
-              </div>
-              {editAvail ? (
-                <div className="avail-form">
-                  <div className="avail-field" style={{ flex: 1 }}>
-                    <label>Daily availability</label>
-                    <input
-                      className="num-input" style={{ width: '100%' }}
-                      value={availVal}
-                      placeholder="e.g. 2 hrs weekdays, 4 on weekends"
-                      onChange={e => setAvailVal(e.target.value)}
-                    />
-                  </div>
-                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditAvail(false); setAvailVal(profile?.daily_availability ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ daily_availability: availVal })) setEditAvail(false); }}>Save</button>
-                </div>
-              ) : (
-                <button className="btn btn-sm btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setEditAvail(true)}>Edit</button>
-              )}
+            <div className="set-label">Focus areas</div>
+            <div className="set-row">
+              <input
+                className="num-input" style={{ flex: 1 }}
+                value={focusVal}
+                placeholder="e.g. System Design, DSA, Behavioral"
+                onChange={e => setFocusVal(e.target.value)}
+              />
+              <button
+                className="btn btn-sm btn-primary"
+                disabled={saving || focusVal === (profile?.focus_areas ?? []).join(', ')}
+                onClick={() => save({ focus_areas: focusVal.split(',').map(s => s.trim()).filter(Boolean) })}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
 
@@ -682,21 +665,43 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
           <div className="set-section">
             <div className="set-label">How should the mentor teach you?</div>
             <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 0 8px' }}>
-              Tell the mentor how you learn best — it follows this in every reply.
+              These preferences apply in every reply, across all topics and modes.
             </div>
-            <textarea
-              value={styleVal}
-              onChange={e => setStyleVal(e.target.value)}
-              placeholder="e.g. I learn best with code examples. Keep explanations short. Use real-world analogies."
-              rows={3}
-              style={{ width: '100%', resize: 'vertical', fontSize: 13, padding: 8, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
-            />
-            <div style={{ marginTop: 6 }}>
-              <button className="btn btn-sm btn-primary" disabled={saving || styleVal === ((profile?.style_notes as string) ?? '')}
-                onClick={() => save({ style_notes: styleVal })}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+
+            <div className="set-row">
+              <div className="k">Explanation style</div>
+              <select className="num-input" value={explanationVal} onChange={e => setExplanationVal(e.target.value)}>
+                <option value="hint-first">Hints first</option>
+                <option value="answer-first">Answer first</option>
+              </select>
             </div>
+            <div className="set-row">
+              <div className="k">Challenge tolerance</div>
+              <select className="num-input" value={challengeVal} onChange={e => setChallengeVal(e.target.value)}>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div className="set-row">
+              <div className="k">Feedback tone</div>
+              <select className="num-input" value={toneVal} onChange={e => setToneVal(e.target.value)}>
+                <option value="direct">Direct</option>
+                <option value="encouraging">Encouraging</option>
+              </select>
+            </div>
+
+            <button
+              className="btn btn-sm btn-primary" style={{ marginTop: 6, alignSelf: 'flex-start' }}
+              disabled={saving || (
+                explanationVal === (profile?.explanation_style ?? 'hint-first') &&
+                challengeVal === (profile?.challenge_tolerance ?? 'medium') &&
+                toneVal === (profile?.feedback_tone ?? 'encouraging')
+              )}
+              onClick={() => save({ explanation_style: explanationVal, challenge_tolerance: challengeVal, feedback_tone: toneVal })}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
           </div>
 
           <div className="set-section">
@@ -717,7 +722,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
                 </div>
               ) : (
                 <>
-                  <button className="danger-btn" onClick={() => setConfirmReset(true)}>Reset goal and skill graph</button>
+                  <button className="danger-btn" onClick={() => setConfirmReset(true)}>Reset profile and skill graph</button>
                   <div className="danger-note">This clears your profile and restarts onboarding.</div>
                 </>
               )}

@@ -311,13 +311,6 @@ export function GapBar({ cur, req, animate }: { cur: number; req: number; animat
   );
 }
 
-function daysLeft(deadline: string | undefined): number | null {
-  if (!deadline) return null;
-  const ms = new Date(deadline).getTime();
-  if (Number.isNaN(ms)) return null; // non-date deadline (e.g. "3 months") → no countdown
-  return Math.max(0, Math.round((ms - Date.now()) / 86_400_000));
-}
-
 function relativeDate(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const days = Math.floor(diff / 86_400_000);
@@ -386,7 +379,8 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
   };
 
   const { logout } = useAuth();
-  const days = daysLeft(profile?.deadline ?? undefined);
+  const focusSummary = profile?.learning_context_detail?.label
+    || (profile?.focus_areas?.length ? profile.focus_areas.join(', ') : null);
   const displayName = userName || profile?.email?.split('@')[0] || 'You';
   const initial = displayName[0]?.toUpperCase() ?? 'Y';
 
@@ -464,10 +458,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
           <div className="avatar">{initial}</div>
           <div style={{ minWidth: 0 }}>
             <div className="who">{displayName}</div>
-            <div className="sub">
-              {profile?.goal ?? '—'}
-              {days !== null ? ` · ${days} days left` : ''}
-            </div>
+            <div className="sub">{focusSummary ?? '—'}</div>
           </div>
         </button>
         <button

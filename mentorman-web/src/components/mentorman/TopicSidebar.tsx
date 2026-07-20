@@ -273,7 +273,10 @@ export function TopicSidebar({
             )}
             <div style={{ minWidth: 0 }}>
               <div className="who">{profile?.name || userName || profile?.email?.split('@')[0] || 'You'}</div>
-              <div className="sub">{profile?.goal ?? '—'}</div>
+              <div className="sub">
+                {profile?.learning_context_detail?.label
+                  || (profile?.focus_areas?.length ? profile.focus_areas.join(', ') : '—')}
+              </div>
             </div>
           </button>
           <button className="icon-btn" title="Sign out" onClick={() => logout()} style={{ flexShrink: 0 }}>

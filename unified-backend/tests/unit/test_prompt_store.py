@@ -35,19 +35,23 @@ class TestGetSystemPrompt:
     def test_interpolates_profile_fields(self):
         context = {
             "profile": {
-                "goal": "Crack FAANG",
-                "deadline": "2025-06-01",
-                "overall_level": "intermediate",
-                "daily_availability": "3 hrs/day",
+                "learning_context": "job_interview",
+                "learning_context_detail": {"label": "Crack FAANG"},
+                "focus_areas": ["System Design", "DSA"],
+                "explanation_style": "answer-first",
+                "challenge_tolerance": "high",
+                "feedback_tone": "direct",
             },
             "skill": {},
             "episodes": [],
         }
         result = get_system_prompt("planning", context)
+        assert "job_interview" in result
         assert "Crack FAANG" in result
-        assert "2025-06-01" in result
-        assert "intermediate" in result
-        assert "3 hrs/day" in result
+        assert "System Design, DSA" in result
+        assert "answer-first" in result
+        assert "high" in result
+        assert "direct" in result
 
     def test_interpolates_skill_fields(self):
         context = {
@@ -143,7 +147,15 @@ class TestStyleNotes:
     """Issue #14: the user's 'how to teach me' note reaches the prompt."""
 
     def test_style_notes_injected(self):
-        context = {"profile": {"style_notes": "Use code examples, be concise"}, "skill": {}, "episodes": []}
+        context = {
+            "profile": {
+                "style_notes": [
+                    {"category": "communication", "note": "Use code examples, be concise"}
+                ]
+            },
+            "skill": {},
+            "episodes": [],
+        }
         result = get_system_prompt("topic", context)
         assert "How to Teach This User" in result
         assert "Use code examples, be concise" in result
@@ -151,7 +163,7 @@ class TestStyleNotes:
     def test_no_style_notes_placeholder(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
         result = get_system_prompt("topic", context)
-        assert "(none provided)" in result
+        assert "(none observed yet)" in result
         assert "{{style_notes}}" not in result
 
 
@@ -212,8 +224,8 @@ class TestGetOnboardingPrompt:
     def test_contains_onboarding_instructions(self):
         result = get_onboarding_prompt()
         assert "onboarding" in result.lower()
-        assert "goal" in result.lower()
-        assert "deadline" in result.lower()
+        assert "learning context" in result.lower()
+        assert "focus areas" in result.lower()
 
     def test_contains_suggestion_chips_instruction(self):
         result = get_onboarding_prompt()

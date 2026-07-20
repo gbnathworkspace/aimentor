@@ -36,18 +36,6 @@ function skillToTopic(s: SkillNode): Topic {
   };
 }
 
-function daysLeft(deadline: string | undefined): number | null {
-  if (!deadline) return null;
-  const ms = new Date(deadline).getTime();
-  if (Number.isNaN(ms)) return null; // non-date deadline (e.g. "3 months") → no countdown
-  return Math.max(0, Math.round((ms - Date.now()) / 86_400_000));
-}
-
-function weeksLeft(deadline: string | undefined): number | null {
-  const d = daysLeft(deadline);
-  return d === null ? null : Math.ceil(d / 7);
-}
-
 const gapClass = (g: number) => g >= 40 ? 'hi' : g >= 20 ? 'mid' : 'lo';
 
 function Ring({ pct, animate }: { pct: number; animate: boolean }) {
@@ -157,14 +145,10 @@ export function Dashboard({ onStartTopic, profile }: {
     ? Math.round(topics.reduce((a, t) => a + t.gap, 0) / topics.length)
     : 0;
 
-  const days = daysLeft(profile?.deadline ?? undefined);
-  const weeks = weeksLeft(profile?.deadline ?? undefined);
-  const goalText = profile?.goal ?? '—';
-  const deadlineMs = profile?.deadline ? new Date(profile.deadline).getTime() : NaN;
-  const deadlineText = !Number.isNaN(deadlineMs)
-    ? new Date(deadlineMs).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
-    : (profile?.deadline ?? '—');
-  const availText = profile?.daily_availability ?? '—';
+  const focusAreas = profile?.focus_areas ?? [];
+  const contextLabel = profile?.learning_context_detail?.label;
+  const heroTitle = contextLabel || (focusAreas.length ? focusAreas.join(', ') : '—');
+  const heroSub = contextLabel && focusAreas.length ? focusAreas.join(', ') : null;
 
   return (
     <div className="dash">
@@ -173,24 +157,13 @@ export function Dashboard({ onStartTopic, profile }: {
           <div className="ph-title">Your Progress</div>
           <div className="ph-sub">skill graph · updated today</div>
         </div>
-        <div className="ph-right">
-          {days !== null && (
-            <div className="countdown">
-              <span className="ind" /> on track · <span className="strong">{days} days</span>
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="dash-body">
         <div className="dash-hero">
           <div style={{ flex: 1, minWidth: 220 }}>
-            <h2 className="h">{goalText}</h2>
-            <div className="sub">
-              <b>{deadlineText}</b>
-              {weeks !== null && <> &nbsp;·&nbsp; {weeks} weeks left</>}
-              {availText !== '—' && <> &nbsp;·&nbsp; {availText}</>}
-            </div>
+            <h2 className="h">{heroTitle}</h2>
+            {heroSub && <div className="sub"><b>{heroSub}</b></div>}
           </div>
         </div>
 

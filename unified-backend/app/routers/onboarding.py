@@ -22,6 +22,7 @@ from app.models.chat import (
     OnboardingSkipRequest,
     OnboardingSkipResponse,
 )
+from app.models.profile import LearningContext, LearningContextDetail, ProfileCreate
 from app.services.onboarding_bootstrap import bootstrap_skills
 from app.services.prompt_store import get_onboarding_prompt
 from app.services.response_parsing import extract_suggestions
@@ -124,15 +125,24 @@ async def onboarding_complete(
     2. Call bootstrap_skills to generate initial skill graph nodes.
     3. Return the list of skill topics created.
     """
-    # Upsert L1 profile
-    profile_data = {
-        "user_id": user_id,
-        "goal": body.goal,
-        "deadline": body.deadline,
-        "overall_level": body.overall_level,
-        "daily_availability": body.daily_availability,
-        "profile_status": "complete",
-    }
+    # Build via ProfileCreate so the write always matches the L1 schema.
+    profile_model = ProfileCreate(
+        learning_context=body.learning_context,
+        learning_context_detail=(
+            LearningContextDetail(
+                learning_context=body.learning_context, label=body.learning_context_label
+            )
+            if body.learning_context_label
+            else None
+        ),
+        focus_areas=body.focus_areas,
+        explanation_style=body.explanation_style,
+        challenge_tolerance=body.challenge_tolerance,
+        feedback_tone=body.feedback_tone,
+        profile_status="complete",
+    )
+    profile_data = profile_model.model_dump(mode="json", exclude_none=True)
+    profile_data["user_id"] = user_id
 
     await profiles_col().update_one(
         {"user_id": user_id},
@@ -140,17 +150,17 @@ async def onboarding_complete(
         upsert=True,
     )
 
-    # Bootstrap skills from goal
-    skill_nodes = await bootstrap_skills(user_id, body.goal, body.overall_level)
+    # Bootstrap skills from focus areas (falls back to the context label)
+    skill_nodes = await bootstrap_skills(
+        user_id, body.focus_areas, body.learning_context_label
+    )
 
     return OnboardingCompleteResponse(skills=skill_nodes)
 
 
 _SKIP_DEFAULTS = {
-    "goal": "exploring",
-    "deadline": None,
-    "daily_availability": "1 hour",
-    "overall_level": "beginner",
+    "learning_context": LearningContext.SELF_DIRECTED.value,
+    "focus_areas": [],
 }
 
 
@@ -164,10 +174,8 @@ async def onboarding_skip(
 
     profile_data = {
         "user_id": user_id,
-        "goal": partial.get("goal") or _SKIP_DEFAULTS["goal"],
-        "deadline": partial.get("deadline") or _SKIP_DEFAULTS["deadline"],
-        "daily_availability": partial.get("daily_availability") or _SKIP_DEFAULTS["daily_availability"],
-        "overall_level": partial.get("overall_level") or _SKIP_DEFAULTS["overall_level"],
+        "learning_context": partial.get("learning_context") or _SKIP_DEFAULTS["learning_context"],
+        "focus_areas": partial.get("focus_areas") or _SKIP_DEFAULTS["focus_areas"],
         "email": "",
         "profile_status": "skipped",
     }
@@ -209,14 +217,27 @@ async def onboarding_complete_deferred(
         )
 
     updates: dict = {"profile_status": "complete"}
-    if body.goal:
-        updates["goal"] = body.goal
-    if body.deadline is not None:
-        updates["deadline"] = body.deadline
-    if body.overall_level:
-        updates["overall_level"] = body.overall_level
-    if body.daily_availability:
-        updates["daily_availability"] = body.daily_availability
+    resolved_context = body.learning_context or existing.get("learning_context")
+    if body.learning_context is not None:
+        updates["learning_context"] = body.learning_context.value
+    if body.learning_context_label is not None and resolved_context:
+        updates["learning_context_detail"] = {
+            "learning_context": (
+                body.learning_context.value
+                if body.learning_context
+                else resolved_context
+            ),
+            "label": body.learning_context_label,
+            "structured": {},
+        }
+    if body.focus_areas is not None:
+        updates["focus_areas"] = body.focus_areas
+    if body.explanation_style is not None:
+        updates["explanation_style"] = body.explanation_style
+    if body.challenge_tolerance is not None:
+        updates["challenge_tolerance"] = body.challenge_tolerance
+    if body.feedback_tone is not None:
+        updates["feedback_tone"] = body.feedback_tone
 
     await profiles_col().update_one({"user_id": user_id}, {"$set": updates})
 

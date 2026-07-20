@@ -50,6 +50,33 @@ class StyleNote(BaseModel):
     added_at: datetime
 
 
+class ProposableField(str, Enum):
+    """Fields the post-session profiling agent (app/services/profiling_agent.py)
+    may propose changes for. Deliberately narrow — proposals never touch
+    onboarding-owned fields (learning_context, focus_areas, the three teaching
+    preferences); those are direct user input, not inferred."""
+
+    GOAL_ORIENTATION = "goal_orientation"
+    STYLE_NOTE = "style_note"                          # one new note to add
+    LEARNING_CONTEXT_STRUCTURED = "learning_context_structured"  # keys to merge in
+
+
+class PendingProfileChange(BaseModel):
+    """A proposed L1 change awaiting user accept/dismiss (never auto-applied).
+
+    proposed_value's shape depends on `field`:
+      - goal_orientation: {"value": "<GoalOrientation>"}
+      - style_note: {"category": "<StyleNoteCategory>", "note": "<str>"}
+      - learning_context_structured: {"<key>": "<value>", ...}
+    """
+
+    field: ProposableField
+    proposed_value: dict
+    reason: str = Field(max_length=200)  # short grounding text, shown to the user
+    session_id: str
+    created_at: datetime
+
+
 # Write-time guard, meant to live in the profiling/session-reflection service that
 # populates LearningContextDetail.structured — keeps it flexible while preventing
 # silent key drift. Not enforced here; no writer for this field exists yet.
@@ -130,6 +157,10 @@ class ProfileResponse(BaseModel):
     challenge_tolerance: Literal["low", "medium", "high"] = "medium"
     feedback_tone: Literal["direct", "encouraging"] = "encouraging"
     style_notes: list[StyleNote] = []
+    # Proposed by the post-session profiling agent, awaiting accept/dismiss via
+    # POST /api/profile/pending-changes/{field}/(accept|dismiss). Never written
+    # by ProfileCreate/ProfileUpdate — system-managed only.
+    pending_changes: list[PendingProfileChange] = []
 
     email: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"

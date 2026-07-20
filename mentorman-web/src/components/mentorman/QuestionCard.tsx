@@ -32,10 +32,12 @@ export function MentorQuestionCard({ text }: { text: string }) {
   );
 }
 
-/** The tappable option rows below a question card. Always ends with a
- *  "type your own answer" row (the free-text equivalent of AskUserQuestion's
- *  "Other") so a discrete option list never forecloses an open-ended reply.
- *  A close button lets the user dismiss the whole box without picking one. */
+/** The tappable option rows below a question card, presented as one bordered
+ *  card with numbered rows (matching Claude Code's own AskUserQuestion card).
+ *  Always ends with a "type your own answer" row (the free-text equivalent of
+ *  AskUserQuestion's "Other") so a discrete option list never forecloses an
+ *  open-ended reply. A close button lets the user dismiss the whole card
+ *  without picking one. */
 export function QuickReplyOptions({
   options, onSelect, onTypeOwn, onClose,
 }: {
@@ -49,15 +51,17 @@ export function QuickReplyOptions({
       <button className="onb-options-close" title="Dismiss suggestions" aria-label="Dismiss suggestions" onClick={onClose}>
         <Icon name="x" size={12} />
       </button>
-      {options.map(s => (
+      {options.map((s, i) => (
         <button key={s.title} className="onb-option" title={s.description} onClick={() => onSelect(s.title)}>
+          <span className="onb-option-num">{i + 1}</span>
           <span className="onb-option-title">{s.title}</span>
-          <Icon name="arrowR" size={14} />
+          <span className="onb-option-arrow"><Icon name="arrowR" size={12} /></span>
         </button>
       ))}
       <button className="onb-option onb-option-custom" title="None of these fit — write a custom reply." onClick={onTypeOwn}>
+        <span className="onb-option-num onb-option-num-custom"><Icon name="edit" size={10} /></span>
         <span className="onb-option-title">Type your own answer</span>
-        <Icon name="arrowR" size={14} />
+        <span className="onb-option-arrow"><Icon name="arrowR" size={12} /></span>
       </button>
     </div>
   );

@@ -23,6 +23,16 @@ export interface StyleNote {
   added_at?: string;
 }
 
+// Proposed by the post-session profiling agent (app/services/profiling_agent.py),
+// awaiting accept/dismiss via POST /api/profile/pending-changes/{field}/(accept|dismiss).
+export interface PendingProfileChange {
+  field: 'goal_orientation' | 'style_note' | 'learning_context_structured';
+  proposed_value: Record<string, string>;
+  reason: string;
+  session_id: string;
+  created_at: string;
+}
+
 export interface CoreProfile {
   learning_context?: string | null;
   learning_context_detail?: LearningContextDetail | null;
@@ -33,6 +43,7 @@ export interface CoreProfile {
   challenge_tolerance: string;
   feedback_tone: string;
   style_notes: StyleNote[];
+  pending_changes: PendingProfileChange[];
   email?: string;
   profile_status?: 'complete' | 'skipped';
   name?: string;

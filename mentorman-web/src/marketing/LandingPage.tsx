@@ -54,7 +54,7 @@ const PAINS = [
 ];
 
 const AGENTS = [
-  { role: 'Profiler', h: 'Knows you', desc: 'Builds your profile from your resume, target companies, and practice history — your goal, timeline, and current level, always up to date.', chip: 'goal: Senior SWE · Aug 2026' },
+  { role: 'Profiler', h: 'Knows you', desc: "Learns why you're here — an interview, an exam, a certification — and which topics matter most, then adapts how it teaches to how you actually learn.", chip: 'context: job interview · focus: System Design, DSA' },
   { role: 'Planner', h: 'Charts the path', desc: 'Turns your goal into a week-by-week roadmap, re-prioritized after every session based on what is actually improving.', chip: 'this week: Graphs → BFS' },
   { role: 'Teacher', h: 'Teaches by asking', desc: 'Explains with questions, analogies, and visuals — guiding you to the insight instead of dumping the answer on you.', chip: '"What if the window shrinks?"' },
   { role: 'Quizzer', h: 'Drills your gaps', desc: 'Generates problems and MCQs aimed right at your weak spots, with instant feedback and spaced follow-ups.', chip: 'drill: DP on strings · 5 Qs' },
@@ -62,13 +62,13 @@ const AGENTS = [
 ];
 
 const LAYERS = [
-  { tag: 'LAYER 1 — CORE PROFILE', h: 'Your goal, always in view', p: 'Your target role, companies, timeline, and constraints anchor every conversation. Nothing you learn is off-path.', example: 'target: Senior SWE, product cos\ntimeline: Aug 2026' },
+  { tag: 'LAYER 1 — CORE PROFILE', h: "Why you're here, always in view", p: "What you're preparing for, the topics you care about, and how you like to be taught anchor every conversation. Nothing you learn is off-path.", example: 'context: job interview\nfocus: System Design, DSA' },
   { tag: 'LAYER 2 — SKILL GRAPH', h: 'A live map of your skills', p: 'Every topic — arrays to system design — scored and connected. Your mentor always knows what to teach next.', example: 'sliding_window: 92% ✓\ndynamic_programming: 41% ⚠' },
   { tag: 'LAYER 3 — EPISODIC MEMORY', h: 'Every session, remembered', p: 'Past explanations, questions you asked, mistakes you made — recalled when relevant, so lessons build on each other.', example: 'recall: "we compared this to the\ndelivery-batching example"' },
 ];
 
 const STEPS = [
-  { num: '01', h: 'Share your goal', p: 'Upload your resume, pick your target role and companies, and set your timeline. That is your Core Profile.' },
+  { num: '01', h: "Tell it why you're here", p: "A short conversation — what you're preparing for, which topics matter, how you like to be taught. That is your Core Profile." },
   { num: '02', h: 'Get your roadmap', p: 'The Planner builds a week-by-week plan from your skill graph — focused on your real gaps, not a generic syllabus.' },
   { num: '03', h: 'Learn by thinking', p: 'Socratic lessons per topic, in persistent threads. Come back tomorrow and continue mid-thought — no recap needed.' },
   { num: '04', h: 'Drill, review, repeat', p: 'Targeted quizzes find the gaps, the mistake tracker keeps you honest, and your skill graph updates every session.' },

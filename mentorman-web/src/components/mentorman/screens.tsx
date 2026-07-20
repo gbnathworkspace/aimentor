@@ -85,10 +85,13 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
   const textaRef = useRef<HTMLTextAreaElement>(null);
   const started  = useRef(false);
 
+  // Includes `suggestions` — the options card takes its own space below the
+  // thread (not an overlay), so the thread shrinks when it appears; without
+  // re-scrolling here, the tail of the last message looks cut off behind it.
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [thread, busy, done]);
+  }, [thread, busy, done, suggestions]);
 
   // Kick off conversation — wait for deferred profile load if needed
   useEffect(() => {
@@ -265,6 +268,17 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
           ))}
           {busy && <Typing />}
 
+          {!busy && suggestions.length > 0 && (
+            <div className="chat-options">
+              <QuickReplyOptions
+                options={suggestions}
+                onSelect={sendText}
+                onTypeOwn={() => { setSuggestions([]); textaRef.current?.focus(); }}
+                onClose={() => setSuggestions([])}
+              />
+            </div>
+          )}
+
           {saveFailed && profile && !done && (
             <div className="onb-save-error">
               <span>Couldn&apos;t save your profile — please check your connection.</span>
@@ -301,14 +315,6 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
       {!done && (
         <div className="onb-composer">
           <div className="onb-composer-inner">
-            {!busy && suggestions.length > 0 && (
-              <QuickReplyOptions
-                options={suggestions}
-                onSelect={sendText}
-                onTypeOwn={() => { setSuggestions([]); textaRef.current?.focus(); }}
-                onClose={() => setSuggestions([])}
-              />
-            )}
             <div className="composer-box">
               <textarea
                 ref={textaRef}
@@ -390,53 +396,6 @@ export function SessionEnd({ onFollow, onBack, title, summary, levelFrom, levelT
   );
 }
 
-// ---------- Data source upload ------------------------------
-// Native file input → POST /api/ingest (validates/stores/extracts server-side).
-// Server accepts PDF + CSV (résumé / LeetCode), 50MB max. The extracted chunks
-// are read back into the mentor context by context_assembler (issue #4).
-function DataSourceUpload() {
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
-  const [msg, setMsg] = useState('');
-
-  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setStatus('uploading');
-    setMsg(file.name);
-    try {
-      const fd = new FormData();
-      fd.append('files', file);
-      const res = await fetch('/api/ingest', { method: 'POST', body: fd });
-      if (!res.ok) {
-        setStatus('error');
-        setMsg(res.status === 400 ? 'Unsupported file — use a PDF or CSV.' : 'Upload failed — try again.');
-      } else {
-        setStatus('done');
-        setMsg(`${file.name} uploaded — your mentor will use it shortly.`);
-      }
-    } catch {
-      setStatus('error');
-      setMsg('Connection error — try again.');
-    } finally {
-      e.target.value = ''; // allow re-selecting the same file
-    }
-  };
-
-  return (
-    <div style={{ padding: '8px 0' }}>
-      <label className="btn btn-sm btn-ghost" style={{ cursor: 'pointer' }}>
-        {status === 'uploading' ? 'Uploading…' : 'Upload résumé (PDF) or LeetCode (CSV)'}
-        <input type="file" accept=".pdf,.csv" onChange={onPick} disabled={status === 'uploading'} style={{ display: 'none' }} />
-      </label>
-      {status !== 'idle' && status !== 'uploading' && (
-        <div style={{ color: status === 'error' ? 'var(--danger)' : 'var(--muted)', fontSize: 12, marginTop: 6 }}>
-          {msg}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------- Settings ----------------------------------------
 export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding }: {
   profile: CoreProfile | null;
@@ -444,6 +403,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   onSaved: () => void;
   onStartDeferredOnboarding?: () => void;
 }) {
+  const [tab, setTab] = useState<'profile' | 'memory'>('profile');
   const [editName, setEditName] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -519,6 +479,57 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
 
   const removeAvatar = () => { save({ avatar: '' }); };
 
+  const [resolvingField, setResolvingField] = useState<string | null>(null);
+  const resolvePendingChange = async (field: string, action: 'accept' | 'dismiss') => {
+    setResolvingField(field);
+    try {
+      const res = await fetch(`/api/profile/pending-changes/${field}/${action}`, { method: 'POST' });
+      if (res.ok) onSaved();
+    } finally {
+      setResolvingField(null);
+    }
+  };
+
+  const describePendingChange = (field: string, value: Record<string, unknown>): string => {
+    if (field === 'style_note') return `New teaching note: "${value.note}"`;
+    if (field === 'goal_orientation') return `Update motivation profile to: ${value.value}`;
+    if (field === 'learning_context_structured') {
+      return `Add detail: ${Object.entries(value).map(([k, v]) => `${k} = ${v}`).join(', ')}`;
+    }
+    return field;
+  };
+
+  // Direct natural-language memory edit (applies immediately — the user typed
+  // it themselves, same trust level as editing a field). See
+  // app/services/memory_editor.py, distinct from the inferred pending_changes.
+  const [memoryMsg, setMemoryMsg] = useState('');
+  const [memoryEditing, setMemoryEditing] = useState(false);
+  const [memoryResult, setMemoryResult] = useState<string | null>(null);
+  const sendMemoryEdit = async () => {
+    const message = memoryMsg.trim();
+    if (!message || memoryEditing) return;
+    setMemoryEditing(true);
+    setMemoryResult(null);
+    try {
+      const res = await fetch('/api/profile/memory-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        setMemoryResult('Something went wrong — try again.');
+      } else {
+        setMemoryResult(data.summary || 'Updated.');
+        if (data.changed) { setMemoryMsg(''); onSaved(); }
+      }
+    } catch {
+      setMemoryResult('Connection error — try again.');
+    } finally {
+      setMemoryEditing(false);
+    }
+  };
+
   const handleReset = async () => {
     setSaving(true);
     setSaveError(null);
@@ -538,199 +549,286 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     }
   };
 
+  const memoryBadgeCount = profile?.pending_changes?.length ?? 0;
+
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="ph-left"><div className="ph-title">Profile &amp; Settings</div><div className="ph-sub">context · focus · style</div></div>
+        <div className="ph-left">
+          <div className="ph-title">Settings</div>
+        </div>
       </div>
-      <div className="set-body">
-        <div className="set-inner">
+      <div className="settings-shell">
+        <div className="settings-nav">
+          <div className={`settings-nav-item ${tab === 'profile' ? 'active' : ''}`} onClick={() => setTab('profile')}>
+            <Icon name="user" size={15} /> Profile
+          </div>
+          <div className={`settings-nav-item ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>
+            <Icon name="target" size={15} /> Memory
+            {memoryBadgeCount > 0 && <span className="nav-badge" />}
+          </div>
+        </div>
 
+        <div className="settings-content">
           {saveError && (
-            <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', background: 'rgba(248,113,113,0.08)', borderRadius: 6, marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', background: 'rgba(248,113,113,0.08)', borderRadius: 6, marginBottom: 16 }}>
               {saveError}
             </div>
           )}
 
-          <div className="set-section">
-            <div className="set-label">Profile</div>
+          {tab === 'profile' && (
+            <div className="settings-group">
+              <div className="settings-group-title">Profile</div>
 
-            <div className="set-row" style={{ gap: 16 }}>
-              <div style={{ position: 'relative', flexShrink: 0 }}>
-                {profile?.avatar ? (
-                  <img src={profile.avatar} alt="Profile" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover' }} />
-                ) : (
-                  <div className="avatar" style={{ width: 56, height: 56, fontSize: 22 }}>
-                    {(profile?.name || profile?.email || 'Y')[0]?.toUpperCase()}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => avatarInputRef.current?.click()}>
-                    {profile?.avatar ? 'Change photo' : 'Upload photo'}
-                  </button>
+              <div className="settings-row">
+                <div className="k">Avatar</div>
+                <div className="v-wrap">
+                  {avatarError && <span style={{ fontSize: 11, color: 'var(--danger)' }}>{avatarError}</span>}
                   {profile?.avatar && (
                     <button className="btn btn-sm btn-ghost" disabled={saving} onClick={removeAvatar}>Remove</button>
                   )}
+                  <button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => avatarInputRef.current?.click()}>
+                    {profile?.avatar ? 'Change' : 'Upload'}
+                  </button>
+                  <input ref={avatarInputRef} type="file" accept="image/*" onChange={onAvatarPick} style={{ display: 'none' }} />
+                  {profile?.avatar ? (
+                    <img src={profile.avatar} alt="Profile" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
+                  ) : (
+                    <div className="avatar" style={{ width: 32, height: 32, fontSize: 14 }}>
+                      {(profile?.name || profile?.email || 'Y')[0]?.toUpperCase()}
+                    </div>
+                  )}
                 </div>
-                <input ref={avatarInputRef} type="file" accept="image/*" onChange={onAvatarPick} style={{ display: 'none' }} />
-                {avatarError && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{avatarError}</div>}
+              </div>
+
+              <div className="settings-row">
+                <div className="k">Full name</div>
+                <div className="v-wrap">
+                  {editName ? (
+                    <>
+                      <input
+                        className="num-input" style={{ minWidth: 200 }}
+                        value={nameVal}
+                        onChange={e => setNameVal(e.target.value)}
+                      />
+                      <button className="btn btn-sm btn-ghost" onClick={() => { setEditName(false); setNameVal(profile?.name ?? ''); }}>Cancel</button>
+                      <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ name: nameVal })) setEditName(false); }}>Save</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="v">{profile?.name || '—'}</span>
+                      <button className="btn btn-sm btn-ghost" onClick={() => setEditName(true)}>Edit</button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {profile?.email && (
+                <div className="settings-row">
+                  <div className="k">Email</div>
+                  <div className="v-wrap"><span className="v">{profile.email}</span></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'memory' && (<>
+            {memoryBadgeCount > 0 && (
+              <div className="settings-group">
+                <div className="settings-group-title">Suggested updates</div>
+                <div className="settings-group-sub">Noticed from recent sessions — nothing changes until you accept.</div>
+                {profile!.pending_changes.map(change => (
+                  <div key={change.field} className="settings-row">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="v" style={{ textAlign: 'left', whiteSpace: 'normal' }}>{describePendingChange(change.field, change.proposed_value)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{change.reason}</div>
+                    </div>
+                    <div className="v-wrap">
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        disabled={resolvingField === change.field}
+                        onClick={() => resolvePendingChange(change.field, 'dismiss')}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        disabled={resolvingField === change.field}
+                        onClick={() => resolvePendingChange(change.field, 'accept')}
+                      >
+                        Accept
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
+              <div className="settings-group">
+                <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} />
+              </div>
+            )}
+
+            <div className="settings-group">
+              <div className="settings-group-title">Learning context</div>
+
+              <div className="settings-row">
+                <div className="k">Context</div>
+                <div className="v-wrap">
+                  <select className="num-input" value={contextVal} onChange={e => setContextVal(e.target.value)}>
+                    <option value="job_interview">Job interview</option>
+                    <option value="high_stakes_exam">High-stakes exam</option>
+                    <option value="competitive_test">Competitive test</option>
+                    <option value="self_directed">Self-directed</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="k">Situation</div>
+                <div className="v-wrap">
+                  <input
+                    className="num-input" style={{ minWidth: 240 }}
+                    value={labelVal}
+                    placeholder="e.g. senior backend roles, 20 LPA target"
+                    onChange={e => setLabelVal(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="settings-row" style={{ justifyContent: 'flex-end', borderBottom: 'none', paddingTop: 6 }}>
+                <button
+                  className="btn btn-sm btn-primary"
+                  disabled={saving || (
+                    contextVal === (profile?.learning_context ?? 'self_directed') &&
+                    labelVal === (profile?.learning_context_detail?.label ?? '')
+                  )}
+                  onClick={() => save({
+                    learning_context: contextVal,
+                    learning_context_detail: { learning_context: contextVal, label: labelVal || null, structured: {} },
+                  })}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
               </div>
             </div>
 
-            <div className="set-row">
-              <div className="k">Name</div>
-              {editName ? (
-                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    className="num-input" style={{ flex: 1 }}
-                    value={nameVal}
-                    onChange={e => setNameVal(e.target.value)}
-                  />
-                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditName(false); setNameVal(profile?.name ?? ''); }}>Cancel</button>
-                  <button className="btn btn-sm btn-primary" disabled={saving} onClick={async () => { if (await save({ name: nameVal })) setEditName(false); }}>Save</button>
+            <div className="settings-group">
+              <div className="settings-group-title">Focus areas</div>
+              <div className="settings-row" style={{ borderBottom: 'none' }}>
+                <input
+                  className="num-input" style={{ flex: 1, minWidth: 0 }}
+                  value={focusVal}
+                  placeholder="e.g. System Design, DSA, Behavioral"
+                  onChange={e => setFocusVal(e.target.value)}
+                />
+                <button
+                  className="btn btn-sm btn-primary"
+                  disabled={saving || focusVal === (profile?.focus_areas ?? []).join(', ')}
+                  onClick={() => save({ focus_areas: focusVal.split(',').map(s => s.trim()).filter(Boolean) })}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <div className="settings-group-title">How should the mentor teach you?</div>
+              <div className="settings-group-sub">These preferences apply in every reply, across all topics and modes.</div>
+
+              <div className="settings-row">
+                <div className="k">Explanation style</div>
+                <div className="v-wrap">
+                  <select className="num-input" value={explanationVal} onChange={e => setExplanationVal(e.target.value)}>
+                    <option value="hint-first">Hints first</option>
+                    <option value="answer-first">Answer first</option>
+                  </select>
                 </div>
-              ) : (
-                <>
-                  <div className="v">{profile?.name || '—'}</div>
-                  <button className="btn btn-sm btn-ghost" onClick={() => setEditName(true)}>Edit</button>
-                </>
-              )}
-            </div>
-          </div>
+              </div>
+              <div className="settings-row">
+                <div className="k">Challenge tolerance</div>
+                <div className="v-wrap">
+                  <select className="num-input" value={challengeVal} onChange={e => setChallengeVal(e.target.value)}>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="k">Feedback tone</div>
+                <div className="v-wrap">
+                  <select className="num-input" value={toneVal} onChange={e => setToneVal(e.target.value)}>
+                    <option value="direct">Direct</option>
+                    <option value="encouraging">Encouraging</option>
+                  </select>
+                </div>
+              </div>
 
-          <div className="set-section">
-            <div className="set-label">Learning context</div>
-
-            <div className="set-row">
-              <div className="k">Context</div>
-              <select className="num-input" value={contextVal} onChange={e => setContextVal(e.target.value)}>
-                <option value="job_interview">Job interview</option>
-                <option value="high_stakes_exam">High-stakes exam</option>
-                <option value="competitive_test">Competitive test</option>
-                <option value="self_directed">Self-directed</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-
-            <div className="set-row">
-              <div className="k">Situation</div>
-              <input
-                className="num-input" style={{ flex: 1 }}
-                value={labelVal}
-                placeholder="e.g. senior backend roles, 20 LPA target"
-                onChange={e => setLabelVal(e.target.value)}
-              />
-            </div>
-
-            <button
-              className="btn btn-sm btn-primary" style={{ marginTop: 6, alignSelf: 'flex-start' }}
-              disabled={saving || (
-                contextVal === (profile?.learning_context ?? 'self_directed') &&
-                labelVal === (profile?.learning_context_detail?.label ?? '')
-              )}
-              onClick={() => save({
-                learning_context: contextVal,
-                learning_context_detail: { learning_context: contextVal, label: labelVal || null, structured: {} },
-              })}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-
-          <div className="set-section">
-            <div className="set-label">Focus areas</div>
-            <div className="set-row">
-              <input
-                className="num-input" style={{ flex: 1 }}
-                value={focusVal}
-                placeholder="e.g. System Design, DSA, Behavioral"
-                onChange={e => setFocusVal(e.target.value)}
-              />
-              <button
-                className="btn btn-sm btn-primary"
-                disabled={saving || focusVal === (profile?.focus_areas ?? []).join(', ')}
-                onClick={() => save({ focus_areas: focusVal.split(',').map(s => s.trim()).filter(Boolean) })}
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-
-          {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
-            <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} />
-          )}
-
-          <div className="set-section">
-            <div className="set-label">How should the mentor teach you?</div>
-            <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 0 8px' }}>
-              These preferences apply in every reply, across all topics and modes.
+              <div className="settings-row" style={{ justifyContent: 'flex-end', borderBottom: 'none', paddingTop: 6 }}>
+                <button
+                  className="btn btn-sm btn-primary"
+                  disabled={saving || (
+                    explanationVal === (profile?.explanation_style ?? 'hint-first') &&
+                    challengeVal === (profile?.challenge_tolerance ?? 'medium') &&
+                    toneVal === (profile?.feedback_tone ?? 'encouraging')
+                  )}
+                  onClick={() => save({ explanation_style: explanationVal, challenge_tolerance: challengeVal, feedback_tone: toneVal })}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
             </div>
 
-            <div className="set-row">
-              <div className="k">Explanation style</div>
-              <select className="num-input" value={explanationVal} onChange={e => setExplanationVal(e.target.value)}>
-                <option value="hint-first">Hints first</option>
-                <option value="answer-first">Answer first</option>
-              </select>
-            </div>
-            <div className="set-row">
-              <div className="k">Challenge tolerance</div>
-              <select className="num-input" value={challengeVal} onChange={e => setChallengeVal(e.target.value)}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-            <div className="set-row">
-              <div className="k">Feedback tone</div>
-              <select className="num-input" value={toneVal} onChange={e => setToneVal(e.target.value)}>
-                <option value="direct">Direct</option>
-                <option value="encouraging">Encouraging</option>
-              </select>
-            </div>
-
-            <button
-              className="btn btn-sm btn-primary" style={{ marginTop: 6, alignSelf: 'flex-start' }}
-              disabled={saving || (
-                explanationVal === (profile?.explanation_style ?? 'hint-first') &&
-                challengeVal === (profile?.challenge_tolerance ?? 'medium') &&
-                toneVal === (profile?.feedback_tone ?? 'encouraging')
-              )}
-              onClick={() => save({ explanation_style: explanationVal, challenge_tolerance: challengeVal, feedback_tone: toneVal })}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-
-          <div className="set-section">
-            <div className="set-label">Data sources</div>
-            <DataSourceUpload />
-          </div>
-
-          <div className="set-section">
-            <div className="set-label danger">Danger zone</div>
-            <div className="danger-card">
-              {confirmReset ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>This will delete your profile and restart onboarding. Are you sure?</div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="danger-btn" disabled={saving} onClick={handleReset}>Yes, reset everything</button>
-                    <button className="btn btn-sm btn-ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
+            <div className="settings-group">
+              <div className="settings-group-title" style={{ color: 'var(--danger)' }}>Danger zone</div>
+              <div className="danger-card">
+                {confirmReset ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      This clears your L1 memory (learning context, focus areas, preferences, style notes) and
+                      restarts onboarding. Your skill graph and session history are kept. Are you sure?
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="danger-btn" disabled={saving} onClick={handleReset}>Yes, reset L1 memory</button>
+                      <button className="btn btn-sm btn-ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <>
-                  <button className="danger-btn" onClick={() => setConfirmReset(true)}>Reset profile and skill graph</button>
-                  <div className="danger-note">This clears your profile and restarts onboarding.</div>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button className="danger-btn" onClick={() => setConfirmReset(true)}>Reset L1 memory</button>
+                    <div className="danger-note">Clears learning context, focus areas, and preferences, then restarts onboarding.</div>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-
+          </>)}
         </div>
       </div>
+
+      {tab === 'memory' && (
+        <div className="settings-memory-composer">
+          {memoryResult && <div className="settings-memory-result">{memoryResult}</div>}
+          <div className="settings-memory-composer-box">
+            <input
+              value={memoryMsg}
+              placeholder="Tell it what to change or remove…"
+              disabled={memoryEditing}
+              onChange={e => setMemoryMsg(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') sendMemoryEdit(); }}
+            />
+            <button
+              className="icon-btn" title="Send" aria-label="Send"
+              disabled={memoryEditing || !memoryMsg.trim()}
+              onClick={sendMemoryEdit}
+            >
+              <Icon name="arrowUp" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -590,7 +590,10 @@ body {
 }
 .eval-flag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent-glow); }
 
-.chat-options { max-width: 760px; margin: 0 auto; padding: 0 26px 10px; }
+/* Rendered inline as part of the scrollable thread (chat-inner/onb-thread
+   already own width/centering/padding) so it never shrinks the chat body's
+   available space the way a fixed-height sibling would. */
+.chat-options { width: 100%; }
 
 .speak-btn {
   width: 24px; height: 24px; border-radius: 6px; border: 1px solid transparent;
@@ -741,30 +744,41 @@ body {
 
 .onb-options {
   position: relative;
-  display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
-  padding-top: 4px;
+  margin: 0 auto 14px; max-width: 380px; width: 100%;
+  border: 1px solid var(--border-soft); border-radius: var(--r-sm);
+  background: var(--card); overflow: hidden;
 }
 .onb-options-close {
-  position: absolute; top: -18px; right: 2px;
-  width: 22px; height: 22px; border-radius: 6px; border: none;
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  width: 18px; height: 18px; border-radius: 5px; border: none;
   background: transparent; color: var(--muted); cursor: pointer;
   display: grid; place-items: center;
   transition: background .14s, color .14s;
 }
 .onb-options-close:hover { background: var(--card-2); color: var(--fg-dim); }
 .onb-option {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; gap: 9px;
   width: 100%; text-align: left; font-family: inherit;
-  padding: 10px 14px; border-radius: var(--r-sm);
-  border: 1px solid var(--border-soft); background: var(--bg);
-  color: var(--fg); cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
+  padding: 7px 30px 7px 10px; border: none; border-bottom: 1px solid var(--border-soft);
+  background: transparent; color: var(--fg); cursor: pointer;
+  transition: background 0.12s;
 }
-.onb-option:hover { border-color: var(--accent-line); background: var(--accent-weak); }
+.onb-option:last-child { border-bottom: none; }
+.onb-option:hover { background: var(--accent-weak); }
 .onb-option:hover .onb-option-title { color: var(--accent); }
-.onb-option-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; transition: color 0.12s; }
-.onb-option svg { flex-shrink: 0; color: var(--muted); }
-.onb-option-custom { border-style: dashed; background: transparent; }
+.onb-option:hover .onb-option-arrow { opacity: 1; transform: translateX(0); }
+.onb-option-num {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 17px; height: 17px; border-radius: 5px;
+  background: var(--card-2); border: 1px solid var(--border-soft);
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+}
+.onb-option-num-custom { color: var(--muted-2); }
+.onb-option-title { flex: 1; min-width: 0; font-size: 11.5px; font-weight: 600; letter-spacing: -0.01em; transition: color 0.12s; }
+.onb-option-arrow {
+  flex-shrink: 0; display: grid; place-items: center; color: var(--muted);
+  opacity: 0; transform: translateX(-4px); transition: opacity 0.12s, transform 0.12s;
+}
 .onb-option-custom .onb-option-title { color: var(--muted-2); font-weight: 550; }
 
 /* ===========================================================
@@ -919,6 +933,58 @@ body {
 .danger-card { border: 1px solid var(--danger-line); border-radius: var(--r); padding: 17px; background: var(--danger-weak); display: flex; flex-direction: column; gap: 11px; }
 .danger-btn { align-self: flex-start; height: 36px; padding: 0 15px; background: transparent; border: 1px solid var(--danger-line); color: var(--danger); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .14s; }
 .danger-btn:hover { background: rgba(251,113,133,0.1); }
+
+/* Settings shell: persistent left nav + scrollable right content (claude.ai
+   settings pattern) — separate from .set-* above, which AdminUsers still uses. */
+.settings-shell { flex: 1; min-height: 0; display: flex; }
+.settings-nav {
+  width: 208px; flex-shrink: 0; padding: 18px 10px;
+  border-right: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+}
+.settings-nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-radius: var(--r-sm); color: var(--muted-2); font-size: 13.5px; font-weight: 550;
+  cursor: pointer; transition: background .12s, color .12s; position: relative;
+}
+.settings-nav-item:hover { background: var(--card-2); color: var(--fg-dim); }
+.settings-nav-item.active { background: var(--accent-weak); color: var(--accent); }
+.settings-nav-item .nav-badge {
+  position: absolute; top: 9px; right: 10px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent);
+}
+
+.settings-content { flex: 1; overflow-y: auto; padding: 30px 38px 60px; }
+.settings-group { max-width: 640px; margin-bottom: 34px; }
+.settings-group:last-child { margin-bottom: 0; }
+.settings-group-title { font-size: 15.5px; font-weight: 650; color: var(--fg); letter-spacing: -0.01em; margin-bottom: 2px; }
+.settings-group-sub { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+.settings-row { display: flex; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
+.settings-row:last-child { border-bottom: none; }
+.settings-row .k { font-size: 13.5px; color: var(--fg-dim); flex-shrink: 0; }
+.settings-row .v-wrap { flex: 1; display: flex; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; }
+.settings-row .v { font-size: 13.5px; color: var(--muted-2); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-row select.num-input, .settings-row input.num-input { width: auto; min-width: 160px; }
+
+.settings-memory-composer { flex-shrink: 0; padding: 12px 20px 16px; border-top: 1px solid var(--border-soft); }
+.settings-memory-result { font-size: 12px; color: var(--muted-2); margin-bottom: 8px; }
+.settings-memory-composer-box {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--card); padding: 6px 6px 6px 16px;
+}
+.settings-memory-composer-box input {
+  flex: 1; min-width: 0; border: none; background: none; color: var(--fg);
+  font-size: 13.5px; font-family: inherit;
+}
+.settings-memory-composer-box input:focus { outline: none; }
+.settings-memory-composer-box input::placeholder { color: var(--muted); }
+.settings-memory-composer-box .icon-btn {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent-weak); color: var(--accent);
+}
+.settings-memory-composer-box .icon-btn:disabled { opacity: 0.4; background: var(--card-2); color: var(--muted); }
 .danger-note { font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.5; }
 
 /* ===========================================================

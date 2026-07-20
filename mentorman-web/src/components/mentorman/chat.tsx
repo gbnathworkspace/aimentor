@@ -76,16 +76,18 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled }: {
+function Composer({ mode, tone, onSend, busy, disabled, onUpload }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
+  onUpload?: (file: File) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const grow = () => {
     const el = ref.current;
@@ -119,6 +121,28 @@ function Composer({ mode, tone, onSend, busy, disabled }: {
           />
           <div className="composer-tools">
             <button className="tool-btn" title="Code block">{'</>'}</button>
+            {onUpload && (
+              <>
+                <button
+                  className="tool-btn"
+                  title="Upload résumé (PDF) or LeetCode (CSV)"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Icon name="upload" size={13} />
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.csv"
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    e.target.value = ''; // allow re-selecting the same file
+                    if (file) onUpload(file);
+                  }}
+                />
+              </>
+            )}
             <div className="spacer" />
             <span className="tag" style={{ marginRight: 2 }}>mode: {mode}</span>
             <button className="send-btn" onClick={submit} disabled={busy || disabled || !val.trim()} title="Send">
@@ -249,11 +273,14 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     return () => { cancelled = true; };
   }, [topicId]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages. Includes `suggestions` — the options card
+  // takes up its own space below chat-body (not an overlay), so chat-body
+  // shrinks when it appears; without re-scrolling here, the tail of the last
+  // message stays at the old scroll position and looks cut off behind it.
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs, busy]);
+  }, [msgs, busy, suggestions]);
 
   // Send a message to the topic
   const send = useCallback(async (text: string) => {
@@ -281,6 +308,26 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       setBusy(false);
     }
   }, [topicId, mode]);
+
+  // Upload a résumé/LeetCode file mid-chat; status surfaces as a system
+  // message in the thread (server accepts PDF/CSV, extracts in the
+  // background, and context_assembler reads the chunks into every mentor
+  // call afterward — see app/routers/ingest.py).
+  const uploadFile = useCallback(async (file: File) => {
+    const sysId = 'sys' + Date.now();
+    setMsgs(prev => [...prev, { who: 'system', text: `Uploading ${file.name}…`, _id: sysId }]);
+    try {
+      const fd = new FormData();
+      fd.append('files', file);
+      const res = await fetch('/api/ingest', { method: 'POST', body: fd });
+      const text = !res.ok
+        ? (res.status === 400 ? 'Unsupported file — use a PDF or CSV.' : 'Upload failed — try again.')
+        : `${file.name} uploaded — your mentor will use it shortly.`;
+      setMsgs(prev => prev.map(m => (m._id === sysId ? { ...m, text } : m)));
+    } catch {
+      setMsgs(prev => prev.map(m => (m._id === sysId ? { ...m, text: 'Connection error — try again.' } : m)));
+    }
+  }, []);
 
   // Export the full topic transcript (all messages, not just the loaded page)
   // as a local .md file for offline analysis.
@@ -417,25 +464,26 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
           {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && <Typing />}
+
+          {!busy && suggestions.length > 0 && (
+            <div className="chat-options">
+              <QuickReplyOptions
+                options={suggestions}
+                onSelect={send}
+                onTypeOwn={() => { setSuggestions([]); document.getElementById('composer-textarea')?.focus(); }}
+                onClose={() => setSuggestions([])}
+              />
+            </div>
+          )}
         </div>
       </div>
-
-      {!busy && suggestions.length > 0 && (
-        <div className="chat-options">
-          <QuickReplyOptions
-            options={suggestions}
-            onSelect={send}
-            onTypeOwn={() => { setSuggestions([]); document.getElementById('composer-textarea')?.focus(); }}
-            onClose={() => setSuggestions([])}
-          />
-        </div>
-      )}
 
       <Composer
         mode={mode}
         tone={tone}
         onSend={send}
         busy={busy}
+        onUpload={uploadFile}
       />
     </div>
   );

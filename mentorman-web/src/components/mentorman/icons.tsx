@@ -6,7 +6,7 @@ type IconName =
   | 'plus' | 'chart' | 'gear' | 'send' | 'arrowUp' | 'check'
   | 'upload' | 'code' | 'spark' | 'warn' | 'x' | 'arrowR'
   | 'back' | 'target' | 'clock' | 'bolt' | 'doc' | 'dots' | 'logout'
-  | 'volume' | 'stop' | 'download' | 'chevronDown' | 'users';
+  | 'volume' | 'stop' | 'download' | 'chevronDown' | 'users' | 'edit' | 'user';
 
 const I: Record<IconName, React.ReactNode> = {
   plus:    <path d="M8 3v10M3 8h10" />,
@@ -33,6 +33,8 @@ const I: Record<IconName, React.ReactNode> = {
   download: <g><path d="M8 2v8.5M5 7.5l3 3 3-3" /><path d="M3 12.5v1.5h10v-1.5" /></g>,
   chevronDown: <path d="M4 6l4 4 4-4" />,
   users:   <g><circle cx="5.5" cy="6" r="2.2" /><path d="M1.5 13v-1a3 3 0 013-3h2a3 3 0 013 3v1" /><circle cx="11.5" cy="6.5" r="1.8" /><path d="M10.3 8.5a3 3 0 012.7 3v.7" /></g>,
+  edit:    <path d="M11.3 2.3a1.6 1.6 0 012.3 2.3L5.2 13 2 14l1-3.2z" />,
+  user:    <g><circle cx="8" cy="5.3" r="2.8" /><path d="M2.5 13.5a5.5 5.5 0 0111 0" /></g>,
 };
 
 export function Icon({ name, size = 16, style }: { name: IconName; size?: number; style?: React.CSSProperties }) {

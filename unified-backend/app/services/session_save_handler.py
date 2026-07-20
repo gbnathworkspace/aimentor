@@ -31,6 +31,7 @@ from app.models.session import (
     SessionStatus,
 )
 from app.services.message_store import MessageStore
+from app.services.profiling_agent import propose_changes as propose_profile_changes
 from app.services.session_manager import SessionManager
 from app.services.skill_graph_repo import apply_update as _apply_skill_graph_update
 
@@ -90,6 +91,18 @@ def _build_combined_prompt(
         f'   - "weak_areas" (array of strings, max 10): Areas where the student struggled\n'
         f'   - "strong_areas" (array of strings, max 10): Areas where the student excelled\n'
         f'   - "eval_score" (string, optional): An evaluation score if applicable\n\n'
+        f'3. "profile_signals" (array, can be empty): Clear signals about how this '
+        f"student learns best or what motivates them, grounded in this transcript. "
+        f"Only include a signal with real, specific evidence — return an empty array "
+        f"if nothing stands out. Do NOT force a signal every session. Each item is one of:\n"
+        f'   - {{"field": "style_note", "proposed_value": {{"category": '
+        f'"pacing|communication|motivation|misconception|context", "note": "short '
+        f'claim, under 140 chars"}}, "reason": "quote or paraphrase from the transcript"}}\n'
+        f'   - {{"field": "goal_orientation", "proposed_value": {{"value": '
+        f'"mastery_approach|mastery_avoidance|performance_approach|performance_avoidance"}}, '
+        f'"reason": "..."}}\n'
+        f'   - {{"field": "learning_context_structured", "proposed_value": {{"<key>": '
+        f'"<value>"}}, "reason": "..."}} — only keys clearly evidenced in the transcript\n\n'
         f"Respond ONLY with the JSON object. No markdown, no code fences, no extra text.\n\n"
         f"<transcript>\n{transcript}\n</transcript>"
     )
@@ -131,15 +144,18 @@ def _generate_fallback_summary(messages: list[Message]) -> str:
     return f"{_FALLBACK_PREFIX}{combined}"
 
 
-def _parse_llm_response(raw_text: str) -> tuple[str | None, dict | None]:
+def _parse_llm_response(raw_text: str) -> tuple[str | None, dict | None, list]:
     """Parse LLM response as JSON, with regex fallback for narrative_summary.
 
     Returns:
-        Tuple of (narrative_summary, skill_update_dict).
-        Either or both may be None if parsing/extraction fails.
+        Tuple of (narrative_summary, skill_update_dict, profile_signals).
+        narrative_summary/skill_update_dict may be None; profile_signals
+        defaults to [] if parsing/extraction fails (it's a best-effort extra,
+        never required for a successful session-end).
     """
     narrative_summary = None
     skill_update_dict = None
+    profile_signals: list = []
 
     # Attempt full JSON parse
     try:
@@ -151,11 +167,15 @@ def _parse_llm_response(raw_text: str) -> tuple[str | None, dict | None]:
             skill_update_dict = data.get("skill_update")
             if skill_update_dict and not isinstance(skill_update_dict, dict):
                 skill_update_dict = None
-            return narrative_summary, skill_update_dict
+            signals = data.get("profile_signals")
+            if isinstance(signals, list):
+                profile_signals = signals
+            return narrative_summary, skill_update_dict, profile_signals
     except (json.JSONDecodeError, TypeError):
         logger.warning("LLM response is not valid JSON, attempting regex extraction")
 
-    # Regex fallback for narrative_summary
+    # Regex fallback for narrative_summary (skill_update/profile_signals are
+    # skipped on malformed JSON — narrative_summary alone is worth recovering)
     match = _NARRATIVE_REGEX.search(raw_text)
     if match:
         # Unescape JSON string escapes
@@ -165,7 +185,7 @@ def _parse_llm_response(raw_text: str) -> tuple[str | None, dict | None]:
         except (json.JSONDecodeError, TypeError):
             narrative_summary = raw_value
 
-    return narrative_summary, skill_update_dict
+    return narrative_summary, skill_update_dict, profile_signals
 
 
 def _validate_skill_update(skill_update_dict: dict | None) -> SessionSkillUpdate | None:
@@ -332,9 +352,10 @@ class SessionSaveHandler:
         # Step 3: Parse and validate
         narrative_summary = None
         validated_skill_update = None
+        profile_signals: list = []
 
         if raw_response:
-            narrative_summary, skill_update_dict = _parse_llm_response(raw_response)
+            narrative_summary, skill_update_dict, profile_signals = _parse_llm_response(raw_response)
             validated_skill_update = _validate_skill_update(skill_update_dict)
 
         # Determine final summary
@@ -355,6 +376,16 @@ class SessionSaveHandler:
                     "Skill graph update failed for session %s: %s",
                     session_id,
                     str(e),
+                )
+
+        # Step 5b: Propose L1 profile changes (non-blocking on failure — the
+        # profiling agent never raises, but guard here too for defense-in-depth)
+        if profile_signals:
+            try:
+                await propose_profile_changes(user_id, session_id, profile_signals)
+            except Exception as e:
+                logger.warning(
+                    "Profile signal proposal failed for session %s: %s", session_id, str(e)
                 )
 
         # Step 6: Transition to ended (before embedding so ended_at is available)

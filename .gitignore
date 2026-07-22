@@ -4,6 +4,8 @@ node_modules/
 .next/
 .vscode/
 *.log
+*.log.*
+*.tsbuildinfo
 mentorman-app/C*Users*AppData*
 __pycache__/
 *.pyc

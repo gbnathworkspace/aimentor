@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.services.context_assembler import assemble, _recent_episodes
+from app.services.context_assembler import assemble, _recent_episodes, _recent_topic_summaries
 
 
 class TestAssemble:
@@ -154,3 +154,71 @@ class TestRecentEpisodes:
         assert query["user_id"] == "u1"
         assert query["status"] == "ended"
         assert query["summary"] == {"$nin": [None, ""]}
+
+
+def _mock_topics_returning(docs):
+    """Build a mock topics_col whose aggregate().to_list() yields docs."""
+    cursor = MagicMock()
+    cursor.to_list = AsyncMock(return_value=docs)
+    col = MagicMock()
+    col.aggregate.return_value = cursor
+    return col
+
+
+class TestRecentTopicSummaries:
+    """Verify _recent_topic_summaries reads SummaryBlocks from topics_col (issue #40)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_exception(self):
+        """If the query raises, return empty list so the mentor still responds."""
+        col = MagicMock()
+        col.aggregate.side_effect = Exception("DB down")
+        with patch("app.services.context_assembler.topics_col", return_value=col):
+            result = await _recent_topic_summaries("u1", "Graphs", limit=3)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_extracts_summary_blocks_across_topics(self):
+        """Summary blocks embedded in each topic's messages are flattened out."""
+        docs = [
+            {
+                "title": "Graphs",
+                "summaryBlocks": [
+                    {
+                        "summary": "Covered BFS and DFS",
+                        "compactedRange": {"to": "2024-01-10T12:00:00Z"},
+                    }
+                ],
+            },
+            {"title": "Empty Topic", "summaryBlocks": []},
+        ]
+        col = _mock_topics_returning(docs)
+        with patch("app.services.context_assembler.topics_col", return_value=col):
+            result = await _recent_topic_summaries("u1", None, limit=3)
+        assert len(result) == 1
+        assert result[0]["topic"] == "Graphs"
+        assert result[0]["summary"] == "Covered BFS and DFS"
+
+    @pytest.mark.asyncio
+    async def test_prefers_same_topic_then_recent(self):
+        """Same-topic summaries come first, then other recent ones; limit respected."""
+        docs = [
+            {
+                "title": "Trees",
+                "summaryBlocks": [
+                    {"summary": "newest other", "compactedRange": {"to": "2024-01-15T00:00:00Z"}}
+                ],
+            },
+            {
+                "title": "Graphs",
+                "summaryBlocks": [
+                    {"summary": "mid same", "compactedRange": {"to": "2024-01-12T00:00:00Z"}},
+                    {"summary": "old same", "compactedRange": {"to": "2024-01-05T00:00:00Z"}},
+                ],
+            },
+        ]
+        col = _mock_topics_returning(docs)
+        with patch("app.services.context_assembler.topics_col", return_value=col):
+            result = await _recent_topic_summaries("u1", "Graphs", limit=2)
+        assert [e["topic"] for e in result] == ["Graphs", "Graphs"]
+        assert len(result) == 2

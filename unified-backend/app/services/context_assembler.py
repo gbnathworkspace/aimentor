@@ -25,6 +25,7 @@ from app.config.database import (
     profiles_col,
     skill_graph_col,
     sessions_col,
+    topics_col,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,17 +70,36 @@ async def assemble(user_id: str, topic: str, query: str) -> dict:
     # L3 — Episodic memory: most-recent ended-session summaries (optional).
     # `query` is reserved for future vector ranking (#5); recency works today
     # without an Atlas vector index. Degrades to [] on failure.
-    episodes = await _recent_episodes(user_id, topic, limit=3)
+    # Two sources: legacy Sessions (sessions_col) and Topics (topics_col) —
+    # Topics never write to sessions_col, so relying on sessions_col alone
+    # leaves Topics users with zero episodic memory (issue #40). Topics-
+    # sourced summaries lead since Topics is the now-primary chat surface.
+    episodes = (
+        await _recent_topic_summaries(user_id, topic, limit=3)
+        + await _recent_episodes(user_id, topic, limit=3)
+    )[:3]
 
     # Uploaded documents (résumé / LeetCode etc. ingested at onboarding).
     # Without this read the ingest pipeline is orphaned — files embedded, never used (issue #4).
     documents = await _fetch_documents(user_id)
+
+    # Full skill graph (all topics, not just the current one) — lets planning
+    # mode do prerequisite-aware next-best-skill sequencing (issue #10). A
+    # user's graph is a handful of docs, so this is cheap to always fetch.
+    try:
+        skill_graph = await skill_graph_col().find(
+            {"user_id": user_id}, {"_id": 0}
+        ).to_list(length=50)
+    except Exception as e:
+        logger.warning("Skill graph list fetch failed for user=%s: %s", user_id, e)
+        skill_graph = []
 
     return {
         "profile": profile,
         "skill": skill or {},
         "episodes": episodes,
         "documents": documents,
+        "skill_graph": skill_graph,
     }
 
 
@@ -137,6 +157,65 @@ async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:
             e,
         )
         return []
+
+
+async def _recent_topic_summaries(user_id: str, topic: str | None, limit: int) -> list:
+    """Fetch the user's most recent Topic compaction summaries (issue #40).
+
+    Topics store their data in topics_col, not sessions_col — SummaryBlocks
+    live inline in each topic's `messages` array (type == "summary"). Uses
+    an aggregation $filter so large topics aren't pulled over the wire whole.
+    Same-topic summaries are preferred, then filled with other recent ones,
+    matching _recent_episodes' behavior. [] on any failure.
+    """
+    try:
+        pipeline = [
+            {"$match": {"userId": user_id}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "title": 1,
+                    "summaryBlocks": {
+                        "$filter": {
+                            "input": "$messages",
+                            "as": "m",
+                            "cond": {"$eq": ["$$m.type", "summary"]},
+                        }
+                    },
+                }
+            },
+        ]
+        topic_docs = await topics_col().aggregate(pipeline).to_list(length=100)
+    except Exception as e:
+        logger.warning(
+            "Recent-topic-summary fetch failed for user=%s: %s. Returning empty episodes.",
+            user_id,
+            e,
+        )
+        return []
+
+    episodes = []
+    for doc in topic_docs:
+        title = doc.get("title", "")
+        for block in doc.get("summaryBlocks") or []:
+            date = (block.get("compactedRange") or {}).get("to") or block.get("createdAt")
+            episodes.append(
+                {
+                    "title": title,
+                    "topic": title,
+                    "summary": block.get("summary", ""),
+                    "date": date.isoformat() if hasattr(date, "isoformat") else str(date or ""),
+                }
+            )
+
+    episodes.sort(key=lambda e: e["date"], reverse=True)
+
+    if topic:
+        same = [e for e in episodes if e["topic"] == topic]
+        others = [e for e in episodes if e["topic"] != topic]
+        episodes = same + others
+
+    return episodes[:limit]
 
 
 # ---------------------------------------------------------------------------

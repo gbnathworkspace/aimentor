@@ -18,6 +18,7 @@ class SkillNode(BaseModel):
     previous_level: Optional[str] = None  # level before the last session (issue #16)
     gap: str = "medium"
     signals: Optional[dict] = None
+    prerequisites: list[str] = []  # topics to master first, for planning sequencing (issue #10)
 
 
 class SkillUpdate(BaseModel):

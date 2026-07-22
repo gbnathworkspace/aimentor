@@ -39,3 +39,32 @@ def test_previous_level_none_for_new_topic():
     written = _run_apply(None)  # no existing node
     assert written["previous_level"] is None
     assert written["current_level"] == "advanced"
+
+
+class TestNextBestTopics:
+    """Issue #10: prerequisite-ordered next-best-skill sequencing."""
+
+    def test_orders_prerequisites_before_dependents(self):
+        nodes = [
+            {"topic": "Algorithms", "gap": "medium", "prerequisites": ["Data Structures"]},
+            {"topic": "Data Structures", "gap": "large", "prerequisites": []},
+        ]
+        ranked = repo.next_best_topics(nodes)
+        assert [n["topic"] for n in ranked] == ["Data Structures", "Algorithms"]
+
+    def test_mastered_topics_are_excluded(self):
+        nodes = [
+            {"topic": "Basics", "gap": "none", "prerequisites": []},
+            {"topic": "Advanced", "gap": "small", "prerequisites": ["Basics"]},
+        ]
+        ranked = repo.next_best_topics(nodes)
+        assert [n["topic"] for n in ranked] == ["Advanced"]
+
+    def test_respects_limit(self):
+        nodes = [{"topic": f"T{i}", "gap": "small", "prerequisites": []} for i in range(5)]
+        assert len(repo.next_best_topics(nodes, limit=2)) == 2
+
+    def test_missing_prerequisite_is_ignored(self):
+        nodes = [{"topic": "Solo", "gap": "medium", "prerequisites": ["Nonexistent"]}]
+        ranked = repo.next_best_topics(nodes)
+        assert [n["topic"] for n in ranked] == ["Solo"]

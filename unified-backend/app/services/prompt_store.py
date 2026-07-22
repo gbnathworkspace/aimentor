@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models.chat import DEFAULT_TONE, ToneId
+from app.services.skill_graph_repo import next_best_topics
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -180,6 +181,14 @@ def _format_episodes(episodes: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)
 
 
+def _format_next_skills(skill_graph: list[dict[str, Any]]) -> str:
+    """Format the prerequisite-ordered next-best-skill sequence (issue #10)."""
+    ranked = next_best_topics(skill_graph)
+    if not ranked:
+        return "(no pending topics — skill graph empty or fully mastered)"
+    return "\n".join(f"{i}. {item['topic']} (gap: {item['gap']})" for i, item in enumerate(ranked, 1))
+
+
 def _build_context_variables(
     context: dict[str, Any], mode: str, tone: ToneId
 ) -> dict[str, str]:
@@ -187,6 +196,13 @@ def _build_context_variables(
     profile = context.get("profile", {})
     skill = context.get("skill", {})
     episodes = context.get("episodes", [])
+
+    mode_instructions = _MODE_INSTRUCTIONS.get(mode, "")
+    if mode == "planning":
+        mode_instructions += (
+            "\n- Suggested next-best-skill order (prerequisites-first, unmastered only):\n"
+            + _format_next_skills(context.get("skill_graph") or [])
+        )
 
     return {
         # L1 Profile fields
@@ -208,7 +224,7 @@ def _build_context_variables(
         "documents": _format_documents(context.get("documents", [])),
         # Mode
         "mode": mode,
-        "mode_instructions": _MODE_INSTRUCTIONS.get(mode, ""),
+        "mode_instructions": mode_instructions,
         # Tone
         "tone_instructions": _TONE_INSTRUCTIONS.get(tone, _TONE_INSTRUCTIONS[DEFAULT_TONE]),
     }

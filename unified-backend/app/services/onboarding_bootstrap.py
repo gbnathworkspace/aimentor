@@ -252,7 +252,7 @@ async def bootstrap_skills(
 
     # Build skill nodes and upsert into DB
     skill_nodes = []
-    for topic in topics:
+    for i, topic in enumerate(topics):
         gap = compute_gap(required_level, current_level)
         node = {
             "user_id": user_id,
@@ -260,6 +260,8 @@ async def bootstrap_skills(
             "required_level": required_level,
             "current_level": current_level,
             "gap": gap,
+            # Hand-seeded linear chain from the curated topic order (issue #10).
+            "prerequisites": [topics[i - 1]] if i > 0 else [],
         }
 
         # Upsert into skill_graph collection

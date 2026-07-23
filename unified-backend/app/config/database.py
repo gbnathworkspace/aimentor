@@ -75,6 +75,14 @@ def compaction_events_col():
     return get_db()["compaction_events"]
 
 
+def subtopic_lists_col():
+    return get_db()["subtopic_lists"]
+
+
+def weight_nudges_col():
+    return get_db()["weight_nudges"]
+
+
 async def _ensure_indexes() -> None:
     """Create required indexes if they don't exist."""
     await profiles_col().create_index("user_id", unique=True)
@@ -84,3 +92,5 @@ async def _ensure_indexes() -> None:
     await ingestion_jobs_col().create_index("job_id", unique=True)
     await ingestion_jobs_col().create_index("user_id")
     await immediate_contexts_col().create_index("session_id")
+    await subtopic_lists_col().create_index("topic", unique=True)
+    await weight_nudges_col().create_index("user_id")

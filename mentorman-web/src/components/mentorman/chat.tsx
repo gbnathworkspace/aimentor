@@ -7,6 +7,7 @@ import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } 
 import { OnboardingBanner } from './OnboardingBanner';
 import { TopicCreation, TopicRenameInput } from './TopicCreation';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
+import { SubtopicWeightsModal } from './SubtopicWeightsModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
@@ -332,6 +333,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   // Export the full topic transcript (all messages, not just the loaded page)
   // as a local .md file for offline analysis.
   const [exporting, setExporting] = useState(false);
+  const [showWeights, setShowWeights] = useState(false);
   const exportTranscript = useCallback(async () => {
     if (!topicId || exporting) return;
     setExporting(true);
@@ -429,6 +431,14 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           {false && <ToneBar tone={tone} onTone={setTone} />}
           <button
             className="icon-btn"
+            title="Subtopic weight breakdown"
+            aria-label="Subtopic weight breakdown"
+            onClick={() => setShowWeights(true)}
+          >
+            <Icon name="chart" />
+          </button>
+          <button
+            className="icon-btn"
             title="Download full transcript (.md)"
             aria-label="Download full transcript"
             disabled={exporting || msgs.length === 0}
@@ -439,6 +449,13 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           <span className="pill ok"><span className="ind" /> active</span>
         </div>
       </div>
+
+      <SubtopicWeightsModal
+        open={showWeights}
+        onClose={() => setShowWeights(false)}
+        topicId={topicId}
+        topicTitle={topicTitle}
+      />
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
 

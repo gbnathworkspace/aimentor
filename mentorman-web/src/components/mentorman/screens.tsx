@@ -9,7 +9,21 @@ import type { CoreProfile } from '@/lib/mentorman-api';
 import { SkipButton } from './SkipButton';
 import { SkipConfirmationDialog } from './SkipConfirmationDialog';
 import { CompleteSetupSection } from './CompleteSetupSection';
+import { ListModal } from './ListModal';
+
+const LEGACY_CONTEXT_LABELS: Record<string, string> = {
+  job_interview: 'Job interview',
+  high_stakes_exam: 'High-stakes exam',
+  competitive_test: 'Competitive test',
+  self_directed: 'Self-directed',
+  other: 'Other',
+};
 import { MentorQuestionCard, QuickReplyOptions, type QuickReplyOption } from './QuestionCard';
+import { AttachButton } from './chat/AttachButton';
+import { AttachmentPreview } from './chat/AttachmentPreview';
+import { DocumentUploadFlow } from './chat/DocumentUploadFlow';
+import { useAttachedFiles } from '@/lib/chat-upload/useAttachedFiles';
+import type { UseDocumentUploadFlowReturn } from '@/lib/chat-upload/useDocumentUploadFlow';
 
 // ---------- Onboarding (conversational AI agent) ----------------
 
@@ -407,9 +421,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   const [editName, setEditName] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
-  const [contextVal, setContextVal] = useState(profile?.learning_context ?? 'self_directed');
-  const [labelVal, setLabelVal] = useState(profile?.learning_context_detail?.label ?? '');
-  const [focusVal, setFocusVal] = useState((profile?.focus_areas ?? []).join(', '));
   const [explanationVal, setExplanationVal] = useState(profile?.explanation_style ?? 'hint-first');
   const [challengeVal, setChallengeVal] = useState(profile?.challenge_tolerance ?? 'medium');
   const [toneVal, setToneVal] = useState(profile?.feedback_tone ?? 'encouraging');
@@ -418,12 +429,32 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [situationsOpen, setSituationsOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [focusAreasOpen, setFocusAreasOpen] = useState(false);
+
+  // Session-scoped dismiss for the "Complete Your Profile" prompt — closing it
+  // shouldn't need a backend flag, but it should stay closed while browsing
+  // Settings rather than reappearing on every tab switch.
+  const [setupPromptDismissed, setSetupPromptDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return sessionStorage.getItem('settings:setup-prompt-dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (!setupPromptDismissed) return;
+    try {
+      sessionStorage.setItem('settings:setup-prompt-dismissed', 'true');
+    } catch {
+      // sessionStorage unavailable (e.g. private mode) — ignore
+    }
+  }, [setupPromptDismissed]);
 
   // Sync form values when profile loads / changes
   useEffect(() => {
-    setContextVal(profile?.learning_context ?? 'self_directed');
-    setLabelVal(profile?.learning_context_detail?.label ?? '');
-    setFocusVal((profile?.focus_areas ?? []).join(', '));
     setExplanationVal(profile?.explanation_style ?? 'hint-first');
     setChallengeVal(profile?.challenge_tolerance ?? 'medium');
     setToneVal(profile?.feedback_tone ?? 'encouraging');
@@ -452,6 +483,40 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
       setSaving(false);
     }
   };
+
+  const saveFocusAreas = (focusAreas: string[]) => save({ focus_areas: focusAreas });
+
+  // Pretty-print the legacy enum values existing profiles still carry; entries
+  // added since Context became a free-text list display as typed.
+  const contextLabel = (v: string) => LEGACY_CONTEXT_LABELS[v] ?? v;
+
+  // Profiles written before contexts[] existed only have the single learning_context.
+  const contextValues = profile?.learning_context_detail?.contexts?.length
+    ? profile.learning_context_detail.contexts
+    : [profile?.learning_context ?? 'self_directed'];
+
+  // learning_context / label mirror the first entry of their list — plenty of
+  // backend readers still take those single-value fields.
+  const saveSituations = (situations: string[]) => save({
+    learning_context_detail: {
+      learning_context: profile?.learning_context ?? 'self_directed',
+      contexts: contextValues,
+      label: situations[0] ?? null,
+      situations,
+      structured: profile?.learning_context_detail?.structured ?? {},
+    },
+  });
+
+  const saveContext = (contexts: string[]) => save({
+    learning_context: contexts[0] ?? 'self_directed',
+    learning_context_detail: {
+      learning_context: contexts[0] ?? 'self_directed',
+      contexts,
+      label: profile?.learning_context_detail?.label ?? null,
+      situations: profile?.learning_context_detail?.situations ?? [],
+      structured: profile?.learning_context_detail?.structured ?? {},
+    },
+  });
 
   const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
@@ -492,12 +557,13 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
 
   const describePendingChange = (field: string, value: Record<string, unknown>): string => {
     if (field === 'style_note') return `New teaching note: "${value.note}"`;
-    if (field === 'goal_orientation') return `Update motivation profile to: ${value.value}`;
-    if (field === 'learning_context_structured') {
-      return `Add detail: ${Object.entries(value).map(([k, v]) => `${k} = ${v}`).join(', ')}`;
-    }
+    if (field === 'focus_area') return `Add focus area: "${value.value}"`;
     return field;
   };
+
+  // Collapsed by default so the pending-review queue doesn't visually bleed
+  // into the settings fields below it — expand on click, same control closes it.
+  const [suggestedOpen, setSuggestedOpen] = useState(false);
 
   // Direct natural-language memory edit (applies immediately — the user typed
   // it themselves, same trust level as editing a field). See
@@ -527,6 +593,33 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
       setMemoryResult('Connection error — try again.');
     } finally {
       setMemoryEditing(false);
+    }
+  };
+
+  // Document upload flow — same L1-profile pipeline as the chat composer's
+  // attach button (POST /api/documents/upload), just triggered from Settings.
+  const docFlowRef = useRef<UseDocumentUploadFlowReturn | null>(null);
+  const attachment = useAttachedFiles();
+
+  // One Send action for both the text edit and attachments — if valid files
+  // are staged, send submits the document-upload job (with the typed note as
+  // optional context); otherwise it sends the typed text as a memory edit.
+  const hasDocsToSend = attachment.hasValidFiles;
+  const canSubmitComposer = !memoryEditing && (!!memoryMsg.trim() || hasDocsToSend);
+
+  const sendComposer = () => {
+    if (!canSubmitComposer) return;
+    if (hasDocsToSend) {
+      const validFiles = attachment.fileResults.filter(r => r.error === null).map(r => r.file);
+      docFlowRef.current?.submitUpload({
+        files: validFiles,
+        skipReview: attachment.skipReview,
+        message: memoryMsg.trim() || undefined,
+      });
+      attachment.clearAll();
+      setMemoryMsg('');
+    } else {
+      sendMemoryEdit();
     }
   };
 
@@ -634,39 +727,51 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
 
           {tab === 'memory' && (<>
             {memoryBadgeCount > 0 && (
-              <div className="settings-group">
-                <div className="settings-group-title">Suggested updates</div>
-                <div className="settings-group-sub">Noticed from recent sessions — nothing changes until you accept.</div>
-                {profile!.pending_changes.map(change => (
-                  <div key={change.field} className="settings-row">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="v" style={{ textAlign: 'left', whiteSpace: 'normal' }}>{describePendingChange(change.field, change.proposed_value)}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{change.reason}</div>
+              <div className="settings-group settings-suggested">
+                <button
+                  type="button"
+                  className="settings-suggested-header"
+                  onClick={() => setSuggestedOpen(o => !o)}
+                  aria-expanded={suggestedOpen}
+                >
+                  <span className="settings-group-title">Suggested updates</span>
+                  <span className="settings-suggested-count">{memoryBadgeCount}</span>
+                  <span className="spacer" />
+                  <Icon name={suggestedOpen ? 'x' : 'chevronDown'} size={13} />
+                </button>
+                {suggestedOpen && (<>
+                  <div className="settings-group-sub">Noticed from recent sessions — nothing changes until you accept.</div>
+                  {profile!.pending_changes.map(change => (
+                    <div key={change.field} className="settings-row">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="v" style={{ textAlign: 'left', whiteSpace: 'normal' }}>{describePendingChange(change.field, change.proposed_value)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{change.reason}</div>
+                      </div>
+                      <div className="v-wrap">
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolvingField === change.field}
+                          onClick={() => resolvePendingChange(change.field, 'dismiss')}
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          disabled={resolvingField === change.field}
+                          onClick={() => resolvePendingChange(change.field, 'accept')}
+                        >
+                          Accept
+                        </button>
+                      </div>
                     </div>
-                    <div className="v-wrap">
-                      <button
-                        className="btn btn-sm btn-ghost"
-                        disabled={resolvingField === change.field}
-                        onClick={() => resolvePendingChange(change.field, 'dismiss')}
-                      >
-                        Dismiss
-                      </button>
-                      <button
-                        className="btn btn-sm btn-primary"
-                        disabled={resolvingField === change.field}
-                        onClick={() => resolvePendingChange(change.field, 'accept')}
-                      >
-                        Accept
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </>)}
               </div>
             )}
 
-            {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
+            {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && !setupPromptDismissed && (
               <div className="settings-group">
-                <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} />
+                <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} onClose={() => setSetupPromptDismissed(true)} />
               </div>
             )}
 
@@ -676,63 +781,82 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
               <div className="settings-row">
                 <div className="k">Context</div>
                 <div className="v-wrap">
-                  <select className="num-input" value={contextVal} onChange={e => setContextVal(e.target.value)}>
-                    <option value="job_interview">Job interview</option>
-                    <option value="high_stakes_exam">High-stakes exam</option>
-                    <option value="competitive_test">Competitive test</option>
-                    <option value="self_directed">Self-directed</option>
-                    <option value="other">Other</option>
-                  </select>
+                  <button
+                    type="button"
+                    className="num-input situation-trigger"
+                    onClick={() => setContextOpen(true)}
+                  >
+                    {contextValues.length > 0
+                      ? `${contextValues.length} ${contextValues.length === 1 ? 'entry' : 'entries'}`
+                      : 'Not set'}
+                  </button>
                 </div>
               </div>
 
-              <div className="settings-row">
+              <div className="settings-row" style={{ borderBottom: 'none' }}>
                 <div className="k">Situation</div>
                 <div className="v-wrap">
-                  <input
-                    className="num-input" style={{ minWidth: 240 }}
-                    value={labelVal}
-                    placeholder="e.g. senior backend roles, 20 LPA target"
-                    onChange={e => setLabelVal(e.target.value)}
-                  />
+                  <button
+                    type="button"
+                    className="num-input situation-trigger"
+                    onClick={() => setSituationsOpen(true)}
+                  >
+                    {(() => {
+                      const n = profile?.learning_context_detail?.situations?.length ?? 0;
+                      return n > 0 ? `${n} ${n === 1 ? 'entry' : 'entries'}` : 'Not set';
+                    })()}
+                  </button>
                 </div>
               </div>
-
-              <div className="settings-row" style={{ justifyContent: 'flex-end', borderBottom: 'none', paddingTop: 6 }}>
-                <button
-                  className="btn btn-sm btn-primary"
-                  disabled={saving || (
-                    contextVal === (profile?.learning_context ?? 'self_directed') &&
-                    labelVal === (profile?.learning_context_detail?.label ?? '')
-                  )}
-                  onClick={() => save({
-                    learning_context: contextVal,
-                    learning_context_detail: { learning_context: contextVal, label: labelVal || null, structured: {} },
-                  })}
-                >
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
             </div>
+
+            <ListModal
+              open={contextOpen}
+              onClose={() => setContextOpen(false)}
+              title="contexts"
+              placeholder="name a context…"
+              items={contextValues}
+              format={contextLabel}
+              onSave={saveContext}
+              maxLength={60}
+            />
+
+            <ListModal
+              open={situationsOpen}
+              onClose={() => setSituationsOpen(false)}
+              title="situations"
+              placeholder="describe a situation…"
+              items={profile?.learning_context_detail?.situations ?? []}
+              onSave={saveSituations}
+            />
 
             <div className="settings-group">
               <div className="settings-group-title">Focus areas</div>
               <div className="settings-row" style={{ borderBottom: 'none' }}>
-                <input
-                  className="num-input" style={{ flex: 1, minWidth: 0 }}
-                  value={focusVal}
-                  placeholder="e.g. System Design, DSA, Behavioral"
-                  onChange={e => setFocusVal(e.target.value)}
-                />
-                <button
-                  className="btn btn-sm btn-primary"
-                  disabled={saving || focusVal === (profile?.focus_areas ?? []).join(', ')}
-                  onClick={() => save({ focus_areas: focusVal.split(',').map(s => s.trim()).filter(Boolean) })}
-                >
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
+                <div className="k">Topics</div>
+                <div className="v-wrap">
+                  <button
+                    type="button"
+                    className="num-input situation-trigger"
+                    onClick={() => setFocusAreasOpen(true)}
+                  >
+                    {(profile?.focus_areas ?? []).length > 0
+                      ? `${profile!.focus_areas.length} ${profile!.focus_areas.length === 1 ? 'area' : 'areas'}`
+                      : 'Not set'}
+                  </button>
+                </div>
               </div>
             </div>
+
+            <ListModal
+              open={focusAreasOpen}
+              onClose={() => setFocusAreasOpen(false)}
+              title="focus areas"
+              placeholder="name a topic…"
+              items={profile?.focus_areas ?? []}
+              onSave={saveFocusAreas}
+              maxLength={80}
+            />
 
             <div className="settings-group">
               <div className="settings-group-title">How should the mentor teach you?</div>
@@ -811,21 +935,40 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
       {tab === 'memory' && (
         <div className="settings-memory-composer">
           {memoryResult && <div className="settings-memory-result">{memoryResult}</div>}
-          <div className="settings-memory-composer-box">
-            <input
-              value={memoryMsg}
-              placeholder="Tell it what to change or remove…"
-              disabled={memoryEditing}
-              onChange={e => setMemoryMsg(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') sendMemoryEdit(); }}
+          <div className="settings-memory-status">
+            <DocumentUploadFlow
+              sessionId="memory-settings"
+              existingStyleNotes={profile?.style_notes}
+              flowRef={docFlowRef}
             />
-            <button
-              className="icon-btn" title="Send" aria-label="Send"
-              disabled={memoryEditing || !memoryMsg.trim()}
-              onClick={sendMemoryEdit}
-            >
-              <Icon name="arrowUp" />
-            </button>
+          </div>
+          <div className="settings-memory-composer-box">
+            <AttachmentPreview
+              fileResults={attachment.fileResults}
+              warning={attachment.warning}
+              skipReview={attachment.skipReview}
+              disabled={memoryEditing}
+              onRemove={attachment.removeFile}
+              onClearAll={attachment.clearAll}
+              onToggleSkipReview={attachment.toggleSkipReview}
+            />
+            <div className="settings-memory-composer-row">
+              <input
+                value={memoryMsg}
+                placeholder="Tell it what to change or remove…"
+                disabled={memoryEditing}
+                onChange={e => setMemoryMsg(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') sendComposer(); }}
+              />
+              <AttachButton disabled={memoryEditing} onSelect={attachment.selectFiles} />
+              <button
+                className="icon-btn" title="Send" aria-label="Send"
+                disabled={!canSubmitComposer}
+                onClick={sendComposer}
+              >
+                <Icon name="arrowUp" />
+              </button>
+            </div>
           </div>
         </div>
       )}

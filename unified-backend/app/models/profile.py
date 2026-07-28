@@ -17,21 +17,20 @@ class LearningContext(str, Enum):
 
 
 class LearningContextDetail(BaseModel):
-    learning_context: LearningContext
+    # Free text like `situations` below — LearningContext's members remain as
+    # well-known defaults, but the field itself no longer restricts users to
+    # those 5 values.
+    learning_context: str = Field(max_length=60)
+    # Every context the user is in at once (e.g. interviewing *and* sitting an
+    # exam). `learning_context` above stays the first entry so the many readers
+    # of that single-value field keep working. All of these reach the prompt.
+    contexts: list[str] = Field(default_factory=list, max_length=20)
     label: Optional[str] = Field(default=None, max_length=120)
     # e.g. "senior backend, Mumbai, 20 LPA" / "CBSE 9th standard, science stream"
-    structured: dict[str, str] = {}
-    # only populate keys the prompt actually branches on — validated against
-    # ALLOWED_STRUCTURED_KEYS at write time by whichever service writes this
-    # (not enforced by this model — see note below)
-
-
-class GoalOrientation(str, Enum):
-    MASTERY_APPROACH = "mastery_approach"           # wants to understand/improve, self-referenced
-    MASTERY_AVOIDANCE = "mastery_avoidance"         # afraid of not meeting own standards
-    PERFORMANCE_APPROACH = "performance_approach"   # wants to outperform others/benchmark
-    PERFORMANCE_AVOIDANCE = "performance_avoidance" # afraid of looking incompetent
-    OTHER = "other"
+    # Free-text situations (e.g. "leading the backend rewrite", "interviewing for
+    # senior roles). All are injected — none is "active". FIFO-capped, newest
+    # first; `label` mirrors the first entry for readers that predate this list.
+    situations: list[str] = Field(default_factory=list, max_length=20)
 
 
 class StyleNoteCategory(str, Enum):
@@ -52,41 +51,31 @@ class StyleNote(BaseModel):
 
 class ProposableField(str, Enum):
     """Fields the post-session profiling agent (app/services/profiling_agent.py)
-    may propose changes for. Deliberately narrow — proposals never touch
-    onboarding-owned fields (learning_context, focus_areas, the three teaching
-    preferences); those are direct user input, not inferred."""
+    or the document upload pipeline may propose changes for.
 
-    GOAL_ORIENTATION = "goal_orientation"
+    Session-derived proposals cover style_note. Document-upload proposals
+    additionally cover focus_area (appended to the focus_areas list)."""
+
     STYLE_NOTE = "style_note"                          # one new note to add
-    LEARNING_CONTEXT_STRUCTURED = "learning_context_structured"  # keys to merge in
+    FOCUS_AREA = "focus_area"                          # one new focus area to append
 
 
 class PendingProfileChange(BaseModel):
     """A proposed L1 change awaiting user accept/dismiss (never auto-applied).
 
     proposed_value's shape depends on `field`:
-      - goal_orientation: {"value": "<GoalOrientation>"}
       - style_note: {"category": "<StyleNoteCategory>", "note": "<str>"}
-      - learning_context_structured: {"<key>": "<value>", ...}
+      - focus_area: {"value": "<str>"}
     """
 
     field: ProposableField
     proposed_value: dict
     reason: str = Field(max_length=200)  # short grounding text, shown to the user
-    session_id: str
+    session_id: str  # For document uploads, stores the job_id for traceability
     created_at: datetime
-
-
-# Write-time guard, meant to live in the profiling/session-reflection service that
-# populates LearningContextDetail.structured — keeps it flexible while preventing
-# silent key drift. Not enforced here; no writer for this field exists yet.
-ALLOWED_STRUCTURED_KEYS: dict[LearningContext, set[str]] = {
-    LearningContext.JOB_INTERVIEW: {"seniority_level", "target_comp", "location", "company_tier", "role_domain"},
-    LearningContext.HIGH_STAKES_EXAM: {"board_or_syllabus", "grade_or_level"},
-    LearningContext.COMPETITIVE_TEST: {"test_name", "target_score_or_rank"},
-    LearningContext.SELF_DIRECTED: set(),  # label-only, no structured keys expected
-    LearningContext.OTHER: set(),
-}
+    # Distinguishes source of the proposal. None or "session" for profiling-agent
+    # proposals; "document_upload" for proposals from the document upload pipeline.
+    source_type: Optional[str] = None
 
 
 class ProfileCreate(BaseModel):
@@ -95,11 +84,8 @@ class ProfileCreate(BaseModel):
         populate_by_name=True,
     )
 
-    learning_context: Optional[LearningContext] = None
+    learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
-
-    goal_orientation: Optional[GoalOrientation] = None
-    goal_orientation_custom: Optional[str] = Field(default=None, max_length=60)
 
     focus_areas: list[str] = []
     explanation_style: Literal["hint-first", "answer-first"] = "hint-first"
@@ -120,11 +106,8 @@ class ProfileUpdate(BaseModel):
         populate_by_name=True,
     )
 
-    learning_context: Optional[LearningContext] = None
+    learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
-
-    goal_orientation: Optional[GoalOrientation] = None
-    goal_orientation_custom: Optional[str] = Field(default=None, max_length=60)
 
     focus_areas: Optional[list[str]] = None
     explanation_style: Optional[Literal["hint-first", "answer-first"]] = None
@@ -146,11 +129,8 @@ class ProfileResponse(BaseModel):
 
     user_id: str
 
-    learning_context: Optional[LearningContext] = None
+    learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
-
-    goal_orientation: Optional[GoalOrientation] = None
-    goal_orientation_custom: Optional[str] = None
 
     focus_areas: list[str] = []
     explanation_style: Literal["hint-first", "answer-first"] = "hint-first"

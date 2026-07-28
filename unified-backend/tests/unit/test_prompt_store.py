@@ -53,6 +53,29 @@ class TestGetSystemPrompt:
         assert "high" in result
         assert "direct" in result
 
+    def test_injects_every_context_and_situation(self):
+        """No entry is "active" — all of them reach the prompt."""
+        context = {
+            "profile": {
+                "learning_context": "job_interview",
+                "learning_context_detail": {
+                    "contexts": ["job_interview", "competitive_test"],
+                    "label": "interviewing for staff roles",
+                    "situations": [
+                        "interviewing for staff roles",
+                        "leading the backend rewrite",
+                    ],
+                },
+            },
+            "skill": {},
+            "episodes": [],
+        }
+        result = get_system_prompt("planning", context)
+        assert "job_interview, competitive_test" in result
+        assert "leading the backend rewrite" in result
+        # `label` duplicates situations[0] — injected once, not twice
+        assert result.count("interviewing for staff roles") == 1
+
     def test_interpolates_skill_fields(self):
         context = {
             "profile": {},

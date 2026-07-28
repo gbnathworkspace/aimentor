@@ -133,16 +133,15 @@ async def accept_pending_change(field: str, user_id: str = Depends(require_auth)
         # note turns out to matter more than a newer one.
         notes = (doc.get("style_notes") or []) + [new_note]
         update["style_notes"] = notes[-5:]
-    elif field == ProposableField.GOAL_ORIENTATION.value:
-        update["goal_orientation"] = proposed["value"]
-    elif field == ProposableField.LEARNING_CONTEXT_STRUCTURED.value:
-        detail = doc.get("learning_context_detail") or {
-            "learning_context": doc.get("learning_context"),
-            "label": None,
-            "structured": {},
-        }
-        detail["structured"] = {**detail.get("structured", {}), **proposed}
-        update["learning_context_detail"] = detail
+    elif field == ProposableField.FOCUS_AREA.value:
+        focus_areas = list(doc.get("focus_areas") or [])
+        new_area = proposed.get("value", "")
+        # Append only if not a case-insensitive duplicate of an existing entry.
+        if new_area and not any(
+            existing.lower() == new_area.lower() for existing in focus_areas
+        ):
+            focus_areas.append(new_area)
+        update["focus_areas"] = focus_areas
 
     update["pending_changes"] = [
         p for p in doc.get("pending_changes", []) if p.get("field") != field

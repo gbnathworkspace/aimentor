@@ -97,12 +97,7 @@ def _build_combined_prompt(
         f"if nothing stands out. Do NOT force a signal every session. Each item is one of:\n"
         f'   - {{"field": "style_note", "proposed_value": {{"category": '
         f'"pacing|communication|motivation|misconception|context", "note": "short '
-        f'claim, under 140 chars"}}, "reason": "quote or paraphrase from the transcript"}}\n'
-        f'   - {{"field": "goal_orientation", "proposed_value": {{"value": '
-        f'"mastery_approach|mastery_avoidance|performance_approach|performance_avoidance"}}, '
-        f'"reason": "..."}}\n'
-        f'   - {{"field": "learning_context_structured", "proposed_value": {{"<key>": '
-        f'"<value>"}}, "reason": "..."}} — only keys clearly evidenced in the transcript\n\n'
+        f'claim, under 140 chars"}}, "reason": "quote or paraphrase from the transcript"}}\n\n'
         f"Respond ONLY with the JSON object. No markdown, no code fences, no extra text.\n\n"
         f"<transcript>\n{transcript}\n</transcript>"
     )

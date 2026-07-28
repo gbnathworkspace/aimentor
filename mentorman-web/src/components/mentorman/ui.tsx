@@ -307,10 +307,11 @@ export function VerdictMsg({ item, delay }: {
   );
 }
 
-export function Typing() {
+export function Typing({ label }: { label?: string }) {
   return (
     <Msg who="mentor">
-      <div className="bubble" style={{ padding: 0 }}>
+      <div className="bubble" style={{ padding: label ? '8px 12px' : 0 }}>
+        {label && <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 4 }}>{label}</div>}
         <div className="typing"><span /><span /><span /></div>
       </div>
     </Msg>

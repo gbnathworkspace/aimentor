@@ -54,9 +54,11 @@ class SubtopicWeightsRequest(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    goal: Literal["interview_prep", "job_performance"]
-    target_context: Optional[str] = Field(default=None, max_length=200)
+    goal: Literal["job_performance"]
     work_evidence: Optional[str] = Field(default=None, max_length=20000)
+    # A stated goal ("preparing for a job interview") rather than a body of
+    # evidence — scored by relevance instead of mention-counting.
+    goal_intent: Optional[str] = Field(default=None, max_length=500)
     pairwise_comparisons: Optional[list[tuple[str, str]]] = None
     user_nudges: Optional[dict[str, float]] = None
 
@@ -186,11 +188,11 @@ async def send_message(
 async def get_subtopic_weights(
     topic_id: str, body: SubtopicWeightsRequest, user_id: str = Depends(require_auth)
 ):
-    """Weight this topic's subtopics from real evidence (DeriveSubtopicWeights).
+    """Weight this topic's subtopics (DeriveSubtopicWeights).
 
-    interview_prep searches job postings/interview questions for the topic;
-    job_performance requires the caller to supply work_evidence (commits,
-    tickets, PR comments) since that evidence isn't web-searchable.
+    Caller supplies either work_evidence (commits, tickets, PR comments —
+    counted by mention, since that evidence isn't web-searchable) or
+    goal_intent (a stated goal — scored by relevance instead).
     """
     topic = await _topic_service.get_topic(topic_id, user_id)
     subtopics = await get_subtopics(topic["title"])
@@ -200,8 +202,8 @@ async def get_subtopic_weights(
             topic=topic["title"],
             goal=body.goal,
             subtopics=subtopics,
-            target_context=body.target_context,
             work_evidence=body.work_evidence,
+            goal_intent=body.goal_intent,
             pairwise_comparisons=body.pairwise_comparisons,
             user_nudges=body.user_nudges,
         )
@@ -209,7 +211,7 @@ async def get_subtopic_weights(
         raise HTTPException(status_code=400, detail=str(e))
 
     return SubtopicWeightsResponse(
-        subtopics=subtopics,
+        subtopics=result.subtopics,
         weights=result.weights,
         flags=[
             WeightFlagResponse(subtopic=f.subtopic, baseline=f.baseline, final=f.final, delta=f.delta)

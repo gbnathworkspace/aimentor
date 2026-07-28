@@ -15,6 +15,12 @@ from app.models.session import (
 from app.models.episodic import EpisodicEntry, SearchQuery
 from app.models.ingestion import IngestionJobResponse
 from app.models.chat import MentorRequest, MentorResponse, OnboardingRequest, OnboardingResponse
+from app.models.document_upload import (
+    DocumentUploadJob,
+    L1SynthesisOutput,
+    SynthesizedStyleNote,
+    UploadFileRecord,
+)
 
 __all__ = [
     # Profile
@@ -43,4 +49,9 @@ __all__ = [
     "MentorResponse",
     "OnboardingRequest",
     "OnboardingResponse",
+    # Document Upload
+    "DocumentUploadJob",
+    "L1SynthesisOutput",
+    "SynthesizedStyleNote",
+    "UploadFileRecord",
 ]

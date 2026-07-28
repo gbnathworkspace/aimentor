@@ -8,7 +8,7 @@
 const MAX_FILE_SIZE_BYTES = 10_485_760; // 10 MB
 const ALLOWED_EXTENSIONS = [".pdf", ".csv"];
 const MAX_FILENAME_LENGTH = 30;
-const TRUNCATED_PREFIX_LENGTH = 27;
+const TRUNCATED_PREFIX_LENGTH = 30;
 const DEFAULT_MESSAGE_LIMIT = 2000;
 const ONE_MB = 1_048_576;
 
@@ -43,8 +43,8 @@ export function validateUploadFile(file: {
  * Truncates a filename for display.
  *
  * Returns the original string if its length is ≤ 30 characters,
- * or the first 27 characters followed by "..." if longer.
- * Output never exceeds 30 characters.
+ * or the first 30 characters followed by "..." if longer.
+ * Output never exceeds 33 characters (30 content + 3 ellipsis).
  */
 export function truncateFilename(name: string): string {
   if (name.length <= MAX_FILENAME_LENGTH) {

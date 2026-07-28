@@ -90,7 +90,11 @@ export function ArchivedTopics({ onSelectTopic, onBack, collapsed, onToggleColla
       {/* Header */}
       <div className="sb-head">
         <div className="brand">
-          <img src="/logo-full.svg" alt="MentorMan" className="brand-logo" />
+          <img
+            src={collapsed ? '/logo-mark.svg' : '/logo-full.svg'}
+            alt="MentorMan"
+            className="brand-logo"
+          />
         </div>
         {onToggleCollapse && (
           <button className="icon-btn" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={onToggleCollapse}>

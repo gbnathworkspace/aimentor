@@ -22,25 +22,6 @@ class TestValidateSignal:
         assert result.proposed_value == raw["proposed_value"]
         assert result.session_id == "session-1"
 
-    def test_valid_goal_orientation(self):
-        raw = {
-            "field": "goal_orientation",
-            "proposed_value": {"value": "mastery_approach"},
-            "reason": "Kept asking 'why' rather than just wanting the right answer",
-        }
-        result = _validate_signal(raw, "session-1")
-        assert result is not None
-        assert result.proposed_value == {"value": "mastery_approach"}
-
-    def test_valid_learning_context_structured(self):
-        raw = {
-            "field": "learning_context_structured",
-            "proposed_value": {"seniority_level": "senior"},
-            "reason": "Mentioned 8 years of experience",
-        }
-        result = _validate_signal(raw, "session-1")
-        assert result is not None
-
     def test_rejects_unknown_field(self):
         raw = {"field": "goal", "proposed_value": {"value": "x"}, "reason": "r"}
         assert _validate_signal(raw, "session-1") is None
@@ -61,22 +42,10 @@ class TestValidateSignal:
         }
         assert _validate_signal(raw, "session-1") is None
 
-    def test_rejects_invalid_goal_orientation_value(self):
-        raw = {
-            "field": "goal_orientation",
-            "proposed_value": {"value": "not-a-real-orientation"},
-            "reason": "r",
-        }
-        assert _validate_signal(raw, "session-1") is None
-
-    def test_rejects_empty_structured_dict(self):
-        raw = {"field": "learning_context_structured", "proposed_value": {}, "reason": "r"}
-        assert _validate_signal(raw, "session-1") is None
-
     def test_rejects_missing_reason(self):
         raw = {
-            "field": "goal_orientation",
-            "proposed_value": {"value": "mastery_approach"},
+            "field": "focus_area",
+            "proposed_value": {"value": "System Design"},
         }
         assert _validate_signal(raw, "session-1") is None
 
@@ -86,8 +55,8 @@ class TestValidateSignal:
 
     def test_truncates_long_reason(self):
         raw = {
-            "field": "goal_orientation",
-            "proposed_value": {"value": "mastery_approach"},
+            "field": "focus_area",
+            "proposed_value": {"value": "System Design"},
             "reason": "x" * 500,
         }
         result = _validate_signal(raw, "session-1")
@@ -118,8 +87,8 @@ class TestProposeChanges:
 
             await propose_changes("u1", "s1", [
                 {
-                    "field": "goal_orientation",
-                    "proposed_value": {"value": "mastery_approach"},
+                    "field": "focus_area",
+                    "proposed_value": {"value": "System Design"},
                     "reason": "evidence",
                 }
             ])
@@ -128,13 +97,13 @@ class TestProposeChanges:
             call_args = mock_col.return_value.update_one.call_args.args
             new_pending = call_args[1]["$set"]["pending_changes"]
             assert len(new_pending) == 1
-            assert new_pending[0]["field"] == "goal_orientation"
+            assert new_pending[0]["field"] == "focus_area"
 
     @pytest.mark.asyncio
     async def test_replaces_existing_pending_for_same_field(self):
         existing_pending = [{
-            "field": "goal_orientation",
-            "proposed_value": {"value": "performance_approach"},
+            "field": "focus_area",
+            "proposed_value": {"value": "Old Area"},
             "reason": "old evidence",
             "session_id": "s0",
             "created_at": "2026-01-01T00:00:00+00:00",
@@ -145,8 +114,8 @@ class TestProposeChanges:
 
             await propose_changes("u1", "s1", [
                 {
-                    "field": "goal_orientation",
-                    "proposed_value": {"value": "mastery_approach"},
+                    "field": "focus_area",
+                    "proposed_value": {"value": "System Design"},
                     "reason": "new evidence",
                 }
             ])
@@ -154,7 +123,7 @@ class TestProposeChanges:
             call_args = mock_col.return_value.update_one.call_args.args
             new_pending = call_args[1]["$set"]["pending_changes"]
             assert len(new_pending) == 1
-            assert new_pending[0]["proposed_value"] == {"value": "mastery_approach"}
+            assert new_pending[0]["proposed_value"] == {"value": "System Design"}
 
     @pytest.mark.asyncio
     async def test_keeps_pending_for_other_fields(self):
@@ -171,8 +140,8 @@ class TestProposeChanges:
 
             await propose_changes("u1", "s1", [
                 {
-                    "field": "goal_orientation",
-                    "proposed_value": {"value": "mastery_approach"},
+                    "field": "focus_area",
+                    "proposed_value": {"value": "System Design"},
                     "reason": "new evidence",
                 }
             ])
@@ -180,7 +149,7 @@ class TestProposeChanges:
             call_args = mock_col.return_value.update_one.call_args.args
             new_pending = call_args[1]["$set"]["pending_changes"]
             fields = {p["field"] for p in new_pending}
-            assert fields == {"style_note", "goal_orientation"}
+            assert fields == {"style_note", "focus_area"}
 
     @pytest.mark.asyncio
     async def test_never_raises_on_db_failure(self):
@@ -189,8 +158,8 @@ class TestProposeChanges:
             # Should not raise
             await propose_changes("u1", "s1", [
                 {
-                    "field": "goal_orientation",
-                    "proposed_value": {"value": "mastery_approach"},
+                    "field": "focus_area",
+                    "proposed_value": {"value": "System Design"},
                     "reason": "evidence",
                 }
             ])

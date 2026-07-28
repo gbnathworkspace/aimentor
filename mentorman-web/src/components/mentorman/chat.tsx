@@ -9,6 +9,11 @@ import { TopicCreation, TopicRenameInput } from './TopicCreation';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
 import { SubtopicWeightsModal } from './SubtopicWeightsModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
+import { AttachButton } from './chat/AttachButton';
+import { AttachmentPreview } from './chat/AttachmentPreview';
+import { DocumentUploadFlow } from './chat/DocumentUploadFlow';
+import { useAttachedFiles } from '@/lib/chat-upload/useAttachedFiles';
+import type { UseDocumentUploadFlowReturn } from '@/lib/chat-upload/useDocumentUploadFlow';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
@@ -77,30 +82,48 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled, onUpload }: {
+function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onDocumentSubmit }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
   onUpload?: (file: File) => void;
+  /** Session ID for the document uploader. */
+  sessionId?: string;
+  /** Called when Send submits staged document attachments. */
+  onDocumentSubmit?: (payload: { files: File[]; skipReview: boolean; message?: string }) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachment = useAttachedFiles();
+  const canAttach = !!(sessionId && onDocumentSubmit);
 
   const grow = () => {
     const el = ref.current;
     if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; }
   };
 
+  // One Send action for both text and attachments — if valid files are
+  // staged, send submits the document-upload job (with the typed text as
+  // optional context); otherwise it sends the typed text as a chat message.
+  const hasDocsToSend = canAttach && attachment.hasValidFiles;
+  const canSubmit = !!val.trim() || hasDocsToSend;
+
   const submit = () => {
-    const t = val.trim();
-    if (!t || busy || disabled) return;
+    if (busy || disabled || !canSubmit) return;
+    const text = val.trim();
     setVal('');
     if (ref.current) ref.current.style.height = 'auto';
-    onSend(t);
+    if (hasDocsToSend) {
+      const validFiles = attachment.fileResults.filter(r => r.error === null).map(r => r.file);
+      onDocumentSubmit!({ files: validFiles, skipReview: attachment.skipReview, message: text || undefined });
+      attachment.clearAll();
+    } else {
+      onSend(text);
+    }
   };
 
   const isEval = mode === 'evaluation';
@@ -111,6 +134,17 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload }: {
       )}
       <div className="composer-inner">
         <div className={`composer-box ${focus ? 'focus' : ''}`}>
+          {canAttach && (
+            <AttachmentPreview
+              fileResults={attachment.fileResults}
+              warning={attachment.warning}
+              skipReview={attachment.skipReview}
+              disabled={disabled}
+              onRemove={attachment.removeFile}
+              onClearAll={attachment.clearAll}
+              onToggleSkipReview={attachment.toggleSkipReview}
+            />
+          )}
           <textarea
             ref={ref} value={val} rows={1}
             id="composer-textarea"
@@ -144,9 +178,10 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload }: {
                 />
               </>
             )}
+            {canAttach && <AttachButton disabled={disabled} onSelect={attachment.selectFiles} />}
             <div className="spacer" />
             <span className="tag" style={{ marginRight: 2 }}>mode: {mode}</span>
-            <button className="send-btn" onClick={submit} disabled={busy || disabled || !val.trim()} title="Send">
+            <button className="send-btn" onClick={submit} disabled={busy || disabled || !canSubmit} title="Send">
               <Icon name={isEval ? 'arrowUp' : 'send'} />
             </button>
           </div>
@@ -217,6 +252,9 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   const [topicTitle, setTopicTitle] = useState<string>('New Topic');
   const bodyRef = useRef<HTMLDivElement>(null);
   const greetedRef = useRef(false);
+
+  // Document upload flow controller ref — shared between DocumentUploadFlow and Composer
+  const docFlowRef = useRef<UseDocumentUploadFlowReturn | null>(null);
 
   // Load messages when topicId changes
   useEffect(() => {
@@ -330,6 +368,25 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     }
   }, []);
 
+  /**
+   * Handle multi-format document upload submission from the composer's Send.
+   * Delegates to the DocumentUploadFlow controller (non-blocking).
+   * The chat session remains fully functional during upload processing.
+   * Requirements: 5.3, 6.1, 9.3
+   */
+  const handleDocumentSubmit = useCallback((payload: { files: File[]; skipReview: boolean; message?: string }) => {
+    if (!docFlowRef.current) return;
+    // Add a system message to acknowledge the upload started
+    const fileNames = payload.files.map(f => f.name).join(', ');
+    setMsgs(prev => [...prev, {
+      who: 'system',
+      text: `Uploading ${payload.files.length} document${payload.files.length > 1 ? 's' : ''}: ${fileNames}`,
+      _id: 'doc-upload-' + Date.now(),
+    }]);
+    // Trigger the upload flow — this is async but non-blocking for chat
+    docFlowRef.current.submitUpload(payload);
+  }, []);
+
   // Export the full topic transcript (all messages, not just the loaded page)
   // as a local .md file for offline analysis.
   const [exporting, setExporting] = useState(false);
@@ -431,8 +488,8 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           {false && <ToneBar tone={tone} onTone={setTone} />}
           <button
             className="icon-btn"
-            title="Subtopic weight breakdown"
-            aria-label="Subtopic weight breakdown"
+            title="Where should you focus?"
+            aria-label="Where should you focus?"
             onClick={() => setShowWeights(true)}
           >
             <Icon name="chart" />
@@ -455,6 +512,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         onClose={() => setShowWeights(false)}
         topicId={topicId}
         topicTitle={topicTitle}
+        profile={profile}
       />
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
@@ -480,7 +538,9 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
               ? <MentorQuestionCard key={m._id || i} text={m.text} />
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
-          {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && <Typing />}
+          {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && (
+            <Typing label="Thinking, may check the web for current info…" />
+          )}
 
           {!busy && suggestions.length > 0 && (
             <div className="chat-options">
@@ -492,6 +552,15 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
               />
             </div>
           )}
+
+          {/* Document upload flow — renders inline, non-blocking (Req: 9.3) */}
+          {topicId && (
+            <DocumentUploadFlow
+              sessionId={topicId}
+              existingStyleNotes={profile?.style_notes}
+              flowRef={docFlowRef}
+            />
+          )}
         </div>
       </div>
 
@@ -501,6 +570,8 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         onSend={send}
         busy={busy}
         onUpload={uploadFile}
+        sessionId={topicId ?? undefined}
+        onDocumentSubmit={topicId ? handleDocumentSubmit : undefined}
       />
     </div>
   );

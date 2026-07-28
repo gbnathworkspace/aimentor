@@ -24,7 +24,11 @@ from app.services.topic_service import TopicService
 
 logger = logging.getLogger(__name__)
 
-LLM_TIMEOUT_SECONDS = 30
+LLM_TIMEOUT_SECONDS = 45  # web search adds a server-side fetch round trip
+
+# ponytail: flat cap on searches-per-turn, cost control until usage data justifies
+# a per-mode or per-user budget.
+WEB_SEARCH_MAX_USES = 3
 
 # Compaction only extracts skill updates as a side effect of reclaiming context
 # space — a topic that never grows big enough to compact never touches the skill
@@ -151,14 +155,27 @@ class TopicChatService:
 
         response = await client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=4096,
+            # ponytail: 4096 was too tight for diagram-heavy replies — adaptive
+            # thinking shares this budget with output, and an SVG diagram plus
+            # explanation can get cut mid-<svg> tag, rendering as a mostly-empty
+            # block (truncated canvas size, only trailing shapes drawn).
+            max_tokens=8192,
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
             system=system_prompt,
             messages=api_messages,
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": WEB_SEARCH_MAX_USES,
+            }],
         )
 
-        return next(block.text for block in response.content if block.type == "text")
+        # Web search interleaves text/server_tool_use/web_search_tool_result
+        # blocks — the real answer can follow a search, so every text block
+        # must be joined, not just the first (see conversation for the bug
+        # this replaced: `next(...)` silently truncated post-search answers).
+        return "".join(block.text for block in response.content if block.type == "text")
 
     def _format_messages_for_api(self, messages: list[dict]) -> list[dict]:
         """Convert topic messages (including SummaryBlocks) to Anthropic API format.

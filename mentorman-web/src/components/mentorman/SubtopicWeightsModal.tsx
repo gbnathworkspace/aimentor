@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './icons';
-
-type Goal = 'interview_prep' | 'job_performance';
+import type { CoreProfile } from '@/lib/mentorman-api';
 
 interface WeightFlag {
   subtopic: string;
@@ -17,29 +16,43 @@ interface WeightsResponse {
   needsPairwise: boolean;
 }
 
-type Phase = 'setup' | 'loading' | 'ranking' | 'result' | 'error';
+type Phase = 'setup' | 'loading' | 'result' | 'error';
 
-// Mirrors apply_nudges() in unified-backend/app/services/subtopic_weights.py —
-// duplicated here (not called over the network) so dragging a nudge input
-// recomputes instantly instead of round-tripping per keystroke.
-const NUDGE_CAP = 15;
-const FLAG_THRESHOLD = NUDGE_CAP * 0.7;
+const TEMP_MIN = 0.25;
+const TEMP_MAX = 3;
+const TEMP_DEFAULT = 1;
 
-function applyNudges(baseline: Record<string, number>, nudges: Record<string, number>) {
-  const nudged: Record<string, number> = {};
+// Plain-language stand-in for the raw temperature value — nobody needs to
+// see "1.35", they need to know which way the slider is leaning.
+function temperatureLabel(t: number): string {
+  if (t <= 0.5) return 'Very focused';
+  if (t < 0.9) return 'Focused';
+  if (t <= 1.1) return 'Balanced';
+  if (t < 2) return 'Flatter';
+  return 'Very even';
+}
+
+// Reshapes the computed weights by a single global "temperature" instead of
+// per-subtopic nudges: T<1 sharpens the distribution (biggest weight grows,
+// smallest shrinks toward 0), T>1 flattens it toward uniform. T=1 is a no-op.
+function applyTemperature(baseline: Record<string, number>, temperature: number): Record<string, number> {
+  const powered: Record<string, number> = {};
   for (const k of Object.keys(baseline)) {
-    const clamped = Math.max(-NUDGE_CAP, Math.min(NUDGE_CAP, nudges[k] ?? 0));
-    nudged[k] = baseline[k] + clamped;
+    powered[k] = Math.pow(Math.max(baseline[k], 0) / 100, 1 / temperature);
   }
-  const total = Object.values(nudged).reduce((a, b) => a + b, 0);
-  const final: Record<string, number> = {};
-  for (const k of Object.keys(nudged)) {
-    final[k] = total === 0 ? 100 / Object.keys(nudged).length : (nudged[k] / total) * 100;
+  const total = Object.values(powered).reduce((a, b) => a + b, 0);
+  const result: Record<string, number> = {};
+  for (const k of Object.keys(powered)) {
+    result[k] = total === 0 ? 100 / Object.keys(powered).length : (powered[k] / total) * 100;
   }
-  const flagged = new Set(
-    Object.keys(baseline).filter((k) => Math.abs(final[k] - baseline[k]) > FLAG_THRESHOLD)
-  );
-  return { final, flagged };
+  return result;
+}
+
+function equalSplit(subtopics: string[]): Record<string, number> {
+  const n = subtopics.length || 1;
+  const w: Record<string, number> = {};
+  for (const s of subtopics) w[s] = 100 / n;
+  return w;
 }
 
 // Full round-robin: rank 0 beats everyone below it, rank 1 beats everyone
@@ -53,33 +66,173 @@ function rankingToComparisons(order: string[]): [string, string][] {
   return pairs;
 }
 
+interface GoalCard {
+  key: string;
+  title: string;
+  tag: string;
+  /** Omitted where the title already says everything — repeating a generic line
+   *  on every card is noise, not information. */
+  description?: string;
+  /** Stated goal sent as `goalIntent` — scored by relevance server-side. Cards
+   *  can't go through the work_evidence path: one line of intent has nothing to
+   *  mention-count, so it always reads as sparse and collapses to equal split. */
+  intent: string;
+}
+
+const CONTEXT_TAGS: Record<string, string> = {
+  job_interview: 'INTERVIEW',
+  high_stakes_exam: 'EXAM',
+  competitive_test: 'TEST',
+};
+
+function humanize(value: string): string {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const STOPWORDS = new Set(['and', 'or', 'the', 'for', 'with', 'into', 'from', 'its']);
+
+function keyTokens(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+  );
+}
+
+// L1 focus areas are free text appended over time, so near-restatements pile up
+// ("REST API development and system design" vs "REST API design and scalability").
+// Showing both as separate goals is just noise — keep the first, drop the echo.
+export function isNearDuplicate(a: string, b: string): boolean {
+  const ta = keyTokens(a);
+  const tb = keyTokens(b);
+  if (ta.size === 0 || tb.size === 0) return false;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared += 1;
+  return shared / Math.min(ta.size, tb.size) >= 0.6;
+}
+
+// Suggests quick-pick goals from the user's existing L1 profile (focus areas,
+// learning context) instead of making them type evidence from scratch every
+// time — "Something else" (rendered separately, not a GoalCard) is the escape
+// hatch back to pasting specific work evidence.
+//
+// Focus areas are profile-wide, not topic-scoped, so they may only partly
+// overlap the topic being weighted — the copy says "overlaps with" rather than
+// implying the area is about this topic, and the LLM judges the actual overlap.
+export function buildGoalCards(profile: CoreProfile | null | undefined, topicTitle: string): GoalCard[] {
+  const cards: GoalCard[] = [];
+
+  const areas: string[] = [];
+  for (const area of profile?.focus_areas ?? []) {
+    if (areas.some((kept) => isNearDuplicate(kept, area))) continue;
+    areas.push(area);
+    if (areas.length === 2) break;
+  }
+
+  for (const area of areas) {
+    cards.push({
+      key: `focus:${area}`,
+      title: area,
+      tag: 'YOUR FOCUS',
+      intent: `My current focus is: ${area}. Prioritize the parts of ${topicTitle} that genuinely support that work.`,
+    });
+  }
+
+  const ctx = profile?.learning_context;
+  if (ctx && ctx !== 'self_directed') {
+    const label = profile?.learning_context_detail?.label || humanize(ctx);
+    cards.push({
+      key: 'context',
+      title: label,
+      tag: CONTEXT_TAGS[ctx] ?? 'GOAL',
+      description: 'Lean toward what usually comes up when preparing for this.',
+      intent: `I'm preparing for: ${label}. Prioritize the parts of ${topicTitle} that typically matter most for that.`,
+    });
+  }
+
+  cards.push({
+    key: 'revise',
+    title: 'Just revising',
+    tag: 'REFRESH',
+    description: 'An even pass over everything — keep concepts sharp.',
+    intent: 'A general refresher with no specific goal — treat every subtopic as roughly equally worth revisiting.',
+  });
+
+  return cards;
+}
+
 export interface SubtopicWeightsModalProps {
   open: boolean;
   onClose: () => void;
   topicId?: string | null;
   topicTitle?: string;
+  profile?: CoreProfile | null;
 }
 
-export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: SubtopicWeightsModalProps) {
+export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profile }: SubtopicWeightsModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const [phase, setPhase] = useState<Phase>('setup');
-  const [goal, setGoal] = useState<Goal>('interview_prep');
-  const [targetContext, setTargetContext] = useState('');
   const [workEvidence, setWorkEvidence] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  // 'custom' selects the free-text fallback; any other value is a GoalCard key.
+  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
+
+  const goalCards = useMemo(
+    () => buildGoalCards(profile, topicTitle || 'this topic'),
+    [profile, topicTitle]
+  );
+
+  // 'custom' is just another option in the same radiogroup — keeping it in the
+  // list (rather than rendered separately) is what makes arrow-key nav uniform.
+  const options: GoalCard[] = useMemo(
+    () => [
+      ...goalCards,
+      {
+        key: 'custom',
+        title: 'Something else',
+        tag: 'CUSTOM',
+        description: "Paste recent commits, tickets, or PR comments and we'll go from there.",
+        intent: '',
+      },
+    ],
+    [goalCards]
+  );
+
+  const hasFocusCards = goalCards.some((c) => c.key.startsWith('focus:'));
+  const goalRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  const onGoalKeyDown = (e: React.KeyboardEvent, key: string) => {
+    const idx = options.findIndex((o) => o.key === key);
+    let next: number;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % options.length;
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (idx - 1 + options.length) % options.length;
+    else return;
+    e.preventDefault();
+    const nextKey = options[next].key;
+    setSelectedGoal(nextKey);
+    goalRefs.current[nextKey]?.focus();
+  };
 
   const [baseline, setBaseline] = useState<Record<string, number>>({});
-  const [nudges, setNudges] = useState<Record<string, number>>({});
-  const [display, setDisplay] = useState<Record<string, number>>({});
-  const [flagged, setFlagged] = useState<Set<string>>(new Set());
+  const [temperature, setTemperature] = useState(TEMP_DEFAULT);
+  const [editing, setEditing] = useState(false);
+  // Manual reorder-to-rank, offered inside Edit as an alternative to the
+  // temperature control — not a forced step. Evidence too sparse to count
+  // reliably just falls back to an equal split instead of blocking the view.
+  const [rankMode, setRankMode] = useState(false);
   const [rankOrder, setRankOrder] = useState<string[]>([]);
-  const [order, setOrder] = useState<string[]>([]); // fixed at result time — dragging a slider must not reshuffle rows
+  const [order, setOrder] = useState<string[]>([]); // fixed at result time — editing must not reshuffle rows
+
+  const display = useMemo(() => applyTemperature(baseline, temperature), [baseline, temperature]);
 
   const reset = useCallback(() => {
     setPhase('setup');
     setErrorMsg('');
-    setNudges({});
+    setTemperature(TEMP_DEFAULT);
+    setEditing(false);
+    setRankMode(false);
+    setSelectedGoal(null);
+    setWorkEvidence('');
   }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -91,8 +244,12 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
     else reset();
   }, [open, reset]);
 
-  const runQuery = useCallback(async (pairwiseComparisons?: [string, string][]) => {
+  const runQuery = useCallback(async (
+    pairwiseComparisons?: [string, string][],
+    source?: { evidence?: string; intent?: string },
+  ) => {
     if (!topicId) return;
+    const evidence = source?.intent ? undefined : (source?.evidence ?? workEvidence);
     setPhase('loading');
     setErrorMsg('');
     try {
@@ -100,9 +257,9 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          goal,
-          targetContext: targetContext.trim() || undefined,
-          workEvidence: goal === 'job_performance' ? workEvidence.trim() || undefined : undefined,
+          goal: 'job_performance',
+          workEvidence: evidence?.trim() || undefined,
+          goalIntent: source?.intent,
           pairwiseComparisons,
         }),
       });
@@ -112,24 +269,39 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
         setPhase('error');
         return;
       }
-      if (data.needsPairwise) {
-        setRankOrder(data.subtopics);
-        setPhase('ranking');
-        return;
-      }
-      const w = data.weights || {};
+      // Sparse evidence: fall back to an equal split rather than forcing the
+      // user through a ranking step before they can see anything.
+      const w = data.needsPairwise ? equalSplit(data.subtopics) : data.weights || {};
       setBaseline(w);
-      setDisplay(w);
-      setFlagged(new Set());
+      setTemperature(TEMP_DEFAULT);
+      setEditing(false);
+      setRankMode(false);
       setOrder([...data.subtopics].sort((a, b) => (w[b] ?? 0) - (w[a] ?? 0)));
       setPhase('result');
     } catch {
       setErrorMsg('Request failed — try again.');
       setPhase('error');
     }
-  }, [topicId, goal, targetContext, workEvidence]);
+  }, [topicId, workEvidence]);
 
-  const submitRanking = useCallback(() => {
+  const startPreparing = () => {
+    if (selectedGoal === 'custom') {
+      runQuery(undefined, { evidence: workEvidence });
+      return;
+    }
+    const card = goalCards.find((c) => c.key === selectedGoal);
+    if (!card) return;
+    runQuery(undefined, { intent: card.intent });
+  };
+
+  const canStart = selectedGoal === 'custom' ? !!workEvidence.trim() : !!selectedGoal;
+
+  const openRankMode = () => {
+    setRankOrder(order);
+    setRankMode(true);
+  };
+
+  const applyRanking = useCallback(() => {
     runQuery(rankingToComparisons(rankOrder));
   }, [rankOrder, runQuery]);
 
@@ -141,36 +313,6 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
       [next[index], next[target]] = [next[target], next[index]];
       return next;
     });
-  };
-
-  const handleNudge = (subtopic: string, value: number) => {
-    const nextNudges = { ...nudges, [subtopic]: value };
-    const { final, flagged: nextFlagged } = applyNudges(baseline, nextNudges);
-    const newlyFlagged = [...nextFlagged].filter((s) => !flagged.has(s));
-    setNudges(nextNudges);
-    setDisplay(final);
-    setFlagged(nextFlagged);
-
-    // Best-effort, fire-and-forget — a flagged disagreement is a signal worth
-    // keeping (spec step 6), but losing one to a network hiccup shouldn't
-    // interrupt dragging a slider.
-    if (newlyFlagged.length && topicId) {
-      fetch(`/api/topic/${topicId}/subtopic-weights/nudge-log`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          flags: newlyFlagged.map((s) => ({
-            subtopic: s, baseline: baseline[s], final: final[s], delta: final[s] - baseline[s],
-          })),
-        }),
-      }).catch(() => {});
-    }
-  };
-
-  const clearNudges = () => {
-    setNudges({});
-    setDisplay(baseline);
-    setFlagged(new Set());
   };
 
   if (!open) return null;
@@ -189,8 +331,8 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
       >
         <div className="sw-head">
           <div>
-            <h2 id="sw-title" className="sw-title">Subtopic weights</h2>
-            <div className="sw-sub">{topicTitle || 'topic'} · DeriveSubtopicWeights</div>
+            <h2 id="sw-title" className="sw-title">Where should you focus?</h2>
+            <div className="sw-sub">{topicTitle ? `for ${topicTitle}` : 'Adjust your study focus'}</div>
           </div>
           <button className="icon-btn" title="Close" aria-label="Close" onClick={onClose}>
             <Icon name="x" />
@@ -199,64 +341,71 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
 
         {phase === 'setup' && (
           <div className="sw-setup">
-            <div className="sw-goal-toggle" role="radiogroup" aria-label="Goal">
-              <button
-                className={`sw-goal-opt ${goal === 'interview_prep' ? 'on' : ''}`}
-                role="radio" aria-checked={goal === 'interview_prep'}
-                onClick={() => setGoal('interview_prep')}
-              >
-                Interview prep
-              </button>
-              <button
-                className={`sw-goal-opt ${goal === 'job_performance' ? 'on' : ''}`}
-                role="radio" aria-checked={goal === 'job_performance'}
-                onClick={() => setGoal('job_performance')}
-              >
-                On-the-job
-              </button>
+            <div className="sw-label" id="sw-goal-label">
+              Choose a goal <span className="sw-required">(required)</span>
+            </div>
+            {hasFocusCards && (
+              <p className="sw-goal-note">
+                Your focus areas come from your profile, so they may only partly overlap {topicTitle || 'this topic'}.
+              </p>
+            )}
+            <div className="goal-card-list" role="radiogroup" aria-labelledby="sw-goal-label">
+              {options.map((card, i) => {
+                const checked = selectedGoal === card.key;
+                return (
+                  <button
+                    key={card.key}
+                    ref={(el) => { goalRefs.current[card.key] = el; }}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    tabIndex={checked || (!selectedGoal && i === 0) ? 0 : -1}
+                    className={`goal-card${checked ? ' goal-card--active' : ''}`}
+                    onClick={() => setSelectedGoal(card.key)}
+                    onKeyDown={(e) => onGoalKeyDown(e, card.key)}
+                  >
+                    <span className={`goal-card-radio${checked ? ' goal-card-radio--active' : ''}`} />
+                    <span className="goal-card-body">
+                      <span className="goal-card-title-row">
+                        <span className="goal-card-title">{card.title}</span>
+                        <span className="goal-card-tag">{card.tag}</span>
+                      </span>
+                      {card.description && <span className="goal-card-desc">{card.description}</span>}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
-            <label className="sw-label" htmlFor="sw-context">
-              Target context <span className="sw-optional">(optional)</span>
-            </label>
-            <input
-              id="sw-context"
-              className="sw-input"
-              placeholder={goal === 'interview_prep' ? 'e.g. mid-level backend role' : "e.g. your team's codebase"}
-              value={targetContext}
-              onChange={(e) => setTargetContext(e.target.value)}
-              maxLength={200}
-            />
-
-            {goal === 'job_performance' && (
-              <>
-                <label className="sw-label" htmlFor="sw-evidence">
-                  Recent work evidence <span className="sw-required">(required)</span>
-                </label>
-                <textarea
-                  id="sw-evidence"
-                  className="sw-textarea"
-                  placeholder="Paste recent commit messages, ticket titles, or PR review comments…"
-                  value={workEvidence}
-                  onChange={(e) => setWorkEvidence(e.target.value)}
-                  rows={5}
-                  maxLength={20000}
-                />
-              </>
+            {selectedGoal === 'custom' && (
+              <textarea
+                id="sw-evidence"
+                className="sw-textarea"
+                style={{ marginTop: 10 }}
+                placeholder="e.g. “Set up a CloudFront distribution in front of our API, debugged a cache invalidation issue, reviewed a PR adding signed cookies…”"
+                value={workEvidence}
+                onChange={(e) => setWorkEvidence(e.target.value)}
+                rows={4}
+                maxLength={20000}
+                autoFocus
+              />
             )}
 
-            <button
-              className="btn btn-accent sw-generate"
-              disabled={!topicId || (goal === 'job_performance' && !workEvidence.trim())}
-              onClick={() => runQuery()}
-            >
-              Generate weights
-            </button>
+            <div className="sw-goal-footer">
+              <button
+                className="btn btn-accent"
+                disabled={!topicId || !canStart}
+                onClick={startPreparing}
+              >
+                Start preparing →
+              </button>
+              {!canStart && <span className="sw-goal-hint-text">Pick one to continue</span>}
+            </div>
           </div>
         )}
 
         {phase === 'loading' && (
-          <div className="sw-status">Deriving weights from evidence…</div>
+          <div className="sw-status">Figuring out where to focus…</div>
         )}
 
         {phase === 'error' && (
@@ -266,64 +415,79 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle }: Sub
           </div>
         )}
 
-        {phase === 'ranking' && (
-          <div className="sw-ranking">
-            <div className="sw-status">
-              Evidence was too sparse to count reliably — rank these subtopics from
-              most to least important (AHP-lite fallback).
-            </div>
-            {rankOrder.map((s, i) => (
-              <div key={s} className="sw-rank-row">
-                <span className="sw-rank-num">{i + 1}</span>
-                <span className="sw-name">{s}</span>
-                <button className="icon-btn" disabled={i === 0} onClick={() => moveRank(i, -1)} aria-label="Move up">
-                  <Icon name="chevronDown" style={{ transform: 'rotate(180deg)' }} />
-                </button>
-                <button className="icon-btn" disabled={i === rankOrder.length - 1} onClick={() => moveRank(i, 1)} aria-label="Move down">
-                  <Icon name="chevronDown" />
-                </button>
-              </div>
-            ))}
-            <button className="btn btn-accent sw-generate" onClick={submitRanking}>
-              Submit ranking
-            </button>
-          </div>
-        )}
-
         {phase === 'result' && (
           <div className="sw-body">
-            <div className="sw-hint">Drag a slider to override a weight (±{NUDGE_CAP} pts) — the rest rebalance automatically.</div>
-            {order.map((s) => {
-              const nudge = nudges[s] ?? 0;
-              return (
+            <div className="sw-hint">
+              {rankMode
+                ? 'Drag from most to least important — we\'ll work out the rest from your order.'
+                : editing
+                  ? 'Slide toward "Focused" to concentrate on your top areas, or "Balanced" to spread more evenly.'
+                  : 'Here\'s where your study time should go, based on what you told us.'}
+            </div>
+
+            {editing && !rankMode && (
+              <div className="sw-temp-control">
+                <label htmlFor="sw-temp">{temperatureLabel(temperature)}</label>
+                <input
+                  id="sw-temp"
+                  type="range"
+                  className="sw-temp-slider"
+                  min={TEMP_MIN}
+                  max={TEMP_MAX}
+                  step={0.05}
+                  value={temperature}
+                  onChange={(e) => setTemperature(Number(e.target.value))}
+                  aria-label="Focus: sharper to more balanced"
+                />
+                <button
+                  className="btn btn-ghost sw-temp-reset"
+                  onClick={() => setTemperature(TEMP_DEFAULT)}
+                  disabled={temperature === TEMP_DEFAULT}
+                >
+                  Reset
+                </button>
+                <button className="btn btn-ghost sw-temp-reset" onClick={openRankMode}>
+                  Reorder manually
+                </button>
+              </div>
+            )}
+
+            {rankMode ? (
+              <div className="sw-ranking">
+                {rankOrder.map((s, i) => (
+                  <div key={s} className="sw-rank-row">
+                    <span className="sw-rank-num">{i + 1}</span>
+                    <span className="sw-name">{s}</span>
+                    <button className="icon-btn" disabled={i === 0} onClick={() => moveRank(i, -1)} aria-label="Move up">
+                      <Icon name="chevronDown" style={{ transform: 'rotate(180deg)' }} />
+                    </button>
+                    <button className="icon-btn" disabled={i === rankOrder.length - 1} onClick={() => moveRank(i, 1)} aria-label="Move down">
+                      <Icon name="chevronDown" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              order.map((s) => (
                 <div key={s} className="sw-row">
-                  <span className="sw-name" title={s}>
-                    {s}
-                    {flagged.has(s) && <span className="sw-flag" title="Nudged near the cap relative to the computed weight">⚑</span>}
-                  </span>
+                  <span className="sw-name" title={s}>{s}</span>
                   <span className="sw-bar-track">
                     <span className="sw-bar-fill" style={{ width: `${display[s] ?? 0}%` }} />
                   </span>
                   <span className="sw-value">{(display[s] ?? 0).toFixed(1)}%</span>
-                  <input
-                    type="range"
-                    className="sw-nudge-slider"
-                    min={-NUDGE_CAP}
-                    max={NUDGE_CAP}
-                    step={1}
-                    value={nudge}
-                    onChange={(e) => handleNudge(s, Number(e.target.value))}
-                    aria-label={`Nudge ${s}`}
-                  />
-                  <span className="sw-nudge-value">{nudge > 0 ? `+${nudge}` : nudge}</span>
                 </div>
-              );
-            })}
+              ))
+            )}
+
             <div className="sw-actions">
-              <button className="btn btn-ghost" onClick={reset}>New query</button>
-              <button className="btn btn-ghost" onClick={clearNudges} disabled={Object.keys(nudges).every((k) => !nudges[k])}>
-                Reset nudges
-              </button>
+              <button className="btn btn-ghost" onClick={reset}>Start over</button>
+              {rankMode ? (
+                <button className="btn btn-accent" onClick={applyRanking}>Apply order</button>
+              ) : (
+                <button className="btn btn-ghost" onClick={() => setEditing((v) => !v)}>
+                  {editing ? 'Done' : 'Edit'}
+                </button>
+              )}
             </div>
           </div>
         )}

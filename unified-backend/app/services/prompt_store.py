@@ -130,12 +130,24 @@ def _format_documents(documents: list[dict[str, Any]]) -> str:
 
 
 def _format_learning_context(profile: dict[str, Any]) -> str:
-    """Format the L1 learning_context + its free-text label for the prompt."""
-    context = profile.get("learning_context")
-    if not context:
-        return "Not specified"
-    label = (profile.get("learning_context_detail") or {}).get("label")
-    return f"{context} — {label}" if label else str(context)
+    """Format every context + every situation the user has recorded.
+
+    Nothing here is "active" — the user curates the lists, and whatever is in
+    them is true of them right now, so all of it is injected.
+    """
+    detail = profile.get("learning_context_detail") or {}
+    contexts = list(detail.get("contexts") or [])
+    if not contexts and profile.get("learning_context"):
+        contexts = [str(profile["learning_context"])]
+
+    situations = list(detail.get("situations") or [])
+    # `label` predates `situations` (onboarding/memory_editor still write it).
+    label = detail.get("label")
+    if label and label not in situations:
+        situations.insert(0, label)
+
+    parts = [p for p in (", ".join(contexts), "; ".join(situations)) if p]
+    return " — ".join(parts) if parts else "Not specified"
 
 
 def _format_focus_areas(profile: dict[str, Any]) -> str:

@@ -18,6 +18,7 @@ from app.auth.admin_router import router as admin_router
 from app.auth.dependencies import require_auth
 from app.auth.router import router as auth_router
 from app.routers import (
+    documents,
     ingest,
     memory,
     mentor,
@@ -28,6 +29,7 @@ from app.routers import (
     skills,
     topics,
 )
+from app.services.file_cleanup import file_cleanup_loop
 from app.services.session_manager import SessionManager
 
 
@@ -81,10 +83,16 @@ async def lifespan(app: FastAPI):
     """Manage MongoDB connection lifecycle and background tasks."""
     await connect_db()
     sweep_task = asyncio.create_task(_timeout_sweep_loop())
+    cleanup_task = asyncio.create_task(file_cleanup_loop())
     yield
     sweep_task.cancel()
+    cleanup_task.cancel()
     try:
         await sweep_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await cleanup_task
     except asyncio.CancelledError:
         pass
     await disconnect_db()
@@ -111,6 +119,7 @@ app.include_router(session_upload.router)
 app.include_router(mentor.router)
 app.include_router(onboarding.router)
 app.include_router(ingest.router)
+app.include_router(documents.router)
 app.include_router(memory.router)
 app.include_router(topics.router)
 

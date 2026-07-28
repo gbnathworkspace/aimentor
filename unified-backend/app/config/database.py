@@ -83,6 +83,10 @@ def weight_nudges_col():
     return get_db()["weight_nudges"]
 
 
+def document_upload_jobs_col():
+    return get_db()["document_upload_jobs"]
+
+
 async def _ensure_indexes() -> None:
     """Create required indexes if they don't exist."""
     await profiles_col().create_index("user_id", unique=True)
@@ -94,3 +98,9 @@ async def _ensure_indexes() -> None:
     await immediate_contexts_col().create_index("session_id")
     await subtopic_lists_col().create_index("topic", unique=True)
     await weight_nudges_col().create_index("user_id")
+    # Document upload jobs: unique job_id, user_id lookup, and TTL on expires_at
+    await document_upload_jobs_col().create_index("job_id", unique=True)
+    await document_upload_jobs_col().create_index("user_id")
+    await document_upload_jobs_col().create_index(
+        "expires_at", expireAfterSeconds=0, name="idx_expires_at_ttl"
+    )

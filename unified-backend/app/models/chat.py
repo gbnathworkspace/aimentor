@@ -4,7 +4,6 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.profile import LearningContext
 from app.models.session import Message
 
 # The four supported mentor session modes. Constraining the API boundary to this
@@ -67,7 +66,7 @@ class OnboardingCompleteRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    learning_context: LearningContext = Field(alias="learningContext")
+    learning_context: str = Field(alias="learningContext", max_length=60)
     learning_context_label: Optional[str] = Field(None, alias="learningContextLabel")
     focus_areas: list[str] = Field(default_factory=list, alias="focusAreas")
     explanation_style: Literal["hint-first", "answer-first"] = Field(
@@ -109,7 +108,7 @@ class OnboardingSkipResponse(BaseModel):
 class OnboardingCompleteDeferredRequest(BaseModel):
     """Request body for POST /api/onboarding/complete-deferred."""
 
-    learning_context: Optional[LearningContext] = Field(None, alias="learningContext")
+    learning_context: Optional[str] = Field(None, alias="learningContext", max_length=60)
     learning_context_label: Optional[str] = Field(None, alias="learningContextLabel")
     focus_areas: Optional[list[str]] = Field(None, alias="focusAreas")
     explanation_style: Optional[Literal["hint-first", "answer-first"]] = Field(

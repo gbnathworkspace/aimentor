@@ -16,12 +16,11 @@ import anthropic
 
 from app.config.database import profiles_col
 from app.config.settings import get_settings
-from app.models.profile import GoalOrientation, LearningContext, StyleNoteCategory
+from app.models.profile import LearningContext, StyleNoteCategory
 
 logger = logging.getLogger(__name__)
 
 _VALID_CONTEXTS = {c.value for c in LearningContext}
-_VALID_ORIENTATIONS = {o.value for o in GoalOrientation}
 _VALID_CATEGORIES = {c.value for c in StyleNoteCategory}
 _VALID_EXPLANATION = {"hint-first", "answer-first"}
 _VALID_CHALLENGE = {"low", "medium", "high"}
@@ -38,7 +37,6 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
         "explanation_style": profile.get("explanation_style", "hint-first"),
         "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
         "feedback_tone": profile.get("feedback_tone", "encouraging"),
-        "goal_orientation": profile.get("goal_orientation"),
         "style_notes": [
             {"index": i, "category": n.get("category"), "note": n.get("note")}
             for i, n in enumerate(profile.get("style_notes") or [])
@@ -57,7 +55,6 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
         '  "explanation_style": hint-first|answer-first\n'
         '  "challenge_tolerance": low|medium|high\n'
         '  "feedback_tone": direct|encouraging\n'
-        '  "goal_orientation": mastery_approach|mastery_avoidance|performance_approach|performance_avoidance|other\n'
         '  "remove_style_note_indices": array of integers — indices from style_notes above to delete\n'
         '  "add_style_note": {"category": pacing|communication|motivation|misconception|context, "note": "short claim"}\n'
         '  "summary": one short sentence describing what you changed, shown to the user\n\n'
@@ -124,10 +121,15 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
     if isinstance(data.get("learning_context_label"), str):
         ctx = update.get("learning_context") or profile.get("learning_context") or "self_directed"
         existing_detail = profile.get("learning_context_detail") or {}
+        label = data["learning_context_label"]
+        situations = [s for s in (existing_detail.get("situations") or []) if s != label]
         update["learning_context_detail"] = {
             "learning_context": ctx,
-            "label": data["learning_context_label"],
-            "structured": existing_detail.get("structured", {}),
+            "contexts": existing_detail.get("contexts") or [ctx],
+            "label": label,
+            # The new label joins the injected list rather than replacing it —
+            # this write used to drop `situations` entirely.
+            "situations": [label, *situations][:20],
         }
 
     if isinstance(data.get("focus_areas"), list) and all(isinstance(x, str) for x in data["focus_areas"]):
@@ -139,8 +141,6 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
         update["challenge_tolerance"] = data["challenge_tolerance"]
     if data.get("feedback_tone") in _VALID_TONE:
         update["feedback_tone"] = data["feedback_tone"]
-    if data.get("goal_orientation") in _VALID_ORIENTATIONS:
-        update["goal_orientation"] = data["goal_orientation"]
 
     style_notes = list(profile.get("style_notes") or [])
     style_notes_changed = False

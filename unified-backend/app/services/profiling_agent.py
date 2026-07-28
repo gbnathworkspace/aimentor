@@ -3,8 +3,8 @@
 Reads the same LLM response session_save_handler.py already gets at session-end
 (a third key, "profile_signals", alongside narrative_summary/skill_update) and
 turns it into PendingProfileChange entries. Never writes directly to the live
-profile — see design_decisions/10_onboarding.md and issue #49: goal_orientation
-and style_notes are inferred, not self-reported, so every proposal sits in
+profile — see design_decisions/10_onboarding.md and issue #49: style_notes are
+inferred, not self-reported, so every proposal sits in
 profiles_col.pending_changes until the user accepts or dismisses it via
 POST /api/profile/pending-changes/{field}/(accept|dismiss).
 
@@ -24,9 +24,6 @@ logger = logging.getLogger(__name__)
 
 _VALID_FIELDS = {f.value for f in ProposableField}
 _VALID_CATEGORIES = {c.value for c in StyleNoteCategory}
-_VALID_ORIENTATIONS = {
-    "mastery_approach", "mastery_avoidance", "performance_approach", "performance_avoidance", "other",
-}
 
 
 def _validate_signal(raw: Any, session_id: str) -> Optional[PendingProfileChange]:
@@ -44,12 +41,6 @@ def _validate_signal(raw: Any, session_id: str) -> Optional[PendingProfileChange
 
     if field == ProposableField.STYLE_NOTE.value:
         if proposed_value.get("category") not in _VALID_CATEGORIES or not proposed_value.get("note"):
-            return None
-    elif field == ProposableField.GOAL_ORIENTATION.value:
-        if proposed_value.get("value") not in _VALID_ORIENTATIONS:
-            return None
-    elif field == ProposableField.LEARNING_CONTEXT_STRUCTURED.value:
-        if not proposed_value:
             return None
 
     try:

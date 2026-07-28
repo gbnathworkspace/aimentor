@@ -1,7 +1,6 @@
 """DeriveSubtopicWeights — allocates a 100-point weight budget across a
-topic's subtopics from real evidence (job postings/interview questions for
-interview_prep, the user's own commits/tickets/PR comments for
-job_performance), instead of guessing or weighting everything equally.
+topic's subtopics from real evidence (the user's own commits/tickets/PR
+comments), instead of guessing or weighting everything equally.
 
 See .kiro/specs/skill-graph-v2/design.md for the taxonomy this feeds into.
 """
@@ -19,7 +18,7 @@ from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-Goal = Literal["interview_prep", "job_performance"]
+Goal = Literal["job_performance"]
 
 NUDGE_CAP = 15.0  # max points a user can shift a subtopic away from baseline
 FLAG_THRESHOLD = NUDGE_CAP * 0.7  # near-max nudge = notable disagreement signal
@@ -28,9 +27,6 @@ MIN_EVIDENCE_PER_SUBTOPIC = 1.5  # scales the floor up as more subtopics compete
 SMOOTHING = 1  # Laplace/add-one smoothing — a real subtopic the counter missed
 # should read as "rare", not "confirmed absent" (weight 0 forever)
 
-# ponytail: flat cap matching topic_chat_service's search budget, no per-user
-# tuning until usage data justifies it.
-WEB_SEARCH_MAX_USES = 3
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 EVIDENCE_CHAR_LIMIT = 8000  # cap prompt size for the mention-counting call
 
@@ -46,6 +42,11 @@ class WeightFlag:
 @dataclass
 class WeightResult:
     weights: dict[str, float] | None
+    # The subtopic set `weights` is keyed on — always return this alongside
+    # weights rather than a separately-fetched list, so the caller can never
+    # render a subset that silently omits some of the 100% (see
+    # pairwise_wins_to_counts for the failure this prevents).
+    subtopics: list[str]
     flags: list[WeightFlag] = field(default_factory=list)
     # True when evidence was too sparse to count — caller must collect a
     # pairwise ranking from the user and re-call with pairwise_comparisons.
@@ -74,7 +75,7 @@ async def get_subtopics(topic: str) -> list[str]:
 
 
 async def _decompose_via_llm(topic: str) -> list[str]:
-    """Call Haiku to generate 5-8 concept-level subtopics for `topic`."""
+    """Call Haiku to generate 6-9 concept-level subtopics for `topic`."""
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
@@ -84,9 +85,13 @@ async def _decompose_via_llm(topic: str) -> list[str]:
         messages=[{
             "role": "user",
             "content": (
-                f"List 5-8 concept-level subtopics someone must learn to master '{topic}'. "
-                "Each should be a short phrase (3-6 words), specific enough to count mentions "
-                "of it in text (e.g. 'cold starts & provisioned concurrency', not 'performance'). "
+                f"List 6-9 concept-level subtopics someone must learn to master '{topic}'. "
+                "Each subtopic name: 2-6 words, a compact noun-phrase tag, not a sentence or "
+                "description — no numbering, no colons, and avoid linking words like 'with', "
+                "'for', 'of', 'and' (join two co-equal terms with '&' instead if needed). "
+                "Specific enough to count mentions of it in text: e.g. 'cold starts & "
+                "provisioned concurrency', not 'performance'; 'IAM roles & permissions', not "
+                "'managing permissions for functions'. "
                 "Return ONLY a JSON array of strings, no explanation. Example: "
                 '["Subtopic 1", "Subtopic 2", "Subtopic 3"]'
             ),
@@ -97,7 +102,7 @@ async def _decompose_via_llm(topic: str) -> list[str]:
     try:
         subtopics = json.loads(text)
         if isinstance(subtopics, list) and all(isinstance(s, str) for s in subtopics):
-            return subtopics[:8]
+            return subtopics[:9]
     except json.JSONDecodeError:
         pass
 
@@ -105,46 +110,17 @@ async def _decompose_via_llm(topic: str) -> list[str]:
     if start != -1 and end != -1:
         subtopics = json.loads(text[start : end + 1])
         if isinstance(subtopics, list) and all(isinstance(s, str) for s in subtopics):
-            return subtopics[:8]
+            return subtopics[:9]
 
     raise ValueError(f"Could not parse subtopics from LLM response for topic={topic!r}")
 
 
-async def _gather_evidence(
-    goal: Goal, topic: str, target_context: str | None, work_evidence: str | None
-) -> str:
-    if goal == "interview_prep":
-        settings = get_settings()
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        context = target_context or topic
-        response = await client.messages.create(
-            model=HAIKU_MODEL,
-            max_tokens=2000,
-            tools=[{
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": WEB_SEARCH_MAX_USES,
-            }],
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Search for job postings and common interview questions "
-                    f"for '{topic}', relevant to: {context}. "
-                    f"Return the raw text you find — do not summarize."
-                ),
-            }],
+async def _gather_evidence(work_evidence: str | None) -> str:
+    if not work_evidence:
+        raise ValueError(
+            "work_evidence is required (recent commits, tickets, PR review comments)"
         )
-        return "".join(block.text for block in response.content if block.type == "text")
-
-    if goal == "job_performance":
-        if not work_evidence:
-            raise ValueError(
-                "goal='job_performance' requires work_evidence "
-                "(recent commits, tickets, PR review comments)"
-            )
-        return work_evidence
-
-    raise ValueError(f"goal must be 'interview_prep' or 'job_performance', got {goal!r}")
+    return work_evidence
 
 
 async def _count_mentions_llm(evidence: str, subtopics: list[str]) -> dict[str, int]:
@@ -179,6 +155,43 @@ async def _count_mentions_llm(evidence: str, subtopics: list[str]) -> dict[str, 
     return {s: int(counts.get(s, 0)) for s in subtopics}
 
 
+async def _score_relevance_llm(intent: str, topic: str, subtopics: list[str]) -> dict[str, float]:
+    """Score each subtopic 0-10 on how much it matters for a stated *goal*.
+
+    Distinct from _count_mentions_llm, which counts occurrences in a body of
+    real evidence. A goal like "preparing for a job interview" is one sentence
+    of intent — there is nothing in it to count, so mention-counting always
+    reads as sparse and collapses to an equal split. Relevance scoring asks
+    the question the intent can actually answer, and always yields a usable
+    spread (no pairwise fallback needed).
+    """
+    settings = get_settings()
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    subtopic_list = "\n".join(f"- {s}" for s in subtopics)
+
+    response = await client.messages.create(
+        model=HAIKU_MODEL,
+        max_tokens=500,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"A learner studying {topic!r} states this goal:\n"
+                f'"""\n{intent[:EVIDENCE_CHAR_LIMIT]}\n"""\n\n'
+                f"Subtopics of {topic!r}:\n{subtopic_list}\n\n"
+                "Score each subtopic 0-10 on how much study time it deserves given that "
+                "goal: 10 = critical to the goal, 5 = generally useful, 0 = irrelevant to it. "
+                "If the goal names an area outside this topic, score by how much each "
+                "subtopic genuinely supports that area rather than scoring everything equally. "
+                "Return ONLY a JSON object mapping each subtopic name (exactly as given) to "
+                'a number, no explanation. Example: {"Subtopic 1": 8, "Subtopic 2": 2}'
+            ),
+        }],
+    )
+    text = "".join(block.text for block in response.content if block.type == "text").strip()
+    scores = _parse_json_object(text)
+    return {s: max(0.0, float(scores.get(s, 0))) for s in subtopics}
+
+
 def _parse_json_object(text: str) -> dict:
     try:
         return json.loads(text)
@@ -192,11 +205,22 @@ def _parse_json_object(text: str) -> dict:
     raise ValueError(f"Could not parse a JSON object from LLM response: {text[:200]!r}")
 
 
-def pairwise_wins_to_counts(
-    comparisons: list[tuple[str, str]], subtopics: list[str]
-) -> dict[str, int]:
-    """AHP-lite fallback: turn (winner, loser) pairwise picks into raw counts."""
-    wins = Counter({s: 0 for s in subtopics})
+def pairwise_wins_to_counts(comparisons: list[tuple[str, str]]) -> dict[str, int]:
+    """AHP-lite fallback: turn (winner, loser) pairwise picks into raw counts.
+
+    Derives the subtopic universe from the comparisons themselves (union of
+    winners and losers) instead of trusting a separately-fetched subtopic
+    list — that list is cached by topic name and can regenerate with
+    different phrasing between when a ranking is captured client-side and
+    when it's submitted. A mismatch there would silently strand real vote
+    counts on names the caller's subtopic list doesn't contain, so the
+    weights the caller does render sum to less than 100%.
+    """
+    universe: dict[str, None] = {}
+    for winner, loser in comparisons:
+        universe.setdefault(winner, None)
+        universe.setdefault(loser, None)
+    wins = Counter({s: 0 for s in universe})
     for winner, _loser in comparisons:
         wins[winner] += 1
     return dict(wins)
@@ -232,8 +256,8 @@ async def derive_subtopic_weights(
     topic: str,
     goal: Goal,
     subtopics: list[str],
-    target_context: str | None = None,
     work_evidence: str | None = None,
+    goal_intent: str | None = None,
     pairwise_comparisons: list[tuple[str, str]] | None = None,
     user_nudges: dict[str, float] | None = None,
 ) -> WeightResult:
@@ -242,12 +266,22 @@ async def derive_subtopic_weights(
 
     Pass `pairwise_comparisons` directly to skip evidence-gathering and use
     the AHP-lite fallback (e.g. on a retry after `needs_pairwise=True`).
+
+    Pass `goal_intent` (a stated goal, not a body of evidence) to score
+    subtopics by relevance instead of counting mentions — see
+    _score_relevance_llm for why intent can't go through the counting path.
     """
     if pairwise_comparisons is not None:
-        counts = pairwise_wins_to_counts(pairwise_comparisons, subtopics)
+        counts = pairwise_wins_to_counts(pairwise_comparisons)
+        subtopics = list(counts)
         baseline = _normalize(counts)
+    elif goal_intent:
+        scores = await _score_relevance_llm(goal_intent, topic, subtopics)
+        # Smoothed like the counting path: a 0 here means "not relevant to this
+        # goal", not "never study this" — keep a floor so nothing hits 0%.
+        baseline = _normalize({s: v + SMOOTHING for s, v in scores.items()})
     else:
-        evidence = await _gather_evidence(goal, topic, target_context, work_evidence)
+        evidence = await _gather_evidence(work_evidence)
         counts = await _count_mentions_llm(evidence, subtopics)
         threshold = max(MIN_EVIDENCE_THRESHOLD, MIN_EVIDENCE_PER_SUBTOPIC * len(subtopics))
         if sum(counts.values()) < threshold:
@@ -255,11 +289,11 @@ async def derive_subtopic_weights(
                 "Sparse evidence for topic=%s goal=%s counts=%s (threshold=%.1f) — need pairwise ranking",
                 topic, goal, counts, threshold,
             )
-            return WeightResult(weights=None, needs_pairwise=True)
+            return WeightResult(weights=None, subtopics=subtopics, needs_pairwise=True)
         # Smoothed only here: a count-of-0 from a thin sample means "rare",
         # not "confirmed zero" — pairwise ranks above are a real signal, not
         # sampling noise, so they're normalized unsmoothed.
         baseline = _normalize({s: c + SMOOTHING for s, c in counts.items()})
 
     final, flags = apply_nudges(baseline, user_nudges or {})
-    return WeightResult(weights=final, flags=flags)
+    return WeightResult(weights=final, subtopics=subtopics, flags=flags)

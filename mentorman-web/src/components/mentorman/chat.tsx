@@ -5,7 +5,8 @@ import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
 import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
 import { OnboardingBanner } from './OnboardingBanner';
-import { TopicCreation, TopicRenameInput } from './TopicCreation';
+import { TopicRenameInput } from './TopicCreation';
+import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
 import { SubtopicWeightsModal } from './SubtopicWeightsModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
@@ -233,7 +234,7 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
   );
 }
 
-export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, onStartDeferredOnboarding }: {
+export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, userName, onStartDeferredOnboarding }: {
   topicId: string | null;
   mode: ModeId;
   setMode: (m: ModeId) => void;
@@ -244,10 +245,18 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   onTopicCreated?: (topicId: string) => void;
   topics?: Topic[];
   profile?: CoreProfile | null;
+  userName?: string;
   onStartDeferredOnboarding?: () => void;
 }) {
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  // Text typed on the welcome screen, held until the freshly-created topic's
+  // history has finished loading (see the effect below).
+  const [pendingFirst, setPendingFirst] = useState<string | null>(null);
+  // Topic id whose history has finished loading — gates the pendingFirst send.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<QuickReplyOption[]>([]);
   const [topicTitle, setTopicTitle] = useState<string>('New Topic');
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -261,9 +270,11 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     if (!topicId) {
       setMsgs([]);
       setTopicTitle('New Topic');
+      setLoadedFor(null);
       greetedRef.current = false;
       return;
     }
+    setLoadedFor(null);
     let cancelled = false;
     setBusy(true);
     greetedRef.current = true;
@@ -307,7 +318,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         setMsgs(loaded);
       })
       .catch(() => { if (!cancelled) setMsgs([]); })
-      .finally(() => { if (!cancelled) setBusy(false); });
+      .finally(() => { if (!cancelled) { setBusy(false); setLoadedFor(topicId); } });
 
     return () => { cancelled = true; };
   }, [topicId]);
@@ -347,6 +358,58 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       setBusy(false);
     }
   }, [topicId, mode]);
+
+  // Welcome screen: send the typed text into the topic the user picked, or —
+  // when they picked "New topic" — create one first. A new topic's title is
+  // derived from the message (first 100 chars), so there's no naming step.
+  const startFromMessage = useCallback(async (text: string, existingTopicId: string | null) => {
+    if (creating) return;
+    if (existingTopicId) {
+      // Same handoff as a fresh topic: hold the text until the thread loads.
+      setPendingFirst(text);
+      onTopicCreated?.(existingTopicId);
+      return;
+    }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/topics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: text.trim().slice(0, 100) }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCreateError(data?.detail || 'Could not start that topic — please try again.');
+        return;
+      }
+      const topic = await res.json();
+      const newId = topic.topicId || topic.topic_id || topic.id;
+      if (!newId) {
+        setCreateError('Could not start that topic — please try again.');
+        return;
+      }
+      setPendingFirst(text);
+      onTopicCreated?.(newId);
+    } catch {
+      setCreateError('Connection error — please try again.');
+    } finally {
+      setCreating(false);
+    }
+  }, [creating, onTopicCreated]);
+
+  // Send that first message only once this topic's history has loaded.
+  // Sending during the load is silently discarded — the load ends with
+  // setMsgs(loaded), which replaces the optimistic user message wholesale.
+  // `busy` can't gate this: the load effect and this one run in the same
+  // commit, where setBusy(true) hasn't applied yet — hence the explicit
+  // "loaded this exact topic" marker.
+  useEffect(() => {
+    if (!topicId || pendingFirst === null || loadedFor !== topicId) return;
+    const text = pendingFirst;
+    setPendingFirst(null);
+    send(text);
+  }, [topicId, pendingFirst, loadedFor, send]);
 
   // Upload a résumé/LeetCode file mid-chat; status surfaces as a system
   // message in the thread (server accepts PDF/CSV, extracts in the
@@ -451,23 +514,17 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     }
   }, [topicId, mode, exporting]);
 
-  // If no topicId, show topic creation screen
+  // No topic yet — the welcome screen doubles as topic creation: whatever the
+  // user types opens a topic and becomes its first message.
   if (!topicId) {
     return (
-      <div className="panel">
-        <div className="panel-head">
-          <div className="ph-left">
-            <div className="ph-title">New Topic</div>
-            <div className="ph-sub">create a topic to start chatting</div>
-          </div>
-        </div>
-        <div className="chat-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <TopicCreation
-            onTopicCreated={(id) => { onTopicCreated?.(id); }}
-            onCancel={() => {}}
-          />
-        </div>
-      </div>
+      <WelcomeScreen
+        userName={userName}
+        busy={creating}
+        error={createError}
+        onStart={startFromMessage}
+        onNav={onNav}
+      />
     );
   }
 

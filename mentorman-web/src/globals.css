@@ -289,6 +289,13 @@ body {
 .pill.info { color: var(--info); border-color: var(--info-line); background: var(--info-weak); }
 .pill.info .ind { background: var(--info); }
 
+/* Pill as a button — the welcome composer's topic picker. */
+.pill.topic-pick {
+  border: none; cursor: pointer; height: 26px; padding: 0 11px;
+  font-family: var(--mono); font-size: 11px;
+}
+.pill.topic-pick:disabled { cursor: default; opacity: 0.5; }
+
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .tag {
@@ -2071,4 +2078,79 @@ body {
 }
 .topic-rename-row .num-input {
   height: 32px; font-size: 13px;
+}
+
+/* ---- Welcome screen (no active topic) -----------------------
+   The empty state of the chat panel: centred hero, composer, and a
+   grid of starter prompts. Layout mirrors the "MentorMan chatbot
+   welcome redesign" Claude Design file. */
+@keyframes heroIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+.welcome-wrap {
+  flex: 1; overflow-y: auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px 26px;
+}
+.welcome-inner {
+  width: 100%; max-width: 720px;
+  display: flex; flex-direction: column; align-items: center;
+  animation: heroIn .5s cubic-bezier(.22,.61,.36,1) both;
+}
+
+.welcome-hero { display: flex; align-items: center; gap: 15px; margin-bottom: 34px; }
+.welcome-spark { color: var(--accent); display: grid; place-items: center; filter: drop-shadow(0 0 14px var(--accent-glow)); }
+.welcome-title { margin: 0; font-size: 40px; font-weight: 500; letter-spacing: -0.025em; color: var(--fg); line-height: 1; white-space: nowrap; }
+
+.welcome-suggestions { width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 20px; }
+.welcome-suggestion {
+  display: flex; align-items: flex-start; gap: 12px; text-align: left;
+  padding: 14px 15px; border-radius: var(--r);
+  border: 1px solid var(--border-soft); background: var(--card);
+  cursor: pointer; font-family: inherit;
+  transition: border-color .15s, background .15s;
+}
+.welcome-suggestion:hover:not(:disabled) { border-color: var(--accent-line); background: var(--card-2); }
+.welcome-suggestion:disabled { opacity: 0.55; cursor: not-allowed; }
+.welcome-suggestion .ws-icon {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: 8px; background: var(--card-2); border: 1px solid var(--border-soft);
+  color: var(--accent); display: grid; place-items: center;
+}
+.welcome-suggestion .ws-title { display: block; font-size: 13.5px; font-weight: 600; color: var(--fg-dim); margin-bottom: 2px; }
+.welcome-suggestion .ws-desc { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+
+.welcome-foot {
+  margin-top: 26px; text-align: center;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  color: var(--muted); text-transform: uppercase;
+}
+.welcome-error { margin-top: 14px; color: var(--danger); font-size: 12.5px; text-align: center; }
+
+/* Topic picker menu — the onboarding option list, re-anchored as a dropdown
+   under the pill. max-height caps it once the topic list grows past a screenful. */
+.topic-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+  margin: 0; width: 240px; max-width: none;
+  max-height: 280px; overflow-y: auto;
+  box-shadow: var(--sh-2);
+}
+.topic-menu-head {
+  padding: 8px 12px 4px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  color: var(--muted); text-transform: uppercase;
+}
+.topic-menu .onb-option-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* "Sounds like React" routing popup, shown when a message matches a topic. */
+.welcome-route { width: 420px; }
+.welcome-route-actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+
+/* The 40px nowrap headline and the 2-up grid both need an out at narrow
+   widths — the design is specified at desktop only. */
+@media (max-width: 760px) {
+  .welcome-title { font-size: 28px; white-space: normal; }
+  .welcome-hero { gap: 11px; margin-bottom: 26px; }
+  .welcome-suggestions { grid-template-columns: 1fr; }
 }

@@ -19,7 +19,7 @@ from app.services import context_assembler
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
-from app.services.token_counter import TokenCounter
+from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,20 @@ class TopicChatService:
             Dict with "response" (assistant content) on success,
             or "error" key on failure.
         """
+        # Step 0: Hard cap — reject before an LLM call is made or the user
+        # message is even accepted, once the topic is at capacity. Compaction
+        # (post-turn hook below) is best-effort and async — it can keep
+        # failing turn after turn with nothing to stop the topic from growing,
+        # so this is the actual backstop on topic size.
+        topic = await self._topic_service.get_topic(topic_id, user_id)
+        existing_messages = topic.get("messages", [])
+        topic_title = topic.get("title", "General")
+        if self._token_counter.get_usage_percent(existing_messages) >= OVER_CAPACITY_THRESHOLD:
+            return {
+                "error": "This topic has reached its size limit. Start a new topic to continue.",
+                "topicFull": True,
+            }
+
         now = datetime.now(timezone.utc)
 
         # Step 1: Create and append user message (Req 4.1)
@@ -90,10 +104,9 @@ class TopicChatService:
 
         await self._topic_service.append_message(topic_id, user_id, user_msg)
 
-        # Step 2: Get topic data for context assembly
-        topic = await self._topic_service.get_topic(topic_id, user_id)
-        messages = topic.get("messages", [])
-        topic_title = topic.get("title", "General")
+        # Step 2: Build the message list for context assembly — reuse the
+        # pre-append fetch above instead of a second DB round trip.
+        messages = existing_messages + [user_msg]
 
         # Step 3: Assemble L1/L2/L3 context (Req 4.3)
         context = await context_assembler.assemble(user_id, topic_title, content)

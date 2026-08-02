@@ -77,6 +77,7 @@ def mock_token_counter():
     """Mock TokenCounter."""
     counter = MagicMock()
     counter.count_message.return_value = 5
+    counter.get_usage_percent.return_value = 0
     return counter
 
 
@@ -183,6 +184,48 @@ class TestHandleMessageHappyPath:
             )
 
         assert result == {"response": "LLM says hello", "suggestions": []}
+
+
+class TestHandleMessageHardCap:
+    """Tests for the hard token-capacity cap (backstop when compaction fails)."""
+
+    @pytest.mark.asyncio
+    async def test_over_capacity_rejects_without_llm_call(
+        self, chat_service, mock_topic_service, mock_token_counter
+    ):
+        """At/over 100% usage, the message is rejected before any append or LLM call."""
+        mock_token_counter.get_usage_percent.return_value = 100
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "Hello", mode="topic"
+            )
+
+        assert result["topicFull"] is True
+        assert "error" in result
+        mock_topic_service.append_message.assert_not_called()
+        mock_llm.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_under_capacity_proceeds_normally(
+        self, mock_get_prompt, mock_assembler, chat_service, mock_token_counter
+    ):
+        """Below the cap, the turn proceeds as usual."""
+        mock_token_counter.get_usage_percent.return_value = 99
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+        })
+        mock_get_prompt.return_value = "prompt"
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = "Response"
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "Hello"
+            )
+
+        assert result["response"] == "Response"
 
 
 class TestHandleMessageLLMTimeout:

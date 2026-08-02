@@ -179,7 +179,7 @@ class TestRenameTopic:
     async def test_rename_topic_success(self, auth_headers):
         updated = _sample_topic(title="Advanced Python")
         mock_service = AsyncMock()
-        mock_service.rename_topic = AsyncMock(return_value=updated)
+        mock_service.update_topic = AsyncMock(return_value=updated)
 
         with patch("app.routers.topics._topic_service", mock_service):
             from app.main import app
@@ -193,14 +193,37 @@ class TestRenameTopic:
 
         assert resp.status_code == 200
         assert resp.json()["title"] == "Advanced Python"
-        mock_service.rename_topic.assert_awaited_once_with(
-            "topic-abc", "user-123", "Advanced Python"
+        mock_service.update_topic.assert_awaited_once_with(
+            "topic-abc", "user-123", title="Advanced Python", subject=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_set_subject_success(self, auth_headers):
+        updated = _sample_topic(title="AWS Lambda")
+        updated["subject"] = "AWS"
+        mock_service = AsyncMock()
+        mock_service.update_topic = AsyncMock(return_value=updated)
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.patch(
+                    "/api/topic/topic-abc",
+                    headers=auth_headers,
+                    json={"subject": "AWS"},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["subject"] == "AWS"
+        mock_service.update_topic.assert_awaited_once_with(
+            "topic-abc", "user-123", title=None, subject="AWS"
         )
 
     @pytest.mark.asyncio
     async def test_rename_topic_not_found(self, auth_headers):
         mock_service = AsyncMock()
-        mock_service.rename_topic = AsyncMock(
+        mock_service.update_topic = AsyncMock(
             side_effect=HTTPException(status_code=404, detail="Topic not found")
         )
 

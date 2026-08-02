@@ -36,10 +36,12 @@ class CreateTopicRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=100)
 
 
-class RenameTopicRequest(BaseModel):
-    """Request body for renaming a topic."""
+class UpdateTopicRequest(BaseModel):
+    """Request body for updating a topic (rename and/or set subject)."""
 
-    title: str = Field(..., min_length=1, max_length=100)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    # Empty string clears the subject (moves the topic back to Ungrouped).
+    subject: Optional[str] = Field(default=None, max_length=60)
 
 
 class SendMessageRequest(BaseModel):
@@ -156,11 +158,17 @@ async def get_messages_paginated(
 
 
 @router.patch("/topic/{topic_id}")
-async def rename_topic(
-    topic_id: str, body: RenameTopicRequest, user_id: str = Depends(require_auth)
+async def update_topic(
+    topic_id: str, body: UpdateTopicRequest, user_id: str = Depends(require_auth)
 ):
-    """Rename a topic. Validates title (1-100 chars after trim)."""
-    topic = await _topic_service.rename_topic(topic_id, user_id, body.title)
+    """Update a topic's title and/or subject.
+
+    Title is validated (1-100 chars after trim) when present. An empty
+    subject string clears the subject (Ungrouped).
+    """
+    topic = await _topic_service.update_topic(
+        topic_id, user_id, title=body.title, subject=body.subject
+    )
     return topic
 
 

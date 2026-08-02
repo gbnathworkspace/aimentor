@@ -119,6 +119,7 @@ class TopicService:
                 "_id": 0,
                 "topicId": 1,
                 "title": 1,
+                "subject": 1,
                 "status": 1,
                 "lastActiveAt": 1,
                 "mode": 1,
@@ -155,6 +156,7 @@ class TopicService:
                 "_id": 0,
                 "topicId": 1,
                 "title": 1,
+                "subject": 1,
                 "status": 1,
                 "lastActiveAt": 1,
                 "mode": 1,
@@ -264,28 +266,44 @@ class TopicService:
         # 4. Delete the topic document LAST — messages are embedded and go with it
         await topics_col().delete_one({"topicId": topic_id, "userId": user_id})
 
-    # --- Rename ---
+    # --- Update (rename / subject) ---
 
-    async def rename_topic(self, topic_id: str, user_id: str, new_title: str) -> dict:
-        """Rename a topic. Validates the new title.
+    async def update_topic(
+        self,
+        topic_id: str,
+        user_id: str,
+        title: str | None = None,
+        subject: str | None = None,
+    ) -> dict:
+        """Update a topic's title and/or subject.
+
+        Only the provided fields are changed. Title is validated when present.
+        An empty subject string clears the subject (moves to Ungrouped).
 
         Args:
             topic_id: The topic identifier.
             user_id: The authenticated user's ID.
-            new_title: The new title string.
+            title: New title, or None to leave unchanged.
+            subject: New subject, "" to clear, or None to leave unchanged.
 
         Returns:
             The updated topic document.
 
         Raises:
-            HTTPException: 400 if new_title is invalid.
+            HTTPException: 400 if title is invalid or no fields were provided.
             HTTPException: 404 if topic not found or user doesn't own it.
         """
-        validated_title = self._validate_title(new_title)
+        updates: dict = {}
+        if title is not None:
+            updates["title"] = self._validate_title(title)
+        if subject is not None:
+            updates["subject"] = subject.strip()
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
 
         result = await topics_col().find_one_and_update(
             {"topicId": topic_id, "userId": user_id},
-            {"$set": {"title": validated_title}},
+            {"$set": updates},
             return_document=True,
         )
         if not result:

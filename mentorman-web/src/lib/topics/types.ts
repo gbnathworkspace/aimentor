@@ -138,6 +138,7 @@ export interface CompactionEvent {
 export interface TopicListItem {
   topicId: string;
   title: string;
+  subject?: string | null; // user-assigned group; absent/"" = Ungrouped
   status: TopicStatus;
   lastActiveAt: Date;
   mode: string | null;

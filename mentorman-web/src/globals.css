@@ -3,6 +3,13 @@
    Dark zinc base · emerald accent (tweakable) · layered depth
    ============================================================ */
 
+/* Brand faces. index.html also <link>s these for the SPA's first paint; keeping
+   them here too makes this stylesheet self-sufficient, so anything that consumes
+   globals.css on its own (the design-system export) gets Clash Grotesk and
+   JetBrains Mono instead of silently falling back to system-ui. */
+@import url('https://api.fontshare.com/v2/css?f[]=clash-grotesk@400,500,600,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 :root {
@@ -16,7 +23,12 @@
   --border-soft: #1d1d22;
   --hair:      rgba(255,255,255,0.06);
 
-  --muted:     #6b6b76;
+  /* Dark UI Compliance Spec v1.0, Item A (2026-08-02): raised from #6b6b76,
+     which cleared WCAG AA for small text on none of the surface ladder and
+     failed outright on --card-3 (2.97:1). Lightness only — hue 240 and
+     saturation 4.9% are unchanged, so the quiet grey character is preserved.
+     Now >= 4.5:1 on every surface from --bg through --card-3. */
+  --muted:     #8a8a95;
   --muted-2:   #9b9ba6;
   --fg-dim:    #d9d9df;
   --fg:        #f4f4f6;

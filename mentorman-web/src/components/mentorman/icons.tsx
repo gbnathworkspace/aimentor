@@ -6,7 +6,7 @@ type IconName =
   | 'plus' | 'chart' | 'gear' | 'send' | 'arrowUp' | 'check'
   | 'upload' | 'code' | 'spark' | 'warn' | 'x' | 'arrowR'
   | 'back' | 'target' | 'clock' | 'bolt' | 'doc' | 'dots' | 'logout'
-  | 'volume' | 'stop' | 'download' | 'chevronDown' | 'users' | 'edit' | 'user';
+  | 'volume' | 'stop' | 'download' | 'chevronDown' | 'users' | 'edit' | 'user' | 'trash';
 
 const I: Record<IconName, React.ReactNode> = {
   plus:    <path d="M8 3v10M3 8h10" />,
@@ -35,6 +35,7 @@ const I: Record<IconName, React.ReactNode> = {
   users:   <g><circle cx="5.5" cy="6" r="2.2" /><path d="M1.5 13v-1a3 3 0 013-3h2a3 3 0 013 3v1" /><circle cx="11.5" cy="6.5" r="1.8" /><path d="M10.3 8.5a3 3 0 012.7 3v.7" /></g>,
   edit:    <path d="M11.3 2.3a1.6 1.6 0 012.3 2.3L5.2 13 2 14l1-3.2z" />,
   user:    <g><circle cx="8" cy="5.3" r="2.8" /><path d="M2.5 13.5a5.5 5.5 0 0111 0" /></g>,
+  trash:   <g><path d="M3 5h10M8 8v4M6 8v4M10 8v4" /><path d="M5 5V3.5h6V5" /><rect x="3" y="5" width="10" height="8" rx="1" /></g>,
 };
 
 export function Icon({ name, size = 16, style }: { name: IconName; size?: number; style?: React.CSSProperties }) {

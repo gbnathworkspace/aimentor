@@ -171,6 +171,20 @@ async def archive_topic(topic_id: str, user_id: str = Depends(require_auth)):
     return {"status": "archived", "topicId": topic_id}
 
 
+@router.delete("/topic/{topic_id}")
+async def delete_topic(topic_id: str, user_id: str = Depends(require_auth)):
+    """Permanently delete a topic and its cascade collections.
+
+    Accepts topics in both active and archived status — unlike archive_topic,
+    which rejects non-active topics with 409. Returns 404 for both not-found
+    and non-owner cases to prevent topic ID enumeration (Req 15.5).
+
+    Requirements: 3.1, 3.3, 3.4, 3.5
+    """
+    await _topic_service.delete_topic(topic_id, user_id)
+    return {"ok": True}
+
+
 @router.post("/topic/{topic_id}/message")
 async def send_message(
     topic_id: str, body: SendMessageRequest, user_id: str = Depends(require_auth)

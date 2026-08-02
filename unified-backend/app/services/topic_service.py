@@ -1,17 +1,20 @@
 """TopicService — CRUD and lifecycle management for topic threads.
 
-Handles topic creation, retrieval, listing, renaming, and archival.
+Handles topic creation, retrieval, listing, renaming, archival, and deletion.
 Enforces title validation, ownership checks, and status transitions.
 Also handles message append with optimistic concurrency and pagination.
 """
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from app.config.database import topics_col
+from app.config.database import compaction_events_col, immediate_contexts_col, topics_col
 from app.services.token_counter import TokenCounter
+
+logger = logging.getLogger(__name__)
 
 
 MAX_MESSAGE_LENGTH = 50_000
@@ -203,6 +206,63 @@ class TopicService:
             {"topicId": topic_id, "userId": user_id},
             {"$set": {"status": "archived"}},
         )
+
+    # --- Deletion ---
+
+    async def delete_topic(self, topic_id: str, user_id: str) -> None:
+        """Permanently delete a topic and its cascade collections.
+
+        Accepts topics in both ``active`` and ``archived`` status — unlike
+        :meth:`archive_topic`, no status check is performed.
+
+        Cascade order:
+        1. ``compaction_events`` rows deleted first (best-effort, logged on failure).
+        2. ``immediate_contexts`` rows deleted second (best-effort, logged on failure).
+        3. ``topics`` document deleted **last** — so a cascade failure leaves the
+           topic document intact as a retry anchor (Req 4.7).
+
+        Collections deliberately **not** touched: ``skill_graph``, ``subtopic_lists``,
+        ``weight_nudges``, ``uploads/`` on disk.
+
+        Args:
+            topic_id: The topic identifier.
+            user_id: The authenticated user's ID.
+
+        Raises:
+            HTTPException: 404 if topic not found or user doesn't own it,
+                           identical for both cases (enumeration prevention, Req 3.2).
+        """
+        # 1. Ownership check — same pattern as get_topic / archive_topic
+        topic = await topics_col().find_one(
+            {"topicId": topic_id, "userId": user_id}
+        )
+        if not topic:
+            raise HTTPException(status_code=404, detail="Topic not found")
+
+        # 2. Cascade step 1 — compaction_events (best-effort)
+        try:
+            await compaction_events_col().delete_many(
+                {"topicId": topic_id, "userId": user_id}
+            )
+        except Exception as e:
+            logger.warning(
+                "cascade: compaction_events delete failed for topic_id=%s: %s",
+                topic_id,
+                e,
+            )
+
+        # 3. Cascade step 2 — immediate_contexts (best-effort)
+        try:
+            await immediate_contexts_col().delete_many({"session_id": topic_id})
+        except Exception as e:
+            logger.warning(
+                "cascade: immediate_contexts delete failed for topic_id=%s: %s",
+                topic_id,
+                e,
+            )
+
+        # 4. Delete the topic document LAST — messages are embedded and go with it
+        await topics_col().delete_one({"topicId": topic_id, "userId": user_id})
 
     # --- Rename ---
 

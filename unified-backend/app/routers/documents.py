@@ -11,7 +11,6 @@ It does NOT write to Vector DB or produce embeddings.
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
@@ -20,6 +19,7 @@ from app.auth.dependencies import require_auth
 from app.config.database import document_upload_jobs_col
 from app.models.document_upload import DocumentUploadJob, UploadFileRecord
 from app.services.document_pipeline import process_document_upload
+from app.services.storage import store_file
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,6 @@ SUPPORTED_MIME_TYPES = {
 
 MAX_FILES = 5
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
-
-# Base directory for file storage
-UPLOADS_BASE_DIR = Path("uploads")
 
 
 @router.post("/upload", status_code=202)
@@ -106,10 +103,8 @@ async def upload_documents(
             },
         )
 
-    # 4. Generate job ID and store valid files to disk
+    # 4. Generate job ID and store valid files via the storage backend
     job_id = str(uuid.uuid4())
-    upload_dir = UPLOADS_BASE_DIR / user_id / job_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
 
     file_records: list[UploadFileRecord] = []
     file_paths: list[str] = []
@@ -117,23 +112,22 @@ async def upload_documents(
 
     for file in valid_files:
         filename = file.filename or f"unnamed_{uuid.uuid4().hex[:8]}"
-        file_path = upload_dir / filename
         content = await file.read()
 
-        # Write file to disk
-        file_path.write_bytes(content)
+        # Store bytes (local disk in dev, S3 in prod) and keep the opaque key
+        storage_key = store_file(user_id, job_id, filename, content)
 
         file_size = getattr(file, "_validated_size", len(content))
 
         record = UploadFileRecord(
             filename=filename,
             mime_type=file.content_type or "application/octet-stream",
-            file_path=str(file_path),
+            file_path=storage_key,
             size_bytes=file_size,
             status="pending",
         )
         file_records.append(record)
-        file_paths.append(str(file_path))
+        file_paths.append(storage_key)
         mime_types.append(file.content_type or "application/octet-stream")
 
     # 5. Create Upload_Job record in MongoDB

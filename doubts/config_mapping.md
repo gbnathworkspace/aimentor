@@ -12,3 +12,7 @@
 | GitHub OAuth Client Secret | `GITHUB_CLIENT_SECRET` | `/mentorman/github-client-secret` | github.com/settings/developers |
 | Gmail address | `GMAIL_USER` | `/mentorman/gmail-user` | your Google account |
 | Gmail app password | `GMAIL_APP_PASSWORD` | `/mentorman/gmail-app-password` | myaccount.google.com → App Passwords |
+| Storage backend | `STORAGE_BACKEND` | — (literal `s3` in deploy.yml, not a secret) | n/a |
+| S3 bucket name | `S3_BUCKET_NAME` | — (literal `mentorman-uploads-prod` in deploy.yml, not a secret) | AWS S3 console |
+| S3 region | `S3_REGION` | — (literal `ap-south-1` in deploy.yml, not a secret) | n/a |
+| AWS credentials | *(none — EC2 instance IAM role)* | — | AWS IAM role attached to the EC2 instance grants `s3:PutObject`/`GetObject`/`DeleteObject` on the bucket; no static keys stored anywhere |

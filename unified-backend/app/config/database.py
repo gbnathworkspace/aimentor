@@ -1,5 +1,7 @@
 """Async MongoDB client and collection accessors."""
 
+from functools import lru_cache
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from app.config.settings import get_settings
@@ -85,6 +87,20 @@ def weight_nudges_col():
 
 def document_upload_jobs_col():
     return get_db()["document_upload_jobs"]
+
+
+@lru_cache
+def get_s3_client():
+    """Return a cached boto3 S3 client (region only).
+
+    Credentials resolve via boto3's default provider chain: AWS_* env vars
+    when set (local dev pointed at S3), otherwise the EC2 instance's IAM role
+    in production. This app never stores static AWS keys.
+    """
+    import boto3
+
+    settings = get_settings()
+    return boto3.client("s3", region_name=settings.S3_REGION)
 
 
 async def _ensure_indexes() -> None:

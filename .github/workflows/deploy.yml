@@ -98,6 +98,9 @@ jobs:
               -e GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
               -e OAUTH_REDIRECT_URI="https://mentorman.co.in/api/auth/oauth/callback" \
               -e FRONTEND_URL="https://mentorman.co.in" \
+              -e STORAGE_BACKEND="s3" \
+              -e S3_BUCKET_NAME="mentorman-uploads-prod" \
+              -e S3_REGION="ap-south-1" \
               ${CLERK_ISSUER:+-e CLERK_ISSUER="$CLERK_ISSUER"} \
               ${JWT_SECRET:+-e JWT_SECRET="$JWT_SECRET"} \
               "$IMAGE_TAG"

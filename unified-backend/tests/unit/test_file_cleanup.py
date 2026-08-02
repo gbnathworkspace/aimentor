@@ -23,6 +23,9 @@ def temp_uploads(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.services.file_cleanup.UPLOADS_BASE_DIR", uploads_dir
     )
+    # delete_upload_files delegates to storage.delete_job_files, which reads
+    # its own base dir — patch it too.
+    monkeypatch.setattr("app.services.storage.UPLOADS_BASE_DIR", uploads_dir)
     return uploads_dir
 
 

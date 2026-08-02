@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 
 from app.config.database import document_upload_jobs_col
+from app.services.storage import delete_job_files
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +24,19 @@ UPLOADS_BASE_DIR = Path("uploads")
 
 
 def delete_upload_files(user_id: str, job_id: str) -> bool:
-    """Delete the upload directory for a specific job.
+    """Delete the stored files for a specific job (local disk or S3).
 
     Args:
         user_id: The user who owns the upload.
         job_id: The job ID whose files should be deleted.
 
     Returns:
-        True if the directory was deleted, False if it didn't exist.
+        True if anything was deleted, False if nothing existed.
     """
-    job_dir = UPLOADS_BASE_DIR / user_id / job_id
-    if job_dir.is_dir():
-        shutil.rmtree(job_dir)
-        logger.info("Deleted upload directory: %s", job_dir)
-        return True
-    return False
+    deleted = delete_job_files(user_id, job_id)
+    if deleted:
+        logger.info("Deleted upload files for job %s/%s", user_id, job_id)
+    return deleted
 
 
 async def cleanup_expired_uploads() -> int:
@@ -47,6 +46,10 @@ async def cleanup_expired_uploads() -> int:
     Upload_Job record no longer exists in MongoDB (removed by TTL index).
 
     Also removes empty user directories after cleaning up job directories.
+
+    ponytail: local backend only. On S3 the uploads/ dir doesn't exist so this
+    is a no-op; a 1-day S3 bucket lifecycle rule expires objects instead of an
+    app-side bucket scan (matches the 24h expires_at TTL).
 
     Returns:
         The number of orphaned directories removed.

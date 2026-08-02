@@ -146,7 +146,7 @@ async def test_server_batch_validation_partition(batch):
         with (
             patch("app.routers.documents.document_upload_jobs_col", return_value=mock_col),
             patch("app.routers.documents.process_document_upload", new_callable=AsyncMock),
-            patch("app.routers.documents.UPLOADS_BASE_DIR", Path(tmp_dir)),
+            patch("app.services.storage.UPLOADS_BASE_DIR", Path(tmp_dir)),
         ):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:

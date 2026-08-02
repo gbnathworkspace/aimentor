@@ -18,6 +18,8 @@ from zipfile import BadZipFile
 import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
 
+from app.services.storage import open_for_read
+
 logger = logging.getLogger(__name__)
 
 MAX_DATA_ROWS = 5000
@@ -118,9 +120,13 @@ async def extract_document(filepath: str, mime_type: str) -> ExtractionResult:
             error=f"unsupported MIME type: {mime_type}",
         )
 
-    # Call the extractor, catching ValueError from individual extractors
+    # Call the extractor, catching ValueError from individual extractors.
+    # open_for_read yields a local path: S3-backed keys are downloaded to a
+    # temp file, local paths pass through unchanged — extractors stay
+    # path-based regardless of backend.
     try:
-        text = await extractor(filepath)
+        with open_for_read(filepath) as local_path:
+            text = await extractor(local_path)
     except ValueError as e:
         return ExtractionResult(
             filename=filename,

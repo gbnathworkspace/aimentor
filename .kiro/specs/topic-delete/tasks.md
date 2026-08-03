@@ -25,7 +25,7 @@ A `trash` icon is added to the shared icons component before any UI work begins.
     - Do **not** touch `skill_graph_col`, `subtopic_lists_col`, `weight_nudges_col`, or `uploads/`
     - _Requirements: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 5.1, 5.2_
 
-  - [ ]* 2.2 Write unit tests for `delete_topic` cascade and ordering (`TestDeleteTopic` class in `unified-backend/tests/unit/test_topics_router.py`)
+  - [x]* 2.2 Write unit tests for `delete_topic` cascade and ordering (`TestDeleteTopic` class in `unified-backend/tests/unit/test_topics_router.py`)
     - `test_delete_topic_success` — 200 `{"ok": true}`, service called with `("topic-abc", "user-123")`
     - `test_delete_non_owner_returns_404` — service raises `HTTPException(404)`, response is 404
     - `test_delete_not_found_returns_404` — same as above (enumeration prevention)
@@ -44,7 +44,7 @@ A `trash` icon is added to the shared icons component before any UI work begins.
   - No additional status check (`active` and `archived` both accepted)
   - _Requirements: 3.1, 3.3, 3.4, 3.5_
 
-- [ ] 4. Checkpoint — run backend tests
+- [x] 4. Checkpoint — run backend tests
   - Ensure all tests pass, ask the user if questions arise.
 
 - [x] 5. Create `DeleteTopicDialog` component
@@ -69,8 +69,8 @@ A `trash` icon is added to the shared icons component before any UI work begins.
   - Reuse CSS class namespace: `skip-dialog-overlay / skip-dialog / skip-dialog-title / skip-dialog-desc / skip-dialog-actions` — no new CSS classes needed for the dialog itself
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 6. Add delete state and handler to `TopicSidebar`
-  - [~] 6.1 Add delete state variables and `onClearActiveTopic` prop to `TopicSidebar`
+- [x] 6. Add delete state and handler to `TopicSidebar`
+  - [x] 6.1 Add delete state variables and `onClearActiveTopic` prop to `TopicSidebar`
     - Add optional prop `onClearActiveTopic?: () => void` to `TopicSidebarProps` interface
     - Add three state variables at the top of the component:
       ```typescript
@@ -80,7 +80,7 @@ A `trash` icon is added to the shared icons component before any UI work begins.
       ```
     - _Requirements: 6.2, 6.5_
 
-  - [~] 6.2 Add delete button to `renderRow` in `TopicSidebar`
+  - [x] 6.2 Add delete button to `renderRow` in `TopicSidebar`
     - Inside `renderRow`, after the existing subject-tag button block, add the delete button guarded by `{!collapsed && (...)}`:
       ```typescript
       {!collapsed && (
@@ -102,7 +102,7 @@ A `trash` icon is added to the shared icons component before any UI work begins.
     - `e.stopPropagation()` prevents the row `onClick` from firing (same pattern as the subject-edit button)
     - _Requirements: 1.1, 1.2, 1.3, 1.4_
 
-  - [~] 6.3 Add `handleDeleteConfirm` handler and wire `DeleteTopicDialog` in `TopicSidebar`
+  - [x] 6.3 Add `handleDeleteConfirm` handler and wire `DeleteTopicDialog` in `TopicSidebar`
     - Add the `handleDeleteConfirm` async function:
       - Guard: `if (!pendingDeleteId || deletingId) return`
       - Set `deletingId(pendingDeleteId)`, clear `deleteError`
@@ -128,13 +128,13 @@ A `trash` icon is added to the shared icons component before any UI work begins.
       ```
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 6.1, 6.2, 6.3, 6.5, 7.1, 7.2, 7.3_
 
-- [ ] 7. Add delete support to `ArchivedTopics`
-  - [~] 7.1 Add delete state variables and delete button to `ArchivedTopics`
+- [x] 7. Add delete support to `ArchivedTopics`
+  - [x] 7.1 Add delete state variables and delete button to `ArchivedTopics`
     - Add the same three state variables (`pendingDeleteId`, `deletingId`, `deleteError`) at the top of `ArchivedTopics`
     - In the `topics.map(...)` render block, add the delete button inside each `.session` div (same JSX as `TopicSidebar` step 6.2, guarded by `{!collapsed && ...}`)
     - _Requirements: 1.5_
 
-  - [~] 7.2 Add `handleDeleteConfirm` handler and wire `DeleteTopicDialog` in `ArchivedTopics`
+  - [x] 7.2 Add `handleDeleteConfirm` handler and wire `DeleteTopicDialog` in `ArchivedTopics`
     - Add `handleDeleteConfirm` following the same logic as `TopicSidebar` — the key differences:
       - No `selectedTopicId` check and no `onClearActiveTopic` call (archived topics are never the active chat)
       - On 404: close dialog, call `fetchArchivedTopics()` to refresh
@@ -142,13 +142,13 @@ A `trash` icon is added to the shared icons component before any UI work begins.
     - Import `DeleteTopicDialog` and render it outside the `.sidebar` div, same pattern as `TopicSidebar`
     - _Requirements: 1.5, 2.1, 2.3, 6.1, 7.1, 7.2_
 
-- [~] 8. Wire `onClearActiveTopic` callback in the parent layout
-  - Locate the component in `mentorman-web/src` that owns `activeTopic` / `setActiveTopic` state (confirmed at `chat.tsx:454-455`) and renders `TopicSidebar`
+- [x] 8. Wire `onClearActiveTopic` callback in the parent layout
+  - Located in `app.tsx` (not `chat.tsx` as originally noted) — owns `activeTopic` / `setActiveTopic` and renders `TopicSidebar`
   - Pass `onClearActiveTopic={() => setActiveTopic(null)}` (or equivalent setter call) as a prop to `TopicSidebar`
   - Verify `TopicSidebar` now receives the callback and that deleting the active topic returns the chat panel to its empty/new-topic state
   - _Requirements: 6.2, 6.3_
 
-- [~] 9. Add CSS for `.session-delete-btn` visibility
+- [x] 9. Add CSS for `.session-delete-btn` visibility
   - Add the following rules to `mentorman-web/src/globals.css`, in the sidebar section immediately after the existing `.session-tag-btn` block:
     ```css
     /* Per-row "delete topic" affordance — hidden by default, revealed on row hover/focus */
@@ -176,8 +176,8 @@ A `trash` icon is added to the shared icons component before any UI work begins.
   - The `pointer-events: none` default ensures the button is not accidentally keyboard-reachable when invisible — the JSX `!collapsed` guard removes it from the DOM entirely when collapsed
   - _Requirements: 1.1, 1.3, 1.4_
 
-- [~] 10. Final checkpoint — Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
+- [x] 10. Final checkpoint — Ensure all tests pass
+  - Backend: 686 passed. Frontend: 84 passed. TypeScript: clean.
 
 ## Notes
 

@@ -246,3 +246,75 @@ class TestAppendMessage:
         set_fields = update_dict.get("$set", {})
         assert "metadata.currentTokenEstimate" in set_fields
         assert set_fields["metadata.currentTokenEstimate"] == result["tokenCount"]
+
+
+class TestDeleteTopic:
+    """Tests for TopicService.delete_topic cascade behavior."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_service.topics_col")
+    async def test_delete_topic_not_found_raises_404(self, mock_topics_col, topic_service):
+        from fastapi import HTTPException
+
+        mock_topics = AsyncMock()
+        mock_topics_col.return_value = mock_topics
+        mock_topics.find_one.return_value = None
+
+        with pytest.raises(HTTPException) as exc_info:
+            await topic_service.delete_topic("topic-123", "user-abc")
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_service.immediate_contexts_col")
+    @patch("app.services.topic_service.compaction_events_col")
+    @patch("app.services.topic_service.topics_col")
+    async def test_delete_topic_cascade_order(
+        self, mock_topics_col, mock_compaction_col, mock_contexts_col, topic_service, active_topic
+    ):
+        """compaction_events and immediate_contexts are cleared before the topic
+        document itself, so a mid-cascade failure leaves a retryable topic doc."""
+        calls = []
+
+        mock_topics = AsyncMock()
+        mock_topics_col.return_value = mock_topics
+        mock_topics.find_one.return_value = active_topic
+        mock_topics.delete_one.side_effect = lambda *a, **k: calls.append("topics") or None
+
+        mock_compaction = AsyncMock()
+        mock_compaction_col.return_value = mock_compaction
+        mock_compaction.delete_many.side_effect = lambda *a, **k: calls.append("compaction_events") or None
+
+        mock_contexts = AsyncMock()
+        mock_contexts_col.return_value = mock_contexts
+        mock_contexts.delete_many.side_effect = lambda *a, **k: calls.append("immediate_contexts") or None
+
+        await topic_service.delete_topic("topic-123", "user-abc")
+
+        assert calls.index("compaction_events") < calls.index("topics")
+        assert calls.index("immediate_contexts") < calls.index("topics")
+        mock_compaction.delete_many.assert_awaited_once_with(
+            {"topicId": "topic-123", "userId": "user-abc"}
+        )
+        mock_contexts.delete_many.assert_awaited_once_with({"session_id": "topic-123"})
+        mock_topics.delete_one.assert_awaited_once_with(
+            {"topicId": "topic-123", "userId": "user-abc"}
+        )
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_service.immediate_contexts_col")
+    @patch("app.services.topic_service.compaction_events_col")
+    @patch("app.services.topic_service.topics_col")
+    async def test_delete_topic_accepts_archived_status(
+        self, mock_topics_col, mock_compaction_col, mock_contexts_col, topic_service, active_topic
+    ):
+        """Unlike archive_topic, delete_topic performs no status gating."""
+        archived_topic = {**active_topic, "status": "archived"}
+        mock_topics = AsyncMock()
+        mock_topics_col.return_value = mock_topics
+        mock_topics.find_one.return_value = archived_topic
+        mock_compaction_col.return_value = AsyncMock()
+        mock_contexts_col.return_value = AsyncMock()
+
+        await topic_service.delete_topic("topic-123", "user-abc")
+
+        mock_topics.delete_one.assert_awaited_once()

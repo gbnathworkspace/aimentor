@@ -247,6 +247,27 @@ body {
 .session:hover .session-tag-btn { opacity: 1; }
 .session-tag-btn:hover { color: var(--fg); background: var(--card-3); }
 
+/* Per-row "delete topic" affordance — hidden by default, revealed on row hover/focus */
+.session-delete-btn {
+  position: absolute; right: 32px; bottom: 6px;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: transparent;
+  color: var(--muted); cursor: pointer; opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s, color .12s, background .12s;
+}
+.session:hover .session-delete-btn,
+.session:focus-within .session-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.session-delete-btn:hover {
+  color: var(--danger);
+  background: var(--danger-weak);
+  border-color: var(--danger-line);
+}
+
 .subject-input {
   margin-top: 6px; width: 100%; box-sizing: border-box;
   padding: 4px 7px; border-radius: var(--r-sm);
@@ -348,6 +369,8 @@ body {
 }
 .btn-accent:hover { filter: brightness(1.06); }
 .btn-ghost { background: transparent; border-color: var(--border); }
+.btn-danger { background: var(--danger); color: #0a0a0c; border-color: var(--danger); }
+.btn-danger:hover { filter: brightness(1.05); background: var(--danger); }
 .btn-sm { height: 28px; padding: 0 11px; font-size: 12px; }
 
 /* ===========================================================

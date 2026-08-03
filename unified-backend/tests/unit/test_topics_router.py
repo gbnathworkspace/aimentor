@@ -274,6 +274,61 @@ class TestArchiveTopic:
         assert resp.status_code == 404
 
 
+class TestDeleteTopic:
+    @pytest.mark.asyncio
+    async def test_delete_topic_success(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.delete_topic = AsyncMock(return_value=None)
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.delete("/api/topic/topic-abc", headers=auth_headers)
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        mock_service.delete_topic.assert_awaited_once_with("topic-abc", "user-123")
+
+    @pytest.mark.asyncio
+    async def test_delete_topic_not_found_returns_404(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.delete_topic = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Topic not found")
+        )
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.delete("/api/topic/nonexistent", headers=auth_headers)
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_archived_topic_success(self, auth_headers):
+        """Unlike archive_topic, delete accepts archived topics with no status gate."""
+        mock_service = AsyncMock()
+        mock_service.delete_topic = AsyncMock(return_value=None)
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.delete("/api/topic/topic-abc", headers=auth_headers)
+
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_delete_topic_no_auth_returns_401(self):
+        from app.main import app
+
+        async with await _client(app) as client:
+            resp = await client.delete("/api/topic/topic-abc")
+
+        assert resp.status_code == 401
+
+
 class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_message_success(self, auth_headers):

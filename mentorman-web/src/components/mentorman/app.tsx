@@ -104,6 +104,7 @@ export function MentorManApp() {
       onSelectTopic={(topicId) => { setActiveTopic(topicId); setView('chat'); }}
       onNewTopic={() => { setActiveTopic(null); setView('chat'); setChatKey(k => k + 1); }}
       onViewArchived={() => setSidebarView('archived')}
+      onClearActiveTopic={() => setActiveTopic(null)}
       refreshKey={topicsVersion}
       view={view}
       onNav={(v) => setView(v as View)}

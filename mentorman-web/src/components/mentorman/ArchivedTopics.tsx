@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from './icons';
 import { relativeTime } from '../../lib/topics/relativeTime';
 import type { TopicListItem } from '../../lib/topics/types';
+import { DeleteTopicDialog } from './DeleteTopicDialog';
 
 export interface ArchivedTopicsProps {
   onSelectTopic: (topicId: string) => void;
@@ -57,6 +58,9 @@ export function ArchivedTopics({ onSelectTopic, onBack, collapsed, onToggleColla
   const [topics, setTopics] = useState<TopicListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchArchivedTopics = () => {
     setLoading(true);
@@ -84,6 +88,28 @@ export function ArchivedTopics({ onSelectTopic, onBack, collapsed, onToggleColla
   useEffect(() => {
     fetchArchivedTopics();
   }, []);
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDeleteId || deletingId) return;
+    const topicId = pendingDeleteId;
+    setDeletingId(topicId);
+    setDeleteError(null);
+    try {
+      const r = await fetch(`/api/topic/${topicId}`, { method: 'DELETE' });
+      if (r.status === 404) {
+        setPendingDeleteId(null);
+        fetchArchivedTopics();
+        return;
+      }
+      if (!r.ok) throw new Error('Delete failed');
+      setTopics((prev) => prev.filter((t) => t.topicId !== topicId));
+      setPendingDeleteId(null);
+    } catch {
+      setDeleteError('Could not delete topic. Please try again.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -185,10 +211,36 @@ export function ArchivedTopics({ onSelectTopic, onBack, collapsed, onToggleColla
                   {truncate(topic.messagePreview || '', 80)}
                 </span>
               </div>
+              {!collapsed && (
+                <button
+                  className="session-delete-btn"
+                  title="Delete topic"
+                  aria-label={`Delete topic ${topic.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteError(null);
+                    setPendingDeleteId(topic.topicId);
+                  }}
+                  disabled={deletingId === topic.topicId}
+                >
+                  <Icon name="trash" size={12} />
+                </button>
+              )}
             </div>
           ))
         )}
       </div>
+
+      {pendingDeleteId && (
+        <DeleteTopicDialog
+          open={!!pendingDeleteId}
+          topicTitle={topics.find((t) => t.topicId === pendingDeleteId)?.title ?? ''}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => { setPendingDeleteId(null); setDeleteError(null); }}
+          loading={deletingId === pendingDeleteId}
+          error={deleteError}
+        />
+      )}
     </div>
   );
 }

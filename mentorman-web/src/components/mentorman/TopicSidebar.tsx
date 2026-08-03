@@ -6,12 +6,14 @@ import { Icon } from './icons';
 import { relativeTime } from '../../lib/topics/relativeTime';
 import type { TopicListItem } from '../../lib/topics/types';
 import type { CoreProfile } from '@/lib/mentorman-api';
+import { DeleteTopicDialog } from './DeleteTopicDialog';
 
 export interface TopicSidebarProps {
   selectedTopicId?: string;
   onSelectTopic: (topicId: string) => void;
   onNewTopic: () => void;
   onViewArchived?: () => void;
+  onClearActiveTopic?: () => void;
   refreshKey?: number; // increment to trigger re-fetch
   view?: string;
   onNav?: (v: string) => void;
@@ -97,6 +99,7 @@ export function TopicSidebar({
   onSelectTopic,
   onNewTopic,
   onViewArchived,
+  onClearActiveTopic,
   refreshKey,
   view,
   onNav,
@@ -110,6 +113,9 @@ export function TopicSidebar({
   const [topics, setTopics] = useState<TopicListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchTopics = () => {
     setLoading(true);
@@ -193,6 +199,29 @@ export function TopicSidebar({
       saveSubject(id, subject || '');
     },
   });
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDeleteId || deletingId) return;
+    const topicId = pendingDeleteId;
+    setDeletingId(topicId);
+    setDeleteError(null);
+    try {
+      const r = await fetch(`/api/topic/${topicId}`, { method: 'DELETE' });
+      if (r.status === 404) {
+        setPendingDeleteId(null);
+        fetchTopics();
+        return;
+      }
+      if (!r.ok) throw new Error('Delete failed');
+      setTopics((prev) => prev.filter((t) => t.topicId !== topicId));
+      setPendingDeleteId(null);
+      if (selectedTopicId === topicId) onClearActiveTopic?.();
+    } catch {
+      setDeleteError('Could not delete topic. Please try again.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const groups = groupTopics(topics);
   const hasSubjects = groups.some((g) => g.subject !== null);
@@ -297,6 +326,21 @@ export function TopicSidebar({
             onClick={(e) => { e.stopPropagation(); setEditingId(topic.topicId); }}
           >
             <Icon name="edit" size={12} />
+          </button>
+        )}
+        {!collapsed && !inPendingGroup && (
+          <button
+            className="session-delete-btn"
+            title="Delete topic"
+            aria-label={`Delete topic ${topic.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteError(null);
+              setPendingDeleteId(topic.topicId);
+            }}
+            disabled={deletingId === topic.topicId}
+          >
+            <Icon name="trash" size={12} />
           </button>
         )}
       </div>
@@ -507,6 +551,17 @@ export function TopicSidebar({
             <Icon name="logout" />
           </button>
         </div>
+      )}
+
+      {pendingDeleteId && (
+        <DeleteTopicDialog
+          open={!!pendingDeleteId}
+          topicTitle={topics.find((t) => t.topicId === pendingDeleteId)?.title ?? ''}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => { setPendingDeleteId(null); setDeleteError(null); }}
+          loading={deletingId === pendingDeleteId}
+          error={deleteError}
+        />
       )}
     </div>
   );

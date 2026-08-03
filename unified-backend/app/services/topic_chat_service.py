@@ -175,7 +175,7 @@ class TopicChatService:
             max_tokens=8192,
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
-            system=system_prompt,
+            system=self._build_system_blocks(system_prompt),
             messages=api_messages,
             tools=[{
                 "type": "web_search_20250305",
@@ -189,6 +189,43 @@ class TopicChatService:
         # must be joined, not just the first (see conversation for the bug
         # this replaced: `next(...)` silently truncated post-search answers).
         return "".join(block.text for block in response.content if block.type == "text")
+
+    def _build_system_blocks(self, system_prompt: str) -> list[dict]:
+        """Split the system prompt into three cache blocks, most-stable first,
+        so a change to one doesn't blow away the cache for the others (issue #23):
+
+        1. Static instructions (never changes — deployment-constant, cacheable
+           across every user/topic, not just this one)
+        2. L1 profile + teaching prefs (changes rarely — onboarding edits)
+        3. L2 skill graph + L3 episodes + documents + mode/tone (changes often
+           — every ~16 messages or on compaction; left uncacheable-on-its-own
+           on purpose, no further split — the 4-breakpoint request limit is
+           already spent here plus the conversation-history marker)
+
+        mentor_v1.md marks the splits with `<!--STATIC-BOUNDARY-->` and
+        `<!--L1-BOUNDARY-->`. Falls back to fewer blocks if a marker is
+        missing (e.g. a future template edit drops one).
+        """
+        static_marker = "<!--STATIC-BOUNDARY-->"
+        l1_marker = "<!--L1-BOUNDARY-->"
+
+        remainder = system_prompt
+        blocks: list[str] = []
+
+        if static_marker in remainder:
+            static_block, remainder = remainder.split(static_marker, 1)
+            blocks.append(static_block.rstrip())
+
+        if l1_marker in remainder:
+            l1_block, remainder = remainder.split(l1_marker, 1)
+            blocks.append(l1_block.strip())
+
+        blocks.append(remainder.lstrip())
+
+        return [
+            {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+            for text in blocks
+        ]
 
     def _format_messages_for_api(self, messages: list[dict]) -> list[dict]:
         """Convert topic messages (including SummaryBlocks) to Anthropic API format.
@@ -232,6 +269,17 @@ class TopicChatService:
                 len(api_messages),
             )
             api_messages = api_messages[first_user:]
+
+        # Cache breakpoint on the last message (the turn just appended). The
+        # next call resends this same prefix verbatim, so this lets Anthropic
+        # serve it from cache instead of billing full price every turn.
+        if api_messages:
+            last = api_messages[-1]
+            last["content"] = [{
+                "type": "text",
+                "text": last["content"],
+                "cache_control": {"type": "ephemeral"},
+            }]
 
         return api_messages
 

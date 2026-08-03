@@ -461,10 +461,14 @@ class TestFormatMessagesForApi:
             {"type": "message", "role": "assistant", "content": "Hi there"},
         ]
         result = service._format_messages_for_api(messages)
-        assert result == [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there"},
-        ]
+        assert result[0] == {"role": "user", "content": "Hello"}
+        # Last message gets a cache_control breakpoint (issue #23 caching)
+        assert result[1]["role"] == "assistant"
+        assert result[1]["content"] == [{
+            "type": "text",
+            "text": "Hi there",
+            "cache_control": {"type": "ephemeral"},
+        }]
 
     def test_summary_blocks_converted_to_assistant_messages(self, service):
         """SummaryBlocks become assistant messages with summary prefix."""
@@ -480,7 +484,12 @@ class TestFormatMessagesForApi:
         assert "Summary of earlier conversation" in result[1]["content"]
         assert "BFS and DFS" in result[1]["content"]
         assert result[2]["role"] == "user"
-        assert result[2]["content"] == "Now about Dijkstra"
+        # Last message gets a cache_control breakpoint (issue #23 caching)
+        assert result[2]["content"] == [{
+            "type": "text",
+            "text": "Now about Dijkstra",
+            "cache_control": {"type": "ephemeral"},
+        }]
 
     def test_first_message_must_be_user(self, service):
         """Messages before the first user message are trimmed."""
@@ -519,3 +528,42 @@ class TestFormatMessagesForApi:
         """Empty input returns empty output."""
         result = service._format_messages_for_api([])
         assert result == []
+
+
+class TestBuildSystemBlocks:
+    """_build_system_blocks splits on the static/L1 boundary markers for caching (issue #23)."""
+
+    @pytest.fixture
+    def service(self, mock_topic_service, mock_compaction_service, mock_token_counter):
+        return TopicChatService(
+            topic_service=mock_topic_service,
+            compaction_service=mock_compaction_service,
+            token_counter=mock_token_counter,
+        )
+
+    def test_splits_on_both_markers_into_three_cached_blocks(self, service):
+        prompt = (
+            "Static instructions\n<!--STATIC-BOUNDARY-->\n"
+            "L1 profile stuff\n<!--L1-BOUNDARY-->\n"
+            "L2/L3 volatile stuff"
+        )
+        blocks = service._build_system_blocks(prompt)
+        assert len(blocks) == 3
+        assert blocks[0]["text"] == "Static instructions"
+        assert blocks[1]["text"] == "L1 profile stuff"
+        assert blocks[2]["text"] == "L2/L3 volatile stuff"
+        assert all(b["cache_control"] == {"type": "ephemeral"} for b in blocks)
+
+    def test_falls_back_to_two_blocks_without_static_marker(self, service):
+        prompt = "L1 profile stuff\n<!--L1-BOUNDARY-->\nL2/L3 volatile stuff"
+        blocks = service._build_system_blocks(prompt)
+        assert len(blocks) == 2
+        assert blocks[0]["text"] == "L1 profile stuff"
+        assert blocks[1]["text"] == "L2/L3 volatile stuff"
+
+    def test_falls_back_to_single_block_without_any_marker(self, service):
+        prompt = "No marker in this prompt at all"
+        blocks = service._build_system_blocks(prompt)
+        assert len(blocks) == 1
+        assert blocks[0]["text"] == prompt
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}

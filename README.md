@@ -104,18 +104,6 @@ Everything runs on free tiers except Anthropic API usage.
 
 ---
 
-## Key Engineering Decisions
-
-**Zod as the layer boundary contract.** The LLM writes structured JSON (skill updates, onboarding outputs). Zod validates every LLM write before it hits MongoDB — silent schema drift is caught at runtime, not discovered in production.
-
-**Prompt versioning in Git, not a database.** Prompts need diffs, review, and rollback. Git is the right tool.
-
-**EC2 over Vercel.** Already paying for the instance. Vercel per-request billing has no hard cap — traffic spikes change the bill. EC2 is flat rate.
-
-**IAM role auth for MongoDB.** No credentials on the EC2 instance. The attached IAM role proves identity to Atlas automatically.
-
----
-
 ## Running Locally
 
 ```bash
@@ -128,19 +116,5 @@ cp .env.example .env        # fill in ANTHROPIC_API_KEY, MONGODB_URI, VOYAGE_API
 cd mentorman-web
 npm run dev
 ```
-
----
-
-## Build Status
-
-| Feature | Status |
-|---|---|
-| Chat UI — session history, recovery, file upload | Done |
-| Onboarding flow | Done |
-| Backend API — sessions, skills, profile, mentor | Done |
-| Context assembler (Layer 1 + 2 injection) | In progress |
-| Streaming responses (SSE) | Planned |
-| Episodic memory retrieval (Atlas Vector Search) | Planned |
-| Full evaluation loop with skill graph updates | Planned |
 
 ---

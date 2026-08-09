@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 const TITLE = 'MentorMan — The AI mentor that remembers you';
 const DESCRIPTION =
-  "MentorMan turns your goal, your gaps, and every session into a personal interview-prep roadmap. Socratic teaching, targeted drills, and a mentor that never forgets where you left off.";
+  "MentorMan turns your goal, your gaps, and every session into a personal study roadmap for any subject. Socratic teaching, targeted drills, and a mentor that never forgets where you left off.";
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap';
@@ -46,48 +46,18 @@ function useGoogleFonts(href: string) {
   }, [href]);
 }
 
-const PAINS = [
-  { h: 'No real plan', p: '"I solved 300 problems… randomly. Am I even ready?"' },
-  { h: 'Same mistakes, again', p: '"I keep missing the same edge cases in every mock."' },
-  { h: 'Tools that forget you', p: '"Every chat starts from zero. I re-explain myself every time."' },
-  { h: 'System design guesswork', p: '"I can code, but designing a system in 45 min? No idea."' },
-];
-
 const AGENTS = [
-  { role: 'Profiler', h: 'Knows you', desc: "Learns why you're here — an interview, an exam, a certification — and which topics matter most, then adapts how it teaches to how you actually learn.", chip: 'context: job interview · focus: System Design, DSA' },
-  { role: 'Planner', h: 'Charts the path', desc: 'Turns your goal into a week-by-week roadmap, re-prioritized after every session based on what is actually improving.', chip: 'this week: Graphs → BFS' },
-  { role: 'Teacher', h: 'Teaches by asking', desc: 'Explains with questions, analogies, and visuals — guiding you to the insight instead of dumping the answer on you.', chip: '"What if the window shrinks?"' },
-  { role: 'Quizzer', h: 'Drills your gaps', desc: 'Generates problems and MCQs aimed right at your weak spots, with instant feedback and spaced follow-ups.', chip: 'drill: DP on strings · 5 Qs' },
-  { role: 'Reviewer', h: 'Tracks your mistakes', desc: 'Logs every slip — off-by-one, missed edge case, wrong structure — and resurfaces it before it costs you an interview.', chip: 'recurring: empty-input check ×3' },
-];
-
-const LAYERS = [
-  { tag: 'LAYER 1 — CORE PROFILE', h: "Why you're here, always in view", p: "What you're preparing for, the topics you care about, and how you like to be taught anchor every conversation. Nothing you learn is off-path.", example: 'context: job interview\nfocus: System Design, DSA' },
-  { tag: 'LAYER 2 — SKILL GRAPH', h: 'A live map of your skills', p: 'Every topic — arrays to system design — scored and connected. Your mentor always knows what to teach next.', example: 'sliding_window: 92% ✓\ndynamic_programming: 41% ⚠' },
-  { tag: 'LAYER 3 — EPISODIC MEMORY', h: 'Every session, remembered', p: 'Past explanations, questions you asked, mistakes you made — recalled when relevant, so lessons build on each other.', example: 'recall: "we compared this to the\ndelivery-batching example"' },
+  { role: 'Profiler', h: 'Knows you', desc: "A short onboarding conversation learns why you're here and which topics matter, so lessons start relevant instead of generic.", chip: 'context: learning Spanish · focus: Grammar, Vocabulary' },
+  { role: 'Planner', h: 'Charts the path', desc: 'Your topics are mapped as a skill graph, scored as you go, so you and your mentor both know what to focus on next.', chip: 'this week: Verb Tenses → Practice' },
+  { role: 'Teacher', h: 'Teaches by asking', desc: "Prompts you to attempt first, then reveals help gradually — a nudge, a hint, a worked step — instead of handing over the answer.", chip: '"Why does the word change here?"' },
+  { role: 'Quizzer', h: 'Checks your understanding', desc: 'Switches into a quiz mode that withholds hints, so you get an honest read on what you actually know.', chip: 'drill: Verb Conjugation · 5 Qs' },
 ];
 
 const STEPS = [
-  { num: '01', h: "Tell it why you're here", p: "A short conversation — what you're preparing for, which topics matter, how you like to be taught. That is your Core Profile." },
+  { num: '01', h: "Tell it what you're learning", p: "A short conversation — what you're studying, which topics matter, how you like to be taught. That is your Core Profile." },
   { num: '02', h: 'Get your roadmap', p: 'The Planner builds a week-by-week plan from your skill graph — focused on your real gaps, not a generic syllabus.' },
   { num: '03', h: 'Learn by thinking', p: 'Socratic lessons per topic, in persistent threads. Come back tomorrow and continue mid-thought — no recap needed.' },
   { num: '04', h: 'Drill, review, repeat', p: 'Targeted quizzes find the gaps, the mistake tracker keeps you honest, and your skill graph updates every session.' },
-];
-
-const COMPARE_OLD = [
-  'Random problem grinding with no direction',
-  'Chatbots that forget you between sessions',
-  'Re-reading answers instead of thinking',
-  'Mistakes repeated until interview day',
-  'No idea if you are actually ready',
-];
-
-const COMPARE_NEW = [
-  'A roadmap built from your goal and gaps',
-  'A mentor that remembers every session',
-  'Socratic teaching that makes ideas stick',
-  'A mistake tracker that closes weak spots',
-  'A live skill graph showing where you stand',
 ];
 
 export function LandingPage() {
@@ -110,10 +80,6 @@ export function LandingPage() {
   --mastered:#0E8C7F;
   --improving:#D98A15;
   --focus:#C24A32;
-  --dark-bg:#241C16;
-  --dark-text:#F0E9DF;
-  --dark-soft:#B9AC9C;
-  --dark-accent:#E8B84B;
   --radius:14px;
   --maxw:1160px;
   --lp-display:'Bricolage Grotesque',sans-serif;
@@ -201,14 +167,6 @@ export function LandingPage() {
 .mm-landing .edge{stroke:var(--line);stroke-width:1.5}
 .mm-landing .edge.lit{stroke:var(--mastered);stroke-dasharray:4 4;animation:mm-dash 3s linear infinite}
 
-/* ---------- Pain ---------- */
-.mm-landing .pain{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:92px 24px}
-.mm-landing .pain-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:44px}
-.mm-landing .pain-card{border:1px solid var(--line);border-radius:var(--radius);padding:26px 22px;background:var(--paper)}
-.mm-landing .pain-card .q{font-family:var(--lp-mono);font-size:24px;color:var(--accent);margin-bottom:12px}
-.mm-landing .pain-card h3{font-family:var(--lp-display);font-weight:700;font-size:17px;margin-bottom:8px}
-.mm-landing .pain-card p{font-size:14.5px;color:var(--ink-soft);font-style:italic}
-
 /* ---------- Agents ---------- */
 .mm-landing .agents{padding:96px 24px}
 .mm-landing .agent-rows{margin-top:50px;display:flex;flex-direction:column;gap:16px}
@@ -223,29 +181,6 @@ export function LandingPage() {
 .mm-landing .agent p{color:var(--ink-soft);font-size:15px}
 .mm-landing .agent .chip{justify-self:end;font-family:var(--lp-mono);font-size:12.5px;color:#5A4A38;background:var(--paper-2);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
 
-/* ---------- Memory (dark) ---------- */
-.mm-landing .memory{background:var(--dark-bg);color:var(--dark-text);position:relative;overflow:hidden;padding:96px 24px}
-.mm-landing .memory .bg-grid{background-image:linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px)}
-.mm-landing .memory-mark{
-  position:absolute;top:50%;right:-60px;transform:translateY(-50%) rotate(-4deg);
-  width:420px;height:auto;opacity:.14;pointer-events:none;mix-blend-mode:screen;
-  -webkit-mask-image:radial-gradient(circle at 50% 42%, #000 34%, transparent 70%);
-  mask-image:radial-gradient(circle at 50% 42%, #000 34%, transparent 70%);
-}
-.mm-landing .memory .eyebrow{color:var(--dark-accent)}
-.mm-landing .memory h2{color:#fff}
-.mm-landing .memory .section-sub{color:var(--dark-soft)}
-.mm-landing .layer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:52px;position:relative}
-.mm-landing .layer-card{border:1px solid rgba(255,255,255,.14);border-radius:var(--radius);padding:28px 24px;background:rgba(255,255,255,.04)}
-.mm-landing .layer-card .tag{font-family:var(--lp-mono);font-size:11.5px;color:var(--dark-accent);letter-spacing:.12em}
-.mm-landing .layer-card h3{font-family:var(--lp-display);font-weight:700;color:#fff;font-size:19px;margin:10px 0}
-.mm-landing .layer-card p{font-size:14.5px;color:var(--dark-soft)}
-.mm-landing .layer-card .example{
-  margin-top:18px;font-family:var(--lp-mono);font-size:12px;color:#D6CBBB;
-  background:rgba(255,255,255,.06);border-left:2px solid var(--amber);
-  padding:10px 14px;border-radius:0 8px 8px 0;white-space:pre-line;
-}
-
 /* ---------- How it works ---------- */
 .mm-landing .how{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:96px 24px}
 .mm-landing .step-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:52px}
@@ -253,22 +188,6 @@ export function LandingPage() {
 .mm-landing .step-card .num{font-family:var(--lp-mono);font-size:12px;color:var(--accent);border:1px solid var(--line);border-radius:100px;padding:4px 12px;display:inline-block;margin-bottom:16px}
 .mm-landing .step-card h3{font-family:var(--lp-display);font-weight:700;font-size:17.5px;margin-bottom:8px}
 .mm-landing .step-card p{font-size:14.5px;color:var(--ink-soft)}
-
-/* ---------- Compare ---------- */
-.mm-landing .compare{padding:96px 24px}
-.mm-landing .compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}
-.mm-landing .compare-col{border-radius:var(--radius);padding:32px}
-.mm-landing .compare-col.old{border:1px dashed #D8CBBA;background:var(--paper)}
-.mm-landing .compare-col.new{border:1px solid var(--accent);background:linear-gradient(180deg,#FFFDF9,#FBF3E8)}
-.mm-landing .compare-col h3{font-family:var(--lp-display);font-weight:700;font-size:19px;margin-bottom:20px}
-.mm-landing .compare-col.old h3{color:var(--ink-soft)}
-.mm-landing .compare-col ul{list-style:none;display:flex;flex-direction:column;gap:14px}
-.mm-landing .compare-col li{display:flex;gap:12px;align-items:flex-start;font-size:15px}
-.mm-landing .compare-col.old li{color:var(--ink-soft)}
-.mm-landing .compare-col.new li{color:var(--ink)}
-.mm-landing .compare-col li .mark{font-family:var(--lp-mono);flex-shrink:0}
-.mm-landing .compare-col.old .mark{color:var(--focus)}
-.mm-landing .compare-col.new .mark{color:var(--mastered)}
 
 /* ---------- Final CTA ---------- */
 .mm-landing .final-cta{padding:110px 24px;text-align:center;border-top:1px solid var(--line)}
@@ -294,7 +213,6 @@ export function LandingPage() {
             <a href="#top" className="logo"><img src="/logo-full.svg" alt="MentorMan" className="logo-mark" /></a>
             <div className="nav-links">
               <a href="#agents">Features</a>
-              <a href="#memory">Why it works</a>
               <a href="#how">How it works</a>
             </div>
             <div className="nav-cta">
@@ -308,14 +226,14 @@ export function LandingPage() {
         <header id="top" className="hero">
           <div className="wrap hero-grid">
             <div>
-              <span className="badge"><span className="dot"></span> Goal-aware interview prep</span>
-              <h1>Interview prep with a mentor that <span className="hl">remembers you</span></h1>
-              <p className="lead">MentorMan learns your goal, maps your gaps, and remembers every session — so each lesson, drill, and review picks up right where you left off. You're never starting over.</p>
+              <span className="badge"><span className="dot"></span> AI mentor for any subject</span>
+              <h1>An AI mentor that <span className="hl">remembers your progress</span></h1>
+              <p className="lead">Tell it what you're studying. It builds your roadmap, teaches by asking questions, and quizzes your weak spots — remembering everything so you never start from zero.</p>
               <div className="hero-ctas">
-                <Link to="/register" className="btn btn-primary btn-lg">Start my prep plan <span className="arrow">→</span></Link>
+                <Link to="/register" className="btn btn-primary btn-lg">Start learning <span className="arrow">→</span></Link>
                 <a href="#how" className="btn btn-ghost btn-lg">See how it works</a>
               </div>
-              <p className="hero-note">Free to start · No credit card required</p>
+              <p className="hero-note">Free to start, no card needed</p>
             </div>
 
             <div className="graph-card" aria-label="Example skill graph showing topic mastery">
@@ -331,17 +249,17 @@ export function LandingPage() {
                 <line className="edge lit" x1="350" y1="72" x2="372" y2="236" />
                 <line className="edge" x1="230" y1="165" x2="230" y2="298" />
                 <circle className="node" cx="230" cy="165" r="13" fill="var(--amber)" stroke="var(--ink)" strokeWidth="1.5" />
-                <text x="230" y="143" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">DSA Core · 78%</text>
+                <text x="230" y="143" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Spanish · 78%</text>
                 <circle cx="110" cy="72" r="11" fill="var(--mastered)" />
-                <text x="110" y="50" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Sliding Window · 92%</text>
+                <text x="110" y="50" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Vocabulary · 92%</text>
                 <circle cx="350" cy="72" r="11" fill="var(--improving)" />
-                <text x="350" y="50" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Dynamic Prog · 41%</text>
+                <text x="350" y="50" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Verb Tenses · 41%</text>
                 <circle cx="92" cy="228" r="11" fill="var(--mastered)" />
-                <text x="92" y="256" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Two Pointers · 88%</text>
+                <text x="92" y="256" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Grammar · 88%</text>
                 <circle cx="372" cy="236" r="11" fill="var(--improving)" />
-                <text x="372" y="264" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Graphs · 55%</text>
+                <text x="372" y="264" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Listening · 55%</text>
                 <circle cx="230" cy="298" r="11" fill="var(--focus)" />
-                <text x="230" y="326" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">System Design · 30%</text>
+                <text x="230" y="326" textAnchor="middle" fontSize="10.5" fill="var(--ink-soft)">Speaking · 30%</text>
               </svg>
               <div className="legend">
                 <span><i style={{ background: 'var(--mastered)' }} /> mastered</span>
@@ -352,29 +270,12 @@ export function LandingPage() {
           </div>
         </header>
 
-        {/* PAIN */}
-        <section className="pain">
-          <div className="wrap">
-            <span className="eyebrow">—&nbsp;&nbsp;Sound familiar?</span>
-            <h2 style={{ maxWidth: 640 }}>Working hard, but not sure it's adding up?</h2>
-            <div className="pain-grid">
-              {PAINS.map((p) => (
-                <div className="pain-card" key={p.h}>
-                  <div className="q">?</div>
-                  <h3>{p.h}</h3>
-                  <p>{p.p}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
         {/* AGENTS */}
         <section id="agents" className="agents">
           <div className="wrap">
-            <span className="eyebrow">—&nbsp;&nbsp;Meet your mentor team</span>
-            <h2>Five specialists. One mentor who knows you.</h2>
-            <p className="section-sub">MentorMan isn't one chatbot — it's a team of focused agents all working from the same picture of you.</p>
+            <span className="eyebrow">—&nbsp;&nbsp;How your mentor works</span>
+            <h2>One mentor, four things it actually does.</h2>
+            <p className="section-sub">Not a generic chatbot — it profiles you, plans your path, teaches by asking, and checks what stuck.</p>
             <div className="agent-rows">
               {AGENTS.map((a) => (
                 <div className="agent" key={a.role}>
@@ -390,32 +291,11 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* MEMORY */}
-        <section id="memory" className="memory">
-          <div className="bg-grid" aria-hidden="true" style={{ position: 'absolute', inset: 0 }} />
-          <img src="/logo-mark.svg" alt="" aria-hidden="true" className="memory-mark" />
-          <div className="wrap" style={{ position: 'relative' }}>
-            <span className="eyebrow">—&nbsp;&nbsp;Why it works</span>
-            <h2>Three layers of memory.<br />You never start over.</h2>
-            <p className="section-sub">Most AI tools have goldfish memory. MentorMan is built on a persistent, three-layer memory of who you are, what you know, and everything you've practiced.</p>
-            <div className="layer-grid">
-              {LAYERS.map((l) => (
-                <div className="layer-card" key={l.tag}>
-                  <span className="tag">{l.tag}</span>
-                  <h3>{l.h}</h3>
-                  <p>{l.p}</p>
-                  <div className="example">{l.example}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
         {/* HOW */}
         <section id="how" className="how">
           <div className="wrap">
             <span className="eyebrow">—&nbsp;&nbsp;How it works</span>
-            <h2>From goal to offer, four simple moves</h2>
+            <h2>From goal to mastery, four simple moves</h2>
             <div className="step-grid">
               {STEPS.map((s) => (
                 <div className="step-card" key={s.num}>
@@ -428,39 +308,13 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* COMPARE */}
-        <section className="compare">
-          <div className="wrap">
-            <span className="eyebrow">—&nbsp;&nbsp;The difference</span>
-            <h2>Stop restarting. Start building.</h2>
-            <div className="compare-grid">
-              <div className="compare-col old">
-                <h3>Prep without a mentor</h3>
-                <ul>
-                  {COMPARE_OLD.map((t) => (
-                    <li key={t}><span className="mark">✕</span>{t}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="compare-col new">
-                <h3>Prep with MentorMan</h3>
-                <ul>
-                  {COMPARE_NEW.map((t) => (
-                    <li key={t}><span className="mark">✓</span>{t}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
-
         {/* FINAL CTA */}
         <section className="final-cta">
           <div className="inner">
             <span className="eyebrow">Ready when you are</span>
             <h2>Your next session picks up<br />where this one leaves off.</h2>
-            <p>Set your goal today. Your mentor will remember it tomorrow — and every day until your offer.</p>
-            <Link to="/register" className="btn btn-primary btn-lg">Start my prep plan <span className="arrow">→</span></Link>
+            <p>Set your goal today. Your mentor will remember it tomorrow — and every day until you've mastered it.</p>
+            <Link to="/register" className="btn btn-primary btn-lg">Start learning <span className="arrow">→</span></Link>
           </div>
         </section>
 
@@ -471,7 +325,6 @@ export function LandingPage() {
             <div className="footer-links">
               <a href="#agents">Features</a>
               <a href="#how">How it works</a>
-              <a href="#memory">Why it works</a>
             </div>
             <span className="footer-copy">© 2026 MentorMan · mentorman.co.in</span>
           </div>

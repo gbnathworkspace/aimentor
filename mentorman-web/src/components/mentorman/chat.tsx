@@ -181,7 +181,6 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onD
             )}
             {canAttach && <AttachButton disabled={disabled} onSelect={attachment.selectFiles} />}
             <div className="spacer" />
-            <span className="tag" style={{ marginRight: 2 }}>mode: {mode}</span>
             <button className="send-btn" onClick={submit} disabled={busy || disabled || !canSubmit} title="Send">
               <Icon name={isEval ? 'arrowUp' : 'send'} />
             </button>
@@ -537,7 +536,6 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
             currentTitle={topicTitle}
             onRenamed={(newTitle) => { setTopicTitle(newTitle); onTopicUpdated?.(); }}
           />
-          <div className="ph-sub">topic · {mode}</div>
         </div>
         <div className="ph-right">
           {/* ponytail: mode + voice (tone) selectors hidden per request — remove `false &&` to re-enable; components/state kept intact. */}

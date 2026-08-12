@@ -14,8 +14,15 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from app.services.topic_chat_service import TopicChatService, LLM_TIMEOUT_SECONDS
+
+
+def _ai_message(text: str, tool_calls: list | None = None) -> AIMessage:
+    """Build a fake _call_llm response matching the LangChain AIMessage
+    contract: .content is a list of blocks, .tool_calls is a list."""
+    return AIMessage(content=[{"type": "text", "text": text}], tool_calls=tool_calls or [])
 
 
 def _mock_count_tokens(text: str) -> int:
@@ -111,7 +118,7 @@ class TestHandleMessageHappyPath:
 
         # Mock the LLM call
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "Here's my response about graphs."
+            mock_llm.return_value = _ai_message("Here's my response about graphs.")
 
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "Explain BFS", mode="topic"
@@ -157,7 +164,7 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.return_value = "System prompt"
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "Response"
+            mock_llm.return_value = _ai_message("Response")
             await chat_service.handle_message(
                 "topic-abc", "user-123", "What is DFS?", mode="doubt"
             )
@@ -178,12 +185,12 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.return_value = "prompt"
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "LLM says hello"
+            mock_llm.return_value = _ai_message("LLM says hello")
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "Hi"
             )
 
-        assert result == {"response": "LLM says hello", "suggestions": []}
+        assert result == {"response": "LLM says hello", "suggestions": [], "mode": "diagnostic"}
 
 
 class TestHandleMessageHardCap:
@@ -220,7 +227,7 @@ class TestHandleMessageHardCap:
         mock_get_prompt.return_value = "prompt"
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "Response"
+            mock_llm.return_value = _ai_message("Response")
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "Hello"
             )
@@ -350,7 +357,7 @@ class TestPostTurnHook:
         mock_get_prompt.return_value = "prompt"
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "LLM response"
+            mock_llm.return_value = _ai_message("LLM response")
             await chat_service.handle_message("topic-abc", "user-123", "Hello")
 
         # Allow the asyncio.create_task to execute
@@ -374,7 +381,7 @@ class TestPostTurnHook:
         mock_compaction_service.should_compact.return_value = True
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "response"
+            mock_llm.return_value = _ai_message("response")
             await chat_service.handle_message("topic-abc", "user-123", "Hello")
 
         await asyncio.sleep(0.05)
@@ -395,7 +402,7 @@ class TestPostTurnHook:
         mock_compaction_service.should_compact.return_value = False
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "response"
+            mock_llm.return_value = _ai_message("response")
             await chat_service.handle_message("topic-abc", "user-123", "Hello")
 
         await asyncio.sleep(0.05)
@@ -416,7 +423,7 @@ class TestPostTurnHook:
         mock_compaction_service.should_compact.side_effect = Exception("DB down")
 
         with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = "All good"
+            mock_llm.return_value = _ai_message("All good")
 
             # The main response should still succeed
             result = await chat_service.handle_message(
@@ -427,7 +434,7 @@ class TestPostTurnHook:
         await asyncio.sleep(0.05)
 
         # Main response is still successful
-        assert result == {"response": "All good", "suggestions": []}
+        assert result == {"response": "All good", "suggestions": [], "mode": "diagnostic"}
 
     @pytest.mark.asyncio
     async def test_post_turn_hook_direct_call_logs_error(
@@ -567,3 +574,162 @@ class TestBuildSystemBlocks:
         assert len(blocks) == 1
         assert blocks[0]["text"] == prompt
         assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+
+class TestDiagnosticRouting:
+    """Cold-start gate: unassessed topics route to DIAGNOSTIC, and a recorded
+    verdict gets written to the skill graph (issue #50)."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_unassessed_skill_routes_to_diagnostic_mode(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """No verified skill assessment yet — turn routes to diagnostic mode
+        and the mentor call is bound with the verdict tool."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = _ai_message("Have you coded before?")
+            await chat_service.handle_message(
+                "topic-abc", "user-123", "teach me JS", mode="topic"
+            )
+
+        mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
+        # include_diagnostic_tool is the 3rd positional arg to _call_llm
+        assert mock_llm.call_args[0][2] is True
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_diagnostic_verdict_written_to_skill_graph(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """A record_diagnostic_verdict tool call in the response gets applied
+        via skill_graph_repo.apply_update before the turn returns."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        verdict_call = {
+            "name": "record_diagnostic_verdict",
+            "args": {
+                "new_level": "beginner",
+                "gap": 40,
+                "weak_areas": ["loops"],
+                "strong_areas": [],
+            },
+            "id": "tc-1",
+            "type": "tool_call",
+        }
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
+             patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+            mock_repo.apply_update = AsyncMock()
+            mock_llm.return_value = _ai_message(
+                "Got it — you're a beginner.", tool_calls=[verdict_call]
+            )
+            await chat_service.handle_message(
+                "topic-abc", "user-123", "no I've never coded", mode="topic"
+            )
+
+        mock_repo.apply_update.assert_called_once()
+        called_user_id, skill_update = mock_repo.apply_update.call_args[0]
+        assert called_user_id == "user-123"
+        assert skill_update.topic == "Test Topic"  # mock_topic_service fixture's title
+        assert skill_update.new_level.value == "beginner"
+        assert skill_update.weak_areas == ["loops"]
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_no_verdict_tool_call_skips_skill_graph_write(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """Diagnostic mode with no tool call yet (still asking) doesn't touch
+        the skill graph."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
+             patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+            mock_repo.apply_update = AsyncMock()
+            mock_llm.return_value = _ai_message("Have you coded before?")
+            await chat_service.handle_message(
+                "topic-abc", "user-123", "teach me JS", mode="topic"
+            )
+
+        mock_repo.apply_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_assessed_skill_uses_router_decision_and_instruction_override(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """Once assessed, the router (not Rule 1) picks the mode, and its
+        instruction_override gets appended to the system prompt."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {"assessed": True, "current_level": "intermediate"},
+            "episodes": [], "documents": [],
+        })
+        mock_get_prompt.return_value = "direct prompt"
+
+        from app.services.mode_router import MatchedRule, MentorMode, RouterDecision
+
+        fake_decision = RouterDecision(
+            matched_rule=MatchedRule.RULE_2_URGENCY_DIRECT,
+            selected_mode=MentorMode.DIRECT,
+            reasoning="Pure syntax lookup.",
+            instruction_override="Just give the syntax, nothing else.",
+        )
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
+             patch(
+                 "app.services.topic_chat_service.mode_router.route_user_turn",
+                 new_callable=AsyncMock,
+             ) as mock_route:
+            mock_route.return_value = fake_decision
+            mock_llm.return_value = _ai_message("array.push(x)")
+            await chat_service.handle_message(
+                "topic-abc", "user-123", "syntax for array push", mode="topic"
+            )
+
+        mock_get_prompt.assert_called_once_with("direct", mock_assembler.assemble.return_value)
+        sent_system_prompt = mock_llm.call_args[0][0]
+        assert "Just give the syntax, nothing else." in sent_system_prompt
+        # DIRECT is not the diagnostic mode — no verdict tool bound
+        assert mock_llm.call_args[0][2] is False
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_doubt_mode_skips_router_entirely(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """doubt/planning/evaluation are session-level intents, untouched by
+        the topic-mode routing engine."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+        })
+        mock_get_prompt.return_value = "doubt prompt"
+
+        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
+             patch(
+                 "app.services.topic_chat_service.mode_router.route_user_turn",
+                 new_callable=AsyncMock,
+             ) as mock_route:
+            mock_llm.return_value = _ai_message("Answer")
+            await chat_service.handle_message(
+                "topic-abc", "user-123", "What is DFS?", mode="doubt"
+            )
+
+        mock_route.assert_not_called()
+        mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)

@@ -2,21 +2,27 @@
 
 import React from 'react';
 import { Icon } from './icons';
-import { fmt } from './ui';
+import { fmt, ModeBadge } from './ui';
 import { SpeakButton } from './SpeakButton';
 
 export type QuickReplyOption = { title: string; description: string };
 
 /** Detects whether an assistant message is asking a question worth rendering
- *  as a question card, rather than a plain chat bubble. */
+ *  as a question card, rather than a plain chat bubble. Checks the first
+ *  paragraph specifically (not the whole message) because that's the part
+ *  MentorQuestionCard renders as its heading — a message ending in "?" after
+ *  a non-question intro paragraph would otherwise get misrendered as a card
+ *  with a non-question heading. */
 export function looksLikeQuestion(text: string): boolean {
-  return text.trim().endsWith('?');
+  const idx = text.indexOf('\n\n');
+  const firstPara = idx === -1 ? text : text.slice(0, idx);
+  return firstPara.trim().replace(/\*\*/g, '').endsWith('?');
 }
 
 /** Renders a mentor turn as a question card: icon badge, bold heading, supporting text.
  *  The LLM is prompted to lead with "question\n\ncontext" — split on the first blank
  *  line; if there isn't one, the whole message is the heading. */
-export function MentorQuestionCard({ text }: { text: string }) {
+export function MentorQuestionCard({ text, label }: { text: string; label?: string }) {
   const idx = text.indexOf('\n\n');
   const heading = (idx === -1 ? text : text.slice(0, idx)).replace(/\*\*/g, '').trim();
   const body = idx === -1 ? null : text.slice(idx + 2).trim();
@@ -24,6 +30,7 @@ export function MentorQuestionCard({ text }: { text: string }) {
     <div className="onb-card fade-up">
       <div className="onb-card-icon"><Icon name="spark" size={14} /></div>
       <div className="onb-card-body">
+        {label && <ModeBadge label={label} />}
         <div className="onb-card-heading">{heading}</div>
         {body && <div className="onb-card-desc">{fmt(body)}</div>}
       </div>

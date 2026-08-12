@@ -59,6 +59,10 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
                     "weak_areas": skill_update.weak_areas,
                     "strong_areas": skill_update.strong_areas,
                     "last_studied": now,
+                    # This is a verified write (diagnostic verdict, periodic
+                    # checkpoint, or session-end) — no longer just the
+                    # onboarding placeholder guess.
+                    "assessed": True,
                 }
             },
             upsert=True,

@@ -243,11 +243,13 @@ export function Brand({ small }: { small?: boolean }) {
 }
 
 // ---- Message block -----------------------------------------
-export function Msg({ who, children, delay = 0, style }: {
+export function Msg({ who, children, delay = 0, style, modeLabel }: {
   who: 'mentor' | 'user';
   children: React.ReactNode;
   delay?: number;
   style?: React.CSSProperties;
+  /** Mentor-only: renders the answer-mode icon+label inline, separated by "|". */
+  modeLabel?: string;
 }) {
   return (
     <div className={`msg ${who}`} style={{ animationDelay: `${delay}ms`, ...style }}>
@@ -255,9 +257,61 @@ export function Msg({ who, children, delay = 0, style }: {
         {who === 'mentor'
           ? <img src="/logo-mark.svg" alt="" className="av" />
           : <span className="av">Y</span>}
-        {who === 'mentor' ? 'Mentor' : 'You'}
+        <span className="who-name">{who === 'mentor' ? 'Mentor' : 'You'}</span>
+        {modeLabel && (
+          <>
+            <span aria-hidden="true" className="who-sep">|</span>
+            <ModeBadge label={modeLabel} inline />
+          </>
+        )}
       </div>
       {children}
+    </div>
+  );
+}
+
+const MODE_ICON_META: Record<string, { color: string; path: React.ReactNode }> = {
+  DIRECT: {
+    color: 'var(--accent)',
+    path: <><path d="M5 12h14" /><path d="M13 18l6-6-6-6" /></>,
+  },
+  HINT: {
+    color: 'var(--warn)',
+    path: <><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-7 7c0 3 2 5.5 3 7h8c1-1.5 3-4 3-7a7 7 0 0 0-7-7z" /></>,
+  },
+  SOCRATIC: {
+    color: 'var(--info)',
+    path: <>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <text x="12" y="14.5" textAnchor="middle" fontFamily="sans-serif" fontSize="10.5" fontWeight="800" fill="currentColor" stroke="none">?</text>
+    </>,
+  },
+  GUIDED: {
+    color: 'var(--danger)',
+    path: <><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" strokeLinejoin="round" /></>,
+  },
+  DIAGNOSTIC: {
+    color: 'var(--muted-2)',
+    path: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.6" /></>,
+  },
+};
+
+export function ModeBadge({ label, inline }: { label: string; inline?: boolean }) {
+  const meta = MODE_ICON_META[label.toUpperCase()];
+  const iconSize = inline ? 13 : 16;
+  const glyphSize = inline ? 8 : 10;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: inline ? 4 : 6, margin: inline ? 0 : '0 4px 6px', opacity: inline ? 0.68 : 1 }}>
+      {meta && (
+        <span style={{ width: iconSize, height: iconSize, borderRadius: '999px', flexShrink: 0, display: 'grid', placeItems: 'center', background: `color-mix(in oklch, ${meta.color} 22%, var(--card))`, border: `1px solid color-mix(in oklch, ${meta.color} 55%, transparent)` }}>
+          <svg viewBox="0 0 24 24" width={glyphSize} height={glyphSize} fill="none" stroke={meta.color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+            {meta.path}
+          </svg>
+        </span>
+      )}
+      <span style={{ fontFamily: 'var(--mono)', fontSize: inline ? 9 : 10, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        {label}
+      </span>
     </div>
   );
 }
@@ -268,12 +322,7 @@ export function Bubble({ who, item, delay }: {
   delay?: number;
 }) {
   return (
-    <Msg who={who} delay={delay}>
-      {item.label && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '0 4px 6px' }}>
-          {item.label}
-        </div>
-      )}
+    <Msg who={who} delay={delay} modeLabel={item.label}>
       <div className="bubble">
         {fmt(item.text)}
         {item.nudge && (

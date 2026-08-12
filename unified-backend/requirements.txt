@@ -16,6 +16,7 @@ tiktoken>=0.5.0
 
 # LLM & Embeddings
 anthropic>=0.39.0
+langchain-anthropic>=1.5.5
 voyageai>=0.3.0
 
 # AWS / Storage

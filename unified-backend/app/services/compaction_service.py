@@ -197,6 +197,24 @@ def _get_preemptive_threshold() -> int:
     return DEFAULT_PREEMPTIVE_THRESHOLD
 
 
+def _find_rolling_summary(messages: list[dict]) -> dict | list[dict] | None:
+    """Locate the topic's summary entry/entries in its messages array.
+
+    Returns:
+        None if no summary entries exist.
+        The single summary dict if exactly one exists (the steady-state case
+        post-migration — see rolling-topic-summary spec Requirement 2.1).
+        A list of summary dicts if more than one exists (legacy multi-block
+        state from before rolling summaries — signals migration is needed).
+    """
+    summaries = [msg for msg in messages if msg.get("type") == "summary"]
+    if not summaries:
+        return None
+    if len(summaries) == 1:
+        return summaries[0]
+    return summaries
+
+
 class CompactionService:
     """Monitors token usage and orchestrates compaction."""
 
@@ -393,6 +411,22 @@ class CompactionService:
         # Step 4: Parse the tool_use response
         return self._parse_tool_use_response(response)
 
+    async def _call_merge_summarization_llm(
+        self, existing_summary: dict | None, selected_messages: list[dict]
+    ) -> dict:
+        """Summarize newly-selected messages, folding in an existing rolling summary if present.
+
+        When `existing_summary` is None, this is identical to `_call_summarization_llm`.
+        When present, the prior summary text is prepended as a synthetic "PRIOR SUMMARY"
+        turn so the same prompt template (which instructs the LLM to fold prior + new
+        into ONE updated summary) and the same tool schema/parsing path are reused as-is.
+        """
+        if existing_summary is None:
+            return await self._call_summarization_llm(selected_messages)
+
+        prior_entry = {"role": "PRIOR SUMMARY", "content": existing_summary["summary"]}
+        return await self._call_summarization_llm([prior_entry] + selected_messages)
+
     def _parse_tool_use_response(self, response) -> dict:
         """Parse the Anthropic tool_use response to extract summary and skill updates.
 
@@ -547,6 +581,92 @@ class CompactionService:
             }
         return None
 
+    async def _migrate_legacy_summaries(self, topic_id: str, user_id: str, topic: dict) -> dict | None:
+        """Collapse a topic's multiple legacy SummaryBlocks into one RollingSummary.
+
+        Runs lazily — only invoked from _execute_compaction when more than one
+        summary entry is found (state from before rolling summaries shipped).
+        Merges all existing summaries oldest-to-newest via one summarization LLM
+        call. On failure, leaves the topic's SummaryBlocks untouched and returns
+        None so the caller skips this turn's compaction (retried next threshold
+        crossing, same as any other compaction failure).
+        """
+        messages = topic.get("messages", [])
+        current_version = topic.get("version", 0)
+        legacy = [m for m in messages if m.get("type") == "summary"]
+        if len(legacy) < 2:
+            return legacy[0] if legacy else None
+
+        legacy.sort(key=lambda s: s.get("compactedRange", {}).get("from") or s.get("createdAt"))
+
+        # Reuse the merge prompt path: each legacy summary becomes a "PRIOR SUMMARY"
+        # turn, oldest first, so the LLM folds them into one narrative.
+        synthetic = [{"role": "PRIOR SUMMARY", "content": s["summary"]} for s in legacy]
+        try:
+            llm_result = await self._call_summarization_llm(synthetic)
+        except Exception as e:
+            logger.error("Legacy summary migration failed for topic %s: %s", topic_id, str(e))
+            return None
+
+        merged_ids: list[str] = []
+        for s in legacy:
+            for mid in s.get("compactedMessageIds", []):
+                if mid not in merged_ids:
+                    merged_ids.append(mid)
+
+        now = datetime.now(timezone.utc)
+        merged_summary_text = llm_result["summary"]
+        merged_block = {
+            "type": "summary",
+            "id": legacy[0]["id"],
+            "summary": merged_summary_text,
+            "compactedMessageIds": merged_ids,
+            "compactedRange": {
+                "from": legacy[0]["compactedRange"]["from"],
+                "to": legacy[-1]["compactedRange"]["to"],
+            },
+            "messageCount": sum(s.get("messageCount", 0) for s in legacy),
+            "tokenCount": self._token_counter.count_message({"content": merged_summary_text}),
+            "createdAt": legacy[0].get("createdAt", now),
+            "updatedAt": now,
+            "compactionEventId": legacy[-1].get("compactionEventId", ""),
+        }
+
+        legacy_ids = {s["id"] for s in legacy}
+        new_messages = []
+        inserted = False
+        for msg in messages:
+            if msg.get("type") == "summary" and msg.get("id") in legacy_ids:
+                if not inserted:
+                    new_messages.append(merged_block)
+                    inserted = True
+            else:
+                new_messages.append(msg)
+
+        new_token_estimate = self._token_counter.count_window(new_messages)
+        result = await topics_col().update_one(
+            {"topicId": topic_id, "userId": user_id, "version": current_version},
+            {
+                "$set": {
+                    "messages": new_messages,
+                    "metadata.currentTokenEstimate": new_token_estimate,
+                    "version": current_version + 1,
+                },
+            },
+        )
+        if result.modified_count != 1:
+            logger.error(
+                "Legacy summary migration failed: concurrent write conflict for topic %s", topic_id
+            )
+            return None
+
+        logger.info(
+            "Migrated %d legacy SummaryBlocks into one rolling summary for topic %s",
+            len(legacy),
+            topic_id,
+        )
+        return merged_block
+
     async def _execute_compaction(self, topic_id: str, user_id: str) -> dict | None:
         """Internal compaction execution logic."""
         # Step 1: Fetch topic document
@@ -558,6 +678,23 @@ class CompactionService:
             return None
 
         messages = topic.get("messages", [])
+
+        # Step 1b: Collapse legacy multi-block state before doing anything else.
+        # If migration is needed and fails, skip this turn's compaction entirely —
+        # it will retry on the next threshold crossing (Req 2.2, 2.3).
+        rolling = _find_rolling_summary(messages)
+        if isinstance(rolling, list):
+            migrated = await self._migrate_legacy_summaries(topic_id, user_id, topic)
+            if migrated is None:
+                logger.warning(
+                    "Compaction skipped: legacy summary migration failed for topic %s", topic_id
+                )
+                return None
+            topic = await topics_col().find_one({"topicId": topic_id, "userId": user_id})
+            messages = topic.get("messages", [])
+            rolling = _find_rolling_summary(messages)
+
+        existing_summary = rolling  # dict or None — never a list past this point
         current_version = topic.get("version", 0)
 
         # Step 2: Calculate target reclamation
@@ -576,19 +713,35 @@ class CompactionService:
             logger.info("Compaction skipped: insufficient messages for topic %s", topic_id)
             return None
 
-        # Step 4: Call LLM for summarization
-        llm_result = await self._call_summarization_llm(selected)
+        # Step 4: Call LLM for summarization, folding in the existing rolling
+        # summary (if any) instead of producing an independent new block.
+        llm_result = await self._call_merge_summarization_llm(existing_summary, selected)
         summary_text = llm_result["summary"]
         skill_updates = llm_result.get("skill_updates")
 
-        # Step 5: Create SummaryBlock
+        # Step 5: Build the replacement RollingSummary — reuse the existing
+        # block's id/from-timestamp when merging, so this is a replace-in-place,
+        # not an append (Req 1.3, 1.4, 1.5, 1.6).
         summary_token_count = self._token_counter.count_message({"content": summary_text})
-        compacted_message_ids = [msg["id"] for msg in selected]
-        compacted_range_from = selected[0].get("timestamp")
-        compacted_range_to = selected[-1].get("timestamp")
+        new_ids = [msg["id"] for msg in selected]
         now = datetime.now(timezone.utc)
         event_id = str(uuid.uuid4())
-        summary_block_id = str(uuid.uuid4())
+
+        if existing_summary:
+            compacted_message_ids = list(existing_summary.get("compactedMessageIds", []))
+            for mid in new_ids:
+                if mid not in compacted_message_ids:
+                    compacted_message_ids.append(mid)
+            compacted_range_from = existing_summary["compactedRange"]["from"]
+            summary_block_id = existing_summary["id"]
+            message_count = existing_summary.get("messageCount", 0) + len(selected)
+            created_at = existing_summary.get("createdAt", now)
+        else:
+            compacted_message_ids = new_ids
+            compacted_range_from = selected[0].get("timestamp")
+            summary_block_id = str(uuid.uuid4())
+            message_count = len(selected)
+            created_at = now
 
         summary_block = {
             "type": "summary",
@@ -597,29 +750,35 @@ class CompactionService:
             "compactedMessageIds": compacted_message_ids,
             "compactedRange": {
                 "from": compacted_range_from,
-                "to": compacted_range_to,
+                "to": selected[-1].get("timestamp"),
             },
-            "messageCount": len(selected),
+            "messageCount": message_count,
             "tokenCount": summary_token_count,
-            "createdAt": now,
+            "createdAt": created_at,
+            "updatedAt": now,
             "compactionEventId": event_id,
         }
 
-        # Step 6: Replace compacted messages with SummaryBlock (atomic operation)
-        # CRITICAL: Messages are only removed AFTER SummaryBlock is persisted (Req 10.3)
-        # Build new messages array: replace the compacted messages with the summary block
-        compacted_ids_set = set(compacted_message_ids)
+        # Step 6: Replace compacted messages AND the prior RollingSummary (if any)
+        # with the single merged block (atomic operation).
+        # CRITICAL: Messages are only removed AFTER the block is persisted (Req 10.3)
+        new_ids_set = set(new_ids)
         new_messages = []
         summary_inserted = False
 
         for msg in messages:
             msg_id = msg.get("id")
-            if msg_id in compacted_ids_set:
-                # Insert summary block at the position of the first compacted message
+            is_prior_summary = (
+                existing_summary is not None
+                and msg.get("type") == "summary"
+                and msg_id == existing_summary["id"]
+            )
+            if msg_id in new_ids_set or is_prior_summary:
+                # Insert the merged block at the position of the first item removed
                 if not summary_inserted:
                     new_messages.append(summary_block)
                     summary_inserted = True
-                # Skip this compacted message
+                # Skip this compacted/superseded entry
             else:
                 new_messages.append(msg)
 
@@ -662,7 +821,10 @@ class CompactionService:
         }
         await compaction_events_col().insert_one(compaction_event)
 
-        # Step 9: Update skill graph if updates were extracted (Req 8.1, 8.2)
+        # Step 9: Update skill graph if updates were extracted (Req 8.1, 8.2).
+        # Extraction is scoped to `selected` (the newly-compacted messages) only —
+        # never the merged summary text — so progress already applied by prior
+        # compactions is never re-derived (Req 5.1, 5.2).
         if skill_updates:
             await self._apply_skill_updates(user_id, skill_updates)
 

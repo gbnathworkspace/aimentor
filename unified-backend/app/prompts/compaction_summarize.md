@@ -24,4 +24,9 @@ You are analyzing a segment of a learning conversation that is being compacted t
 
 ## Conversation excerpt to analyze:
 
+If the excerpt below begins with a "PRIOR SUMMARY" section, that is the
+existing rolling summary of earlier parts of this same conversation — your
+job is to produce ONE updated summary that folds the prior summary and the
+new messages together, not two separate summaries.
+
 {{conversation}}

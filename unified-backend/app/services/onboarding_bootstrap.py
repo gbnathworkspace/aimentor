@@ -262,6 +262,9 @@ async def bootstrap_skills(
             "gap": gap,
             # Hand-seeded linear chain from the curated topic order (issue #10).
             "prerequisites": [topics[i - 1]] if i > 0 else [],
+            # current_level above is a guess, not a measurement — gate the
+            # cold-start diagnostic mode until a real assessment lands.
+            "assessed": False,
         }
 
         # Upsert into skill_graph collection

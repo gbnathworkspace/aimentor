@@ -19,9 +19,16 @@ _cache: dict[str, str] = {}
 # Mode → template filename mapping
 _MODE_TEMPLATES: dict[str, str] = {
     "planning": "mentor_v1.md",
-    "topic": "mentor_v1.md",
     "doubt": "mentor_v1.md",
     "evaluation": "mentor_v1.md",
+    # Routed sub-modes for "topic" turns — selected per-turn by
+    # mode_router.route_user_turn() instead of one static "topic" block
+    # that used to give contradictory instructions.
+    "diagnostic": "mentor_v1.md",
+    "direct": "mentor_v1.md",
+    "socratic": "mentor_v1.md",
+    "hint": "mentor_v1.md",
+    "guided": "mentor_v1.md",
 }
 
 _ONBOARDING_TEMPLATE = "onboarding.md"
@@ -36,17 +43,61 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "- Factor in their daily availability — don't overcommit.\n"
         "- Do NOT start teaching. Planning is the entire goal of this session."
     ),
-    "topic": (
-        "You are in TOPIC mode. Your job is to teach the user about the current topic.\n"
-        "- Start by probing what they already know — don't re-explain things covered before.\n"
-        "- Focus on weak areas. Skip strong areas unless asked.\n"
-        "- Teach through explanation + targeted questions. Don't monologue.\n"
-        "- Use Socratic method: explain → apply → push edge cases.\n"
-        "- Attempt-first: pose a question and let them try before you explain. Give hints "
-        "as a ladder (nudge → hint → worked step → answer), and fade the ladder as the "
-        "Current Level rises — beginners get more rungs, advanced students get almost none.\n"
+    # Routed sub-modes for "topic" turns (see mode_router.py). Each is
+    # self-contained — no shared universal "always end with a question"
+    # suffix, since that used to defeat DIRECT's whole purpose.
+    "diagnostic": (
+        "You are running a brief DIAGNOSTIC before teaching this topic.\n"
+        "- Ask 1-2 targeted questions to gauge the student's actual current "
+        "level (beginner/intermediate/advanced/expert). Do NOT teach content "
+        "yet, do NOT give the full picture up front. This holds even if the "
+        "user's profile below says they prefer answer-first explanations — "
+        "that preference shapes how you teach once diagnosis is done, it "
+        "does not skip diagnosis.\n"
+        "- If Relevant Past Sessions below show related experience, let it "
+        "inform your first question's difficulty, but still verify — don't "
+        "skip diagnosis on assumption.\n"
+        "- Use the quick-reply option format for questions with discrete "
+        "plausible answers.\n"
+        "- Once the user's answer gives you enough signal, call the "
+        "record_diagnostic_verdict tool with your assessment, and tell them "
+        "their level in one line before moving into teaching."
+    ),
+    "direct": (
+        "You are in DIRECT mode. The user wants a direct, concise answer — "
+        "a factual lookup, syntax question, or explicit request to skip "
+        "the back-and-forth.\n"
+        "- Answer immediately and completely. No preamble, no leading "
+        "question, no withholding.\n"
+        "- Do not end the reply with a question — that defeats the point "
+        "of this mode."
+    ),
+    "socratic": (
+        "You are in SOCRATIC mode. The user hasn't attempted this yet, or "
+        "you're activating prior knowledge before teaching.\n"
+        "- Do not give away the solution or full explanation.\n"
+        "- Pose a targeted leading question that makes them use what they "
+        "already know to take the first step.\n"
         "- Calibrate difficulty to the user's current level.\n"
-        "- Track understanding as you go — name struggling concepts explicitly."
+        "- End with a question — the student should reply before you teach."
+    ),
+    "hint": (
+        "You are in HINT mode. The user made an attempt and hit a specific, "
+        "targeted point of confusion — not yet frustrated, not a repeated "
+        "failure.\n"
+        "- Name the specific gap or misapplied concept in their attempt.\n"
+        "- Point at the blind spot without handing over the fully corrected "
+        "answer — a nudge, not a solve.\n"
+        "- End with a question that lets them try the fix themselves."
+    ),
+    "guided": (
+        "You are in GUIDED mode. The user is stuck on a multi-step problem "
+        "or showing real frustration (repeated failed attempts, explicit "
+        "'I'm lost' language).\n"
+        "- De-escalate. Break the problem into simple sub-steps.\n"
+        "- Walk through step 1 only — don't dump the remaining steps at "
+        "once.\n"
+        "- End with a check that they've got step 1 before continuing."
     ),
     "doubt": (
         "You are in DOUBT mode. The user has a specific doubt or confusion to resolve.\n"
@@ -248,7 +299,9 @@ def get_system_prompt(
     """Load and format the system prompt for a given mentor mode.
 
     Args:
-        mode: One of "planning", "topic", "doubt", "evaluation".
+        mode: One of "planning", "doubt", "evaluation", or a routed topic
+            sub-mode from mode_router.py ("diagnostic", "direct", "socratic",
+            "hint", "guided").
         context: Dict with keys "profile", "skill", "episodes" from context_assembler.
         tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.
 

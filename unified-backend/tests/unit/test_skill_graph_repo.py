@@ -41,6 +41,13 @@ def test_previous_level_none_for_new_topic():
     assert written["current_level"] == "advanced"
 
 
+def test_apply_update_marks_assessed_true():
+    """Issue #50: any verified write flips assessed, distinguishing it from
+    the onboarding placeholder guess."""
+    written = _run_apply({"required_level": "expert", "current_level": "beginner", "assessed": False})
+    assert written["assessed"] is True
+
+
 class TestNextBestTopics:
     """Issue #10: prerequisite-ordered next-best-skill sequencing."""
 

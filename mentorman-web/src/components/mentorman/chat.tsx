@@ -292,7 +292,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       .then(data => {
         if (cancelled) return;
         const messages = data.messages || [];
-        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number }, i: number) => {
+        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; mode?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number }, i: number) => {
           if (m.type === 'summary') {
             return {
               who: 'summary' as const,
@@ -311,6 +311,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           return {
             who: (m.role === 'assistant' || m.role === 'mentor') ? 'mentor' as const : 'user' as const,
             text: m.content || '',
+            label: m.mode ? m.mode.toUpperCase() : undefined,
             _id: m.id || `loaded${i}`,
           };
         });
@@ -348,7 +349,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       if (data.error) {
         setMsgs(prev => [...prev, { who: 'mentor', text: data.error, _id: 'err' + Date.now() }]);
       } else {
-        setMsgs(prev => [...prev, { who: 'mentor', text: data.response, _id: 'm' + Date.now() }]);
+        setMsgs(prev => [...prev, { who: 'mentor', text: data.response, label: data.mode ? String(data.mode).toUpperCase() : undefined, _id: 'm' + Date.now() }]);
         setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
       }
     } catch {
@@ -590,7 +591,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
                   <span className="system-msg-text">{m.text}</span>
                 </div>
               : m.who === 'mentor' && looksLikeQuestion(m.text)
-              ? <MentorQuestionCard key={m._id || i} text={m.text} />
+              ? <MentorQuestionCard key={m._id || i} text={m.text} label={m.label} />
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
           {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && (

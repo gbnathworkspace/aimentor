@@ -28,7 +28,7 @@ class TestGetSystemPrompt:
             "skill": {"topic": "Python Basics", "current_level": "beginner"},
             "episodes": [],
         }
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -87,7 +87,7 @@ class TestGetSystemPrompt:
             },
             "episodes": [],
         }
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "System Design" in result
         assert "advanced" in result
         assert "intermediate" in result
@@ -99,11 +99,34 @@ class TestGetSystemPrompt:
         assert "PLANNING mode" in result
         assert "study plan" in result
 
-    def test_includes_mode_instructions_topic(self):
+    def test_includes_mode_instructions_socratic(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("topic", context)
-        assert "TOPIC mode" in result
-        assert "teach" in result
+        result = get_system_prompt("socratic", context)
+        assert "SOCRATIC mode" in result
+        assert "leading question" in result
+
+    def test_includes_mode_instructions_diagnostic(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("diagnostic", context)
+        assert "DIAGNOSTIC" in result
+        assert "record_diagnostic_verdict" in result
+
+    def test_includes_mode_instructions_direct(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("direct", context)
+        assert "DIRECT mode" in result
+        assert "no leading question" in result
+
+    def test_includes_mode_instructions_hint(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("hint", context)
+        assert "HINT mode" in result
+
+    def test_includes_mode_instructions_guided(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("guided", context)
+        assert "GUIDED mode" in result
+        assert "step 1" in result.lower()
 
     def test_includes_mode_instructions_doubt(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
@@ -124,7 +147,7 @@ class TestGetSystemPrompt:
 
     def test_handles_missing_profile_gracefully(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "Not specified" in result
 
     def test_includes_episodes_in_prompt(self):
@@ -140,7 +163,7 @@ class TestGetSystemPrompt:
                 }
             ],
         }
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "Arrays session" in result
         assert "two-pointer" in result
 
@@ -151,17 +174,17 @@ class TestGetSystemPrompt:
             "episodes": [],
             "topic": "Graphs",
         }
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "Graphs" in result
 
     def test_tone_instructions_injected(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
-        assert "TOUGH" in get_system_prompt("topic", context, "tough")
-        assert "ENCOURAGING" in get_system_prompt("topic", context, "encouraging")
+        assert "TOUGH" in get_system_prompt("socratic", context, "tough")
+        assert "ENCOURAGING" in get_system_prompt("socratic", context, "encouraging")
 
     def test_tone_defaults_to_balanced(self):
         # No tone arg → balanced voice, and the placeholder is always filled.
-        result = get_system_prompt("topic", context={"profile": {}, "skill": {}, "episodes": []})
+        result = get_system_prompt("socratic", context={"profile": {}, "skill": {}, "episodes": []})
         assert "BALANCED" in result
         assert "{{tone_instructions}}" not in result
 
@@ -179,32 +202,51 @@ class TestStyleNotes:
             "skill": {},
             "episodes": [],
         }
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "How to Teach This User" in result
         assert "Use code examples, be concise" in result
 
     def test_no_style_notes_placeholder(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "(none observed yet)" in result
         assert "{{style_notes}}" not in result
 
 
 class TestAttemptFirstTeaching:
-    """Issue #12: attempt-first rule + mastery hint ladder in doubt/topic, not evaluation."""
+    """Issue #12/#50: whether to withhold the answer is decided per-mode (by
+    the router), not by one blanket static rule — DIRECT must be exempt from
+    the "make them attempt first" framing, or it defeats its own purpose."""
 
-    def test_global_attempt_first_rule_present(self):
+    def test_no_blanket_attempt_first_rule(self):
+        """The old universal "do not hand over the full answer" static rule
+        is gone — mode-specific instructions are the authority now."""
         context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("topic", context)
-        assert "attempt-first" in result.lower()
-        assert "do not hand over the full answer" in result.lower()
+        result = get_system_prompt("socratic", context)
+        assert "do not hand over the full answer" not in result.lower()
 
-    def test_topic_and_doubt_have_hint_ladder(self):
+    def test_direct_mode_has_no_attempt_first_framing(self):
+        """DIRECT must answer immediately — the static block explicitly
+        carves it out from the gradual-reveal framing."""
         context = {"profile": {}, "skill": {}, "episodes": []}
-        for mode in ("topic", "doubt"):
+        result = get_system_prompt("direct", context)
+        assert "answer immediately" in result.lower()
+        assert "no leading question" in result.lower()
+
+    def test_socratic_hint_guided_show_current_level(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        for mode in ("socratic", "hint", "guided"):
             result = get_system_prompt(mode, context)
-            assert "ladder" in result.lower(), mode
-            assert "Current Level" in result, mode  # ladder fades with the shown level
+            assert "Current Level" in result, mode
+        assert "leading question" in get_system_prompt("socratic", context).lower()
+
+    def test_doubt_mode_still_has_hint_ladder(self):
+        """doubt mode's own instructions (untouched by the routing change)
+        still carry the fading hint ladder."""
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("doubt", context)
+        assert "ladder" in result.lower()
+        assert "Current Level" in result
 
     def test_evaluation_stays_hint_free(self):
         # Evaluation must NOT gain a hint ladder — it withholds hints by design.
@@ -225,14 +267,14 @@ class TestUploadedDocuments:
                 {"text": "5 years Python at Acme", "metadata": {"filename": "resume.pdf"}},
             ],
         }
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "resume.pdf" in result
         assert "5 years Python at Acme" in result
         assert "{{documents}}" not in result
 
     def test_no_documents_placeholder(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("topic", context)
+        result = get_system_prompt("socratic", context)
         assert "(no uploaded documents)" in result
 
 

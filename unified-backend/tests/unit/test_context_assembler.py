@@ -166,7 +166,11 @@ def _mock_topics_returning(docs):
 
 
 class TestRecentTopicSummaries:
-    """Verify _recent_topic_summaries reads SummaryBlocks from topics_col (issue #40)."""
+    """Verify _recent_topic_summaries reads the topic's rolling summary from
+    topics_col (issue #40, #23). Under the rolling-topic-summary model at most
+    one summary entry exists per topic, so this returns 0 or 1 items scoped to
+    the current topic only — no limit, no cross-topic fill (see
+    .kiro/specs/rolling-topic-summary)."""
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_exception(self):
@@ -174,12 +178,18 @@ class TestRecentTopicSummaries:
         col = MagicMock()
         col.aggregate.side_effect = Exception("DB down")
         with patch("app.services.context_assembler.topics_col", return_value=col):
-            result = await _recent_topic_summaries("u1", "Graphs", limit=3)
+            result = await _recent_topic_summaries("u1", "Graphs")
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_extracts_summary_blocks_across_topics(self):
-        """Summary blocks embedded in each topic's messages are flattened out."""
+    async def test_returns_empty_when_topic_is_none(self):
+        """No current topic means nothing to scope the query to — return []."""
+        result = await _recent_topic_summaries("u1", None)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_extracts_the_topics_rolling_summary(self):
+        """The current topic's single summary block is returned."""
         docs = [
             {
                 "title": "Graphs",
@@ -190,35 +200,19 @@ class TestRecentTopicSummaries:
                     }
                 ],
             },
-            {"title": "Empty Topic", "summaryBlocks": []},
         ]
         col = _mock_topics_returning(docs)
         with patch("app.services.context_assembler.topics_col", return_value=col):
-            result = await _recent_topic_summaries("u1", None, limit=3)
+            result = await _recent_topic_summaries("u1", "Graphs")
         assert len(result) == 1
         assert result[0]["topic"] == "Graphs"
         assert result[0]["summary"] == "Covered BFS and DFS"
 
     @pytest.mark.asyncio
-    async def test_prefers_same_topic_then_recent(self):
-        """Same-topic summaries come first, then other recent ones; limit respected."""
-        docs = [
-            {
-                "title": "Trees",
-                "summaryBlocks": [
-                    {"summary": "newest other", "compactedRange": {"to": "2024-01-15T00:00:00Z"}}
-                ],
-            },
-            {
-                "title": "Graphs",
-                "summaryBlocks": [
-                    {"summary": "mid same", "compactedRange": {"to": "2024-01-12T00:00:00Z"}},
-                    {"summary": "old same", "compactedRange": {"to": "2024-01-05T00:00:00Z"}},
-                ],
-            },
-        ]
+    async def test_returns_empty_when_topic_has_no_summary_yet(self):
+        """A topic that hasn't compacted yet has no summary blocks — empty list."""
+        docs = [{"title": "Graphs", "summaryBlocks": []}]
         col = _mock_topics_returning(docs)
         with patch("app.services.context_assembler.topics_col", return_value=col):
-            result = await _recent_topic_summaries("u1", "Graphs", limit=2)
-        assert [e["topic"] for e in result] == ["Graphs", "Graphs"]
-        assert len(result) == 2
+            result = await _recent_topic_summaries("u1", "Graphs")
+        assert result == []

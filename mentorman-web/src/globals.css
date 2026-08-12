@@ -453,9 +453,11 @@ body {
   text-transform: uppercase; letter-spacing: 0.1em; margin: 0 4px 6px;
   display: flex; align-items: center; gap: 6px;
 }
+.msg .who-name { font-size: 12px; font-weight: 650; color: var(--fg-dim); letter-spacing: 0.04em; }
+.msg .who-sep { color: var(--border); font-size: 10px; }
 .msg .who .av {
-  width: 16px; height: 16px; border-radius: 5px; display: grid; place-items: center;
-  font-size: 9px; font-weight: 700;
+  width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center;
+  font-size: 9.5px; font-weight: 700;
 }
 .msg.mentor .who .av { background: var(--accent); color: var(--accent-ink-2); }
 .msg.user .who .av { background: var(--card-3); color: var(--muted-2); border: 1px solid var(--border); }

@@ -19,6 +19,10 @@ class SkillNode(BaseModel):
     gap: str = "medium"
     signals: Optional[dict] = None
     prerequisites: list[str] = []  # topics to master first, for planning sequencing (issue #10)
+    # True once current_level reflects a real measurement (diagnostic verdict,
+    # skill checkpoint, or session-end extraction) rather than the onboarding
+    # placeholder guess. Gates the cold-start diagnostic mode (issue #50).
+    assessed: bool = False
 
 
 class SkillUpdate(BaseModel):

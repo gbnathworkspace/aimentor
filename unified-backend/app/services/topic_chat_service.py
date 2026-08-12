@@ -12,10 +12,12 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-import anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.config.settings import get_settings
-from app.services import context_assembler
+from app.models.session import SessionSkillUpdate
+from app.services import context_assembler, mode_router, skill_graph_repo
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
@@ -29,6 +31,39 @@ LLM_TIMEOUT_SECONDS = 45  # web search adds a server-side fetch round trip
 # ponytail: flat cap on searches-per-turn, cost control until usage data justifies
 # a per-mode or per-user budget.
 WEB_SEARCH_MAX_USES = 3
+
+_WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": WEB_SEARCH_MAX_USES}
+
+# Bound onto the mentor call only in DIAGNOSTIC mode. tool_choice stays
+# "auto" (not forced) so the same response can carry both the reply text
+# and — once there's enough signal — this verdict, in one LLM call instead
+# of a separate diagnostic-agent round trip.
+_DIAGNOSTIC_VERDICT_TOOL = {
+    "name": "record_diagnostic_verdict",
+    "description": (
+        "Record the assessed skill level once the user's answer gives enough "
+        "signal to judge it. Do not call this until you're confident — it's "
+        "fine to ask another question first and call it on a later turn."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "new_level": {
+                "type": "string",
+                "enum": ["beginner", "intermediate", "advanced", "expert"],
+            },
+            "gap": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Estimated gap to required proficiency: 0 = none, 100 = huge.",
+            },
+            "weak_areas": {"type": "array", "items": {"type": "string"}},
+            "strong_areas": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["new_level", "gap", "weak_areas", "strong_areas"],
+    },
+}
 
 # Compaction only extracts skill updates as a side effect of reclaiming context
 # space — a topic that never grows big enough to compact never touches the skill
@@ -111,13 +146,34 @@ class TopicChatService:
         # Step 3: Assemble L1/L2/L3 context (Req 4.3)
         context = await context_assembler.assemble(user_id, topic_title, content)
 
+        # Step 3b: Route "topic" turns to a specific teaching tactic instead of
+        # one static block that used to give contradictory instructions (probe
+        # first vs explain first vs attempt-first, all at once, no priority).
+        # doubt/planning/evaluation are untouched — they're session-level
+        # intents, not per-message tactics.
+        effective_mode = mode
+        instruction_override = ""
+        if mode == "topic":
+            decision = await mode_router.route_user_turn(
+                query=content,
+                skill=context.get("skill") or {},
+                recent_messages=existing_messages,
+                profile=context.get("profile"),
+            )
+            effective_mode = decision.selected_mode.value.lower()
+            instruction_override = decision.instruction_override
+
         # Step 4: Build system prompt
-        system_prompt = get_system_prompt(mode, context)
+        system_prompt = get_system_prompt(effective_mode, context)
+        if instruction_override:
+            system_prompt += f"\n\n## This Turn's Specific Instruction\n{instruction_override}"
+
+        include_diagnostic_tool = effective_mode == "diagnostic"
 
         # Step 5: Call LLM with 30s timeout (Req 4.3)
         try:
-            assistant_content = await asyncio.wait_for(
-                self._call_llm(system_prompt, messages),
+            ai_message = await asyncio.wait_for(
+                self._call_llm(system_prompt, messages, include_diagnostic_tool),
                 timeout=LLM_TIMEOUT_SECONDS,
             )
         except (asyncio.TimeoutError, Exception) as e:
@@ -127,7 +183,19 @@ class TopicChatService:
                 "error": "The assistant response could not be generated. Please try again."
             }
 
-        # Step 5b: Strip any quick-reply suggestions block out of the visible text
+        assistant_content = "".join(
+            block.get("text", "")
+            for block in ai_message.content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+
+        # Step 5b: If the mentor recorded a diagnostic verdict this turn, write
+        # it to the skill graph now — this is what flips assessed=True and
+        # stops the diagnostic gate from firing on the next message.
+        if include_diagnostic_tool:
+            await self._apply_diagnostic_verdict(ai_message, user_id, topic_title)
+
+        # Step 5c: Strip any quick-reply suggestions block out of the visible text
         # before persisting — the stored history (and future LLM calls) should
         # never see the raw JSON fence.
         clean_content, suggestions = extract_suggestions(assistant_content)
@@ -143,6 +211,7 @@ class TopicChatService:
             "content": clean_content,
             "timestamp": datetime.now(timezone.utc),
             "systemPrompt": system_prompt,
+            "mode": effective_mode,
         }
         await self._topic_service.append_message(topic_id, user_id, assistant_msg)
 
@@ -150,23 +219,23 @@ class TopicChatService:
         total_messages = len(messages) + 1  # messages already includes the user turn
         asyncio.create_task(self._post_turn_hook(topic_id, user_id, total_messages))
 
-        return {"response": clean_content, "suggestions": suggestions}
+        return {"response": clean_content, "suggestions": suggestions, "mode": effective_mode}
 
-    async def _call_llm(self, system_prompt: str, messages: list[dict]) -> str:
-        """Call Anthropic Claude with the assembled context.
+    async def _call_llm(
+        self, system_prompt: str, messages: list[dict], include_diagnostic_tool: bool
+    ) -> AIMessage:
+        """Call Claude (via LangChain) with the assembled context.
 
-        Converts topic messages (including SummaryBlocks) into the format
-        expected by the Anthropic API.
-
-        Returns the assistant's response text.
+        Converts topic messages (including SummaryBlocks) into LangChain
+        message objects. Returns the raw AIMessage — callers read `.content`
+        for reply text and `.tool_calls` for any tool invocations (verified
+        against a live call: cache_control blocks, adaptive thinking, and
+        output_config effort=high all pass through langchain-anthropic
+        unchanged; tool_choice="auto" returns text and a tool call in the
+        same response when the model has both).
         """
         settings = get_settings()
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-        # Convert messages to Anthropic format
-        api_messages = self._format_messages_for_api(messages)
-
-        response = await client.messages.create(
+        llm = ChatAnthropic(
             model="claude-sonnet-5",
             # ponytail: 4096 was too tight for diagram-heavy replies — adaptive
             # thinking shares this budget with output, and an SVG diagram plus
@@ -175,20 +244,55 @@ class TopicChatService:
             max_tokens=8192,
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
-            system=self._build_system_blocks(system_prompt),
-            messages=api_messages,
-            tools=[{
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": WEB_SEARCH_MAX_USES,
-            }],
+            api_key=settings.ANTHROPIC_API_KEY,
         )
 
-        # Web search interleaves text/server_tool_use/web_search_tool_result
-        # blocks — the real answer can follow a search, so every text block
-        # must be joined, not just the first (see conversation for the bug
-        # this replaced: `next(...)` silently truncated post-search answers).
-        return "".join(block.text for block in response.content if block.type == "text")
+        tools = [_WEB_SEARCH_TOOL]
+        if include_diagnostic_tool:
+            tools.append(_DIAGNOSTIC_VERDICT_TOOL)
+
+        # tool_choice stays "auto" (not forced) — DIAGNOSTIC-mode turns need to
+        # ask a question with no tool call at all until there's enough signal.
+        bound = llm.bind_tools(tools, tool_choice="auto")
+
+        return await bound.ainvoke(self._to_langchain_messages(system_prompt, messages))
+
+    def _to_langchain_messages(self, system_prompt: str, messages: list[dict]) -> list:
+        """Convert the assembled system prompt + topic messages into LangChain
+        message objects, reusing the existing cache-block and role-mapping
+        logic unchanged."""
+        api_messages = self._format_messages_for_api(messages)
+        lc_messages: list = [SystemMessage(content=self._build_system_blocks(system_prompt))]
+        for m in api_messages:
+            msg_cls = HumanMessage if m["role"] == "user" else AIMessage
+            lc_messages.append(msg_cls(content=m["content"]))
+        return lc_messages
+
+    async def _apply_diagnostic_verdict(
+        self, ai_message: AIMessage, user_id: str, topic_title: str
+    ) -> None:
+        """If the mentor called record_diagnostic_verdict this turn, write it
+        to the skill graph. Best-effort: a failure here shouldn't break the
+        turn — the periodic skill checkpoint (extract_skill_updates_only)
+        is the backstop if this write is lost.
+        """
+        verdict = next(
+            (tc for tc in ai_message.tool_calls if tc["name"] == "record_diagnostic_verdict"),
+            None,
+        )
+        if not verdict:
+            return
+
+        try:
+            skill_update = SessionSkillUpdate(topic=topic_title, **verdict["args"])
+            await skill_graph_repo.apply_update(user_id, skill_update)
+        except Exception as e:
+            logger.warning(
+                "Diagnostic verdict write failed for topic=%s user=%s: %s",
+                topic_title,
+                user_id,
+                str(e),
+            )
 
     def _build_system_blocks(self, system_prompt: str) -> list[dict]:
         """Split the system prompt into three cache blocks, most-stable first,

@@ -70,14 +70,13 @@ async def assemble(user_id: str, topic: str, query: str) -> dict:
     # L3 — Episodic memory: most-recent ended-session summaries (optional).
     # `query` is reserved for future vector ranking (#5); recency works today
     # without an Atlas vector index. Degrades to [] on failure.
-    # Two sources: legacy Sessions (sessions_col) and Topics (topics_col) —
-    # Topics never write to sessions_col, so relying on sessions_col alone
-    # leaves Topics users with zero episodic memory (issue #40). Topics-
-    # sourced summaries lead since Topics is the now-primary chat surface.
-    episodes = (
-        await _recent_topic_summaries(user_id, topic, limit=3)
-        + await _recent_episodes(user_id, topic, limit=3)
-    )[:3]
+    # Two sources: the topic's own rolling summary (topics_col — at most one
+    # per topic, see rolling-topic-summary spec) and cross-topic Sessions
+    # (sessions_col, issue #40). The topic's own summary leads since it's
+    # always maximally relevant to the current conversation; the remaining
+    # slots are filled from cross-topic episodic history.
+    topic_summary = await _recent_topic_summaries(user_id, topic)
+    episodes = (topic_summary + await _recent_episodes(user_id, topic, limit=3))[:3]
 
     # Uploaded documents (résumé / LeetCode etc. ingested at onboarding).
     # Without this read the ingest pipeline is orphaned — files embedded, never used (issue #4).
@@ -159,18 +158,22 @@ async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:
         return []
 
 
-async def _recent_topic_summaries(user_id: str, topic: str | None, limit: int) -> list:
-    """Fetch the user's most recent Topic compaction summaries (issue #40).
+async def _recent_topic_summaries(user_id: str, topic: str | None) -> list:
+    """Fetch the current topic's rolling summary, if one exists (issue #40, #23).
 
-    Topics store their data in topics_col, not sessions_col — SummaryBlocks
-    live inline in each topic's `messages` array (type == "summary"). Uses
-    an aggregation $filter so large topics aren't pulled over the wire whole.
-    Same-topic summaries are preferred, then filled with other recent ones,
-    matching _recent_episodes' behavior. [] on any failure.
+    Topics store their data in topics_col, not sessions_col — the rolling
+    summary lives inline in the topic's `messages` array (type == "summary").
+    Under the rolling-topic-summary model, at most one such entry can exist
+    per topic (see .kiro/specs/rolling-topic-summary), so this returns a 0-
+    or 1-item list — no count limit needed. Remaining episode slots are
+    filled cross-topic by `_recent_episodes`. [] on any failure.
     """
+    if not topic:
+        return []
+
     try:
         pipeline = [
-            {"$match": {"userId": user_id}},
+            {"$match": {"userId": user_id, "title": topic}},
             {
                 "$project": {
                     "_id": 0,
@@ -185,7 +188,7 @@ async def _recent_topic_summaries(user_id: str, topic: str | None, limit: int) -
                 }
             },
         ]
-        topic_docs = await topics_col().aggregate(pipeline).to_list(length=100)
+        topic_docs = await topics_col().aggregate(pipeline).to_list(length=1)
     except Exception as e:
         logger.warning(
             "Recent-topic-summary fetch failed for user=%s: %s. Returning empty episodes.",
@@ -194,28 +197,25 @@ async def _recent_topic_summaries(user_id: str, topic: str | None, limit: int) -
         )
         return []
 
-    episodes = []
-    for doc in topic_docs:
-        title = doc.get("title", "")
-        for block in doc.get("summaryBlocks") or []:
-            date = (block.get("compactedRange") or {}).get("to") or block.get("createdAt")
-            episodes.append(
-                {
-                    "title": title,
-                    "topic": title,
-                    "summary": block.get("summary", ""),
-                    "date": date.isoformat() if hasattr(date, "isoformat") else str(date or ""),
-                }
-            )
+    if not topic_docs:
+        return []
 
-    episodes.sort(key=lambda e: e["date"], reverse=True)
+    doc = topic_docs[0]
+    blocks = doc.get("summaryBlocks") or []
+    if not blocks:
+        return []
 
-    if topic:
-        same = [e for e in episodes if e["topic"] == topic]
-        others = [e for e in episodes if e["topic"] != topic]
-        episodes = same + others
-
-    return episodes[:limit]
+    block = blocks[0]  # at most one exists under the rolling-summary model
+    title = doc.get("title", "")
+    date = (block.get("compactedRange") or {}).get("to") or block.get("createdAt")
+    return [
+        {
+            "title": title,
+            "topic": title,
+            "summary": block.get("summary", ""),
+            "date": date.isoformat() if hasattr(date, "isoformat") else str(date or ""),
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------

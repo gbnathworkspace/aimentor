@@ -80,7 +80,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
         if (cancelled) return;
         const parts: string[] = [];
         if (p.learning_context) parts.push(`learning context: ${p.learning_context}`);
-        if (p.learning_context_detail?.label) parts.push(`situation: ${p.learning_context_detail.label}`);
+        if (p.learning_context_detail?.situations?.[0]) parts.push(`situation: ${p.learning_context_detail.situations[0]}`);
         if (p.focus_areas?.length) parts.push(`focus areas: ${p.focus_areas.join(', ')}`);
         if (p.explanation_style) parts.push(`explanation style: ${p.explanation_style}`);
         if (p.challenge_tolerance) parts.push(`challenge tolerance: ${p.challenge_tolerance}`);
@@ -495,13 +495,12 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     ? profile.learning_context_detail.contexts
     : [profile?.learning_context ?? 'self_directed'];
 
-  // learning_context / label mirror the first entry of their list — plenty of
-  // backend readers still take those single-value fields.
+  // learning_context mirrors the first entry of contexts[] — plenty of
+  // backend readers still take that single-value field.
   const saveSituations = (situations: string[]) => save({
     learning_context_detail: {
       learning_context: profile?.learning_context ?? 'self_directed',
       contexts: contextValues,
-      label: situations[0] ?? null,
       situations,
       structured: profile?.learning_context_detail?.structured ?? {},
     },
@@ -512,7 +511,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     learning_context_detail: {
       learning_context: contexts[0] ?? 'self_directed',
       contexts,
-      label: profile?.learning_context_detail?.label ?? null,
       situations: profile?.learning_context_detail?.situations ?? [],
       structured: profile?.learning_context_detail?.structured ?? {},
     },

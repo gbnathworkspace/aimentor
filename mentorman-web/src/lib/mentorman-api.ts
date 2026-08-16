@@ -12,7 +12,6 @@
 export interface LearningContextDetail {
   learning_context: string;
   contexts?: string[];
-  label?: string | null;
   situations?: string[];
   structured?: Record<string, string>;
 }

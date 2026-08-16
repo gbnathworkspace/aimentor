@@ -192,10 +192,6 @@ def _format_learning_context(profile: dict[str, Any]) -> str:
         contexts = [str(profile["learning_context"])]
 
     situations = list(detail.get("situations") or [])
-    # `label` predates `situations` (onboarding/memory_editor still write it).
-    label = detail.get("label")
-    if label and label not in situations:
-        situations.insert(0, label)
 
     parts = [p for p in (", ".join(contexts), "; ".join(situations)) if p]
     return " — ".join(parts) if parts else "Not specified"

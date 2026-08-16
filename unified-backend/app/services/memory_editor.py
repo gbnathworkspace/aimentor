@@ -32,7 +32,6 @@ _FALLBACK_SUMMARY = "Couldn't match that to anything in your profile — try bei
 def _build_prompt(profile: dict[str, Any], message: str) -> str:
     current = {
         "learning_context": profile.get("learning_context"),
-        "learning_context_label": (profile.get("learning_context_detail") or {}).get("label"),
         "focus_areas": profile.get("focus_areas") or [],
         "explanation_style": profile.get("explanation_style", "hint-first"),
         "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
@@ -126,8 +125,7 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
         update["learning_context_detail"] = {
             "learning_context": ctx,
             "contexts": existing_detail.get("contexts") or [ctx],
-            "label": label,
-            # The new label joins the injected list rather than replacing it —
+            # The new entry joins the injected list rather than replacing it —
             # this write used to drop `situations` entirely.
             "situations": [label, *situations][:20],
         }

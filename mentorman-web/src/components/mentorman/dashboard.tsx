@@ -146,7 +146,7 @@ export function Dashboard({ onStartTopic, profile }: {
     : 0;
 
   const focusAreas = profile?.focus_areas ?? [];
-  const contextLabel = profile?.learning_context_detail?.label;
+  const contextLabel = profile?.learning_context_detail?.situations?.[0];
   const heroTitle = contextLabel || (focusAreas.length ? focusAreas.join(', ') : '—');
   const heroSub = contextLabel && focusAreas.length ? focusAreas.join(', ') : null;
 

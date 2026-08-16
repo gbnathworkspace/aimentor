@@ -139,7 +139,7 @@ export function buildGoalCards(profile: CoreProfile | null | undefined, topicTit
 
   const ctx = profile?.learning_context;
   if (ctx && ctx !== 'self_directed') {
-    const label = profile?.learning_context_detail?.label || humanize(ctx);
+    const label = profile?.learning_context_detail?.situations?.[0] || humanize(ctx);
     cards.push({
       key: 'context',
       title: label,

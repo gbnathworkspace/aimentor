@@ -130,7 +130,8 @@ async def onboarding_complete(
         learning_context=body.learning_context,
         learning_context_detail=(
             LearningContextDetail(
-                learning_context=body.learning_context, label=body.learning_context_label
+                learning_context=body.learning_context,
+                situations=[body.learning_context_label],
             )
             if body.learning_context_label
             else None
@@ -221,14 +222,19 @@ async def onboarding_complete_deferred(
     if body.learning_context is not None:
         updates["learning_context"] = body.learning_context.value
     if body.learning_context_label is not None and resolved_context:
+        existing_detail = existing.get("learning_context_detail") or {}
+        prior_situations = [
+            s for s in (existing_detail.get("situations") or [])
+            if s != body.learning_context_label
+        ]
         updates["learning_context_detail"] = {
             "learning_context": (
                 body.learning_context.value
                 if body.learning_context
                 else resolved_context
             ),
-            "label": body.learning_context_label,
-            "structured": {},
+            "contexts": existing_detail.get("contexts") or [],
+            "situations": [body.learning_context_label, *prior_situations][:20],
         }
     if body.focus_areas is not None:
         updates["focus_areas"] = body.focus_areas

@@ -36,7 +36,7 @@ class TestGetSystemPrompt:
         context = {
             "profile": {
                 "learning_context": "job_interview",
-                "learning_context_detail": {"label": "Crack FAANG"},
+                "learning_context_detail": {"situations": ["Crack FAANG"]},
                 "focus_areas": ["System Design", "DSA"],
                 "explanation_style": "answer-first",
                 "challenge_tolerance": "high",
@@ -60,7 +60,6 @@ class TestGetSystemPrompt:
                 "learning_context": "job_interview",
                 "learning_context_detail": {
                     "contexts": ["job_interview", "competitive_test"],
-                    "label": "interviewing for staff roles",
                     "situations": [
                         "interviewing for staff roles",
                         "leading the backend rewrite",
@@ -73,7 +72,6 @@ class TestGetSystemPrompt:
         result = get_system_prompt("planning", context)
         assert "job_interview, competitive_test" in result
         assert "leading the backend rewrite" in result
-        # `label` duplicates situations[0] — injected once, not twice
         assert result.count("interviewing for staff roles") == 1
 
     def test_interpolates_skill_fields(self):

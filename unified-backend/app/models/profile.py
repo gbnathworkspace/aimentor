@@ -25,11 +25,10 @@ class LearningContextDetail(BaseModel):
     # exam). `learning_context` above stays the first entry so the many readers
     # of that single-value field keep working. All of these reach the prompt.
     contexts: list[str] = Field(default_factory=list, max_length=20)
-    label: Optional[str] = Field(default=None, max_length=120)
-    # e.g. "senior backend, Mumbai, 20 LPA" / "CBSE 9th standard, science stream"
     # Free-text situations (e.g. "leading the backend rewrite", "interviewing for
-    # senior roles). All are injected — none is "active". FIFO-capped, newest
-    # first; `label` mirrors the first entry for readers that predate this list.
+    # senior roles"; e.g. "senior backend, Mumbai, 20 LPA" / "CBSE 9th standard,
+    # science stream"). All are injected — none is "active". FIFO-capped, newest
+    # first.
     situations: list[str] = Field(default_factory=list, max_length=20)
 
 

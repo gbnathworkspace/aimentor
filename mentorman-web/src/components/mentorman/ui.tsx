@@ -450,7 +450,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
   };
 
   const { logout } = useAuth();
-  const focusSummary = profile?.learning_context_detail?.label
+  const focusSummary = profile?.learning_context_detail?.situations?.[0]
     || (profile?.focus_areas?.length ? profile.focus_areas.join(', ') : null);
   const displayName = userName || profile?.email?.split('@')[0] || 'You';
   const initial = displayName[0]?.toUpperCase() ?? 'Y';

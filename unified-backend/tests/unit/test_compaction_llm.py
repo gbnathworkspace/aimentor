@@ -211,7 +211,7 @@ class TestCallSummarizationLLM:
             },
         ]
 
-    def _make_tool_use_response(self, summary: str, skill_updates: list):
+    def _make_tool_use_response(self, summary: str, skill_updates: list, taught_concepts: list | None = None):
         """Create a mock Anthropic response with a tool_use block."""
         tool_block = MagicMock()
         tool_block.type = "tool_use"
@@ -220,6 +220,8 @@ class TestCallSummarizationLLM:
             "summary": summary,
             "skill_updates": skill_updates,
         }
+        if taught_concepts is not None:
+            tool_block.input["taught_concepts"] = taught_concepts
 
         response = MagicMock()
         response.content = [tool_block]
@@ -283,6 +285,38 @@ class TestCallSummarizationLLM:
         assert result["skill_updates"][0]["topic"] == "Graph Algorithms"
         assert result["skill_updates"][0]["new_level"] == "intermediate"
         assert result["skill_updates"][0]["gap"] == 35
+
+    @pytest.mark.asyncio
+    async def test_parses_taught_concepts(self, service, sample_messages):
+        """taught_concepts entries are extracted, stripped, and non-strings dropped."""
+        mock_response = self._make_tool_use_response(
+            "Student learned BFS.",
+            [],
+            taught_concepts=["  BFS graph traversal  ", "", 42, "DFS backtracking"],
+        )
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.compaction_service.get_settings") as mock_settings:
+                mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
+                result = await service._call_summarization_llm(sample_messages)
+
+        assert result["taught_concepts"] == ["BFS graph traversal", "DFS backtracking"]
+
+    @pytest.mark.asyncio
+    async def test_missing_taught_concepts_defaults_empty(self, service, sample_messages):
+        """Backward-compat: a response with no taught_concepts key parses to []."""
+        mock_response = self._make_tool_use_response("Student learned BFS.", [])
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.compaction_service.get_settings") as mock_settings:
+                mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
+                result = await service._call_summarization_llm(sample_messages)
+
+        assert result["taught_concepts"] == []
 
     @pytest.mark.asyncio
     async def test_no_skill_updates_returns_none(self, service, sample_messages):

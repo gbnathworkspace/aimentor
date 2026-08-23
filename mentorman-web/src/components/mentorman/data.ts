@@ -9,6 +9,7 @@ export type MessageItem = {
   tone?: 'strong' | 'partial' | 'weak';
   _id?: string;
   suggestions?: { title: string; description: string }[];
+  attachments?: { name: string; size: number }[];
   summaryBlock?: {
     type: 'summary';
     id: string;

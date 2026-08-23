@@ -1919,6 +1919,37 @@ body {
   font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em;
   color: var(--muted); text-transform: uppercase;
 }
+/* classify_relevance-scoped L1 memory badge — marks a card as derived from
+   the user's profile (focus areas / learning context), not a generic option
+   like "Just revising" or "Something else". */
+.goal-card-l1-badge { display: inline-flex; color: var(--accent); flex-shrink: 0; }
+
+/* L1MemoryModal — read-only listing of a topic's full l1_scope, grouped by
+   verdict. Reuses .skip-dialog/.sw-head/.sw-title/.sw-sub/.sw-goal-note. */
+.l1-memory-dialog { width: 460px; max-height: 80vh; overflow-y: auto; }
+.l1-memory-groups { display: flex; flex-direction: column; gap: 18px; }
+.l1-memory-group { border-radius: var(--r-sm); transition: background-color .12s ease, outline-color .12s ease; }
+/* Only Relevant/Not relevant accept drops (see DROP_TARGETS) — the dashed
+   outline only appears on those while something is dragged over them. */
+.l1-memory-group--dragover { background: var(--accent-weak); outline: 1.5px dashed var(--accent-line); outline-offset: 2px; }
+.l1-memory-group-title {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 8px; padding: 2px 0;
+  background: none; border: none; width: 100%; text-align: left; cursor: pointer;
+  font-family: var(--mono); font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.l1-memory-group-title svg { flex-shrink: 0; transition: transform .12s ease; }
+.l1-memory-group-title--relevant { color: var(--accent); }
+.l1-memory-group-title--uncertain { color: var(--warn); }
+.l1-memory-group-title--irrelevant { color: var(--danger); }
+.l1-memory-group-count {
+  font-family: var(--sans); font-size: 10.5px; font-weight: 600; letter-spacing: 0;
+  color: var(--muted); text-transform: none;
+}
+.l1-memory-row { padding: 8px 4px; border-top: 1px solid var(--border); cursor: grab; }
+.l1-memory-row:active { cursor: grabbing; }
+.l1-memory-group > .l1-memory-row:first-of-type { border-top: none; }
+.l1-memory-row-text { font-size: 13px; color: var(--fg); line-height: 1.4; }
+.l1-memory-row-reason { margin-top: 3px; font-size: 11.5px; color: var(--muted-2); line-height: 1.4; }
 .goal-card-desc { font-size: 12px; color: var(--muted-2); line-height: 1.45; }
 
 .sw-goal-footer { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
@@ -1937,6 +1968,14 @@ body {
 .sw-status { font-size: 12.5px; color: var(--muted-2); padding: 10px 0; line-height: 1.5; }
 .sw-status-error { color: var(--danger); }
 .sw-back { margin-top: 10px; height: 30px; font-size: 12px; }
+
+/* Uncertain l1_scope resolution — a single-question variant of .sw-dialog,
+   narrower since it holds one line of text and three buttons, not a form. */
+.urm-dialog { width: 420px; }
+.urm-situation { font-size: 14px; font-weight: 550; color: var(--fg); line-height: 1.5; margin: 0 0 8px; }
+.urm-reason { font-size: 12px; color: var(--muted-2); line-height: 1.5; margin: 0 0 18px; }
+.urm-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.urm-actions .btn { min-width: 110px; height: 34px; font-size: 12.5px; }
 
 /* ===========================================================
    ListModal — terminal-style editor for the free-text profile
@@ -2183,6 +2222,11 @@ body {
 /* "Sounds like React" routing popup, shown when a message matches a topic. */
 .welcome-route { width: 420px; }
 .welcome-route-actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+
+/* Ambiguous-match variant: up to 4 candidate topics stacked as full-width
+   rows instead of the single-guess row of buttons above. */
+.welcome-route-actions-list { flex-direction: column; }
+.welcome-route-candidate { justify-content: flex-start; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The 40px nowrap headline and the 2-up grid both need an out at narrow
    widths — the design is specified at desktop only. */

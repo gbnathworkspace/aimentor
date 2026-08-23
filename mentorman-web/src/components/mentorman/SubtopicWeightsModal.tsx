@@ -77,6 +77,10 @@ interface GoalCard {
    *  can't go through the work_evidence path: one line of intent has nothing to
    *  mention-count, so it always reads as sparse and collapses to equal split. */
   intent: string;
+  /** True for cards built from the profile, filtered through classify_relevance's
+   *  scoped L1 memory (l1Scope) — shows a badge so it's visually distinct from
+   *  "Just revising"/"Something else", which aren't L1-derived. */
+  fromL1Scope?: boolean;
 }
 
 const CONTEXT_TAGS: Record<string, string> = {
@@ -116,13 +120,37 @@ export function isNearDuplicate(a: string, b: string): boolean {
 // hatch back to pasting specific work evidence.
 //
 // Focus areas are profile-wide, not topic-scoped, so they may only partly
-// overlap the topic being weighted — the copy says "overlaps with" rather than
-// implying the area is about this topic, and the LLM judges the actual overlap.
-export function buildGoalCards(profile: CoreProfile | null | undefined, topicTitle: string): GoalCard[] {
+// overlap the topic being weighted — classify_relevance judges the actual
+// overlap (see .kiro/specs/topic-scoping), and `l1Scope` here is that
+// judgment's cached output: any focus area / context label it marked
+// "irrelevant" to this topic is dropped from the picker entirely rather
+// than offered as a goal that doesn't apply. Entries with no verdict yet
+// (l1Scope empty/absent) or judged "uncertain"/"relevant" are kept —
+// callers are expected to resolve "uncertain" ones before this runs (see
+// chat.tsx's openWeights gate).
+export function buildGoalCards(
+  profile: CoreProfile | null | undefined,
+  topicTitle: string,
+  l1Scope?: { situation: string; verdict: string }[] | null,
+): GoalCard[] {
   const cards: GoalCard[] = [];
+  const verdictBySituation = new Map((l1Scope ?? []).map((e) => [e.situation, e.verdict]));
+  const irrelevant = new Set(
+    (l1Scope ?? []).filter((e) => e.verdict === 'irrelevant').map((e) => e.situation)
+  );
+
+  // classify_relevance's verdict ranks the survivors — a confirmed "relevant"
+  // judgment goes first so the top card (the one auto-selected below) is the
+  // one the classifier actually vouched for, not just whichever happened to
+  // be first in the user's raw focus_areas list.
+  const candidates = (profile?.focus_areas ?? []).filter((a) => !irrelevant.has(a));
+  const ranked = [...candidates].sort((a, b) => {
+    const score = (v?: string) => (v === 'relevant' ? 0 : v === undefined ? 1 : 2); // relevant, unjudged, uncertain
+    return score(verdictBySituation.get(a)) - score(verdictBySituation.get(b));
+  });
 
   const areas: string[] = [];
-  for (const area of profile?.focus_areas ?? []) {
+  for (const area of ranked) {
     if (areas.some((kept) => isNearDuplicate(kept, area))) continue;
     areas.push(area);
     if (areas.length === 2) break;
@@ -134,19 +162,23 @@ export function buildGoalCards(profile: CoreProfile | null | undefined, topicTit
       title: area,
       tag: 'YOUR FOCUS',
       intent: `My current focus is: ${area}. Prioritize the parts of ${topicTitle} that genuinely support that work.`,
+      fromL1Scope: true,
     });
   }
 
   const ctx = profile?.learning_context;
   if (ctx && ctx !== 'self_directed') {
     const label = profile?.learning_context_detail?.label || humanize(ctx);
-    cards.push({
-      key: 'context',
-      title: label,
-      tag: CONTEXT_TAGS[ctx] ?? 'GOAL',
-      description: 'Lean toward what usually comes up when preparing for this.',
-      intent: `I'm preparing for: ${label}. Prioritize the parts of ${topicTitle} that typically matter most for that.`,
-    });
+    if (!irrelevant.has(label)) {
+      cards.push({
+        key: 'context',
+        title: label,
+        tag: CONTEXT_TAGS[ctx] ?? 'GOAL',
+        description: 'Lean toward what usually comes up when preparing for this.',
+        intent: `I'm preparing for: ${label}. Prioritize the parts of ${topicTitle} that typically matter most for that.`,
+        fromL1Scope: true,
+      });
+    }
   }
 
   cards.push({
@@ -166,9 +198,12 @@ export interface SubtopicWeightsModalProps {
   topicId?: string | null;
   topicTitle?: string;
   profile?: CoreProfile | null;
+  /** The topic's l1_scope — filters out focus areas/context judged
+   *  irrelevant to this topic. Omit or pass [] to show every card unfiltered. */
+  l1Scope?: { situation: string; verdict: string }[] | null;
 }
 
-export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profile }: SubtopicWeightsModalProps) {
+export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profile, l1Scope }: SubtopicWeightsModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const [phase, setPhase] = useState<Phase>('setup');
@@ -178,8 +213,8 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
 
   const goalCards = useMemo(
-    () => buildGoalCards(profile, topicTitle || 'this topic'),
-    [profile, topicTitle]
+    () => buildGoalCards(profile, topicTitle || 'this topic', l1Scope),
+    [profile, topicTitle, l1Scope]
   );
 
   // 'custom' is just another option in the same radiogroup — keeping it in the
@@ -243,6 +278,16 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
     if (open) dialogRef.current?.focus();
     else reset();
   }, [open, reset]);
+
+  // Auto-select the top classify_relevance-ranked card so opening the modal
+  // is a confirm-or-change decision, not a blank pick — goalCards[0] is
+  // always defined (falls back to "Just revising" when nothing else
+  // qualifies), so this never lands on "custom".
+  useEffect(() => {
+    if (open && selectedGoal === null && goalCards[0]) {
+      setSelectedGoal(goalCards[0].key);
+    }
+  }, [open, goalCards, selectedGoal]);
 
   const runQuery = useCallback(async (
     pairwiseComparisons?: [string, string][],
@@ -342,11 +387,11 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
         {phase === 'setup' && (
           <div className="sw-setup">
             <div className="sw-label" id="sw-goal-label">
-              Choose a goal <span className="sw-required">(required)</span>
+              Confirm your goal <span className="sw-required">(required)</span>
             </div>
             {hasFocusCards && (
               <p className="sw-goal-note">
-                Your focus areas come from your profile, so they may only partly overlap {topicTitle || 'this topic'}.
+                We've pre-selected the focus area classify_relevance ranked highest for {topicTitle || 'this topic'} — change it below if that's not what you meant.
               </p>
             )}
             <div className="goal-card-list" role="radiogroup" aria-labelledby="sw-goal-label">
@@ -367,6 +412,11 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
                     <span className={`goal-card-radio${checked ? ' goal-card-radio--active' : ''}`} />
                     <span className="goal-card-body">
                       <span className="goal-card-title-row">
+                        {card.fromL1Scope && (
+                          <span className="goal-card-l1-badge" title="From your scoped L1 memory — ranked relevant to this topic by classify_relevance">
+                            <Icon name="target" size={11} />
+                          </span>
+                        )}
                         <span className="goal-card-title">{card.title}</span>
                         <span className="goal-card-tag">{card.tag}</span>
                       </span>
@@ -399,7 +449,11 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
               >
                 Start preparing →
               </button>
-              {!canStart && <span className="sw-goal-hint-text">Pick one to continue</span>}
+              {!canStart && (
+                <span className="sw-goal-hint-text">
+                  {selectedGoal === 'custom' ? 'Paste some evidence to continue' : 'Pick one to continue'}
+                </span>
+              )}
             </div>
           </div>
         )}

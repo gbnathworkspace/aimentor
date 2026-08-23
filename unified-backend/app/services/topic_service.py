@@ -11,7 +11,10 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from app.config.database import compaction_events_col, immediate_contexts_col, topics_col
+from app.config.database import compaction_events_col, immediate_contexts_col, profiles_col, topics_col
+from app.services.l1_scope import (
+    classify_relevance, compute_profile_stamp, extract_focus_areas, extract_situations_and_contexts,
+)
 from app.services.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,19 @@ MAX_MESSAGE_LENGTH = 50_000
 
 MAX_RETRIES = 3
 """Maximum optimistic concurrency retries before aborting."""
+
+
+def _merge_l1_scope(old: list[dict] | None, fresh: list[dict]) -> list[dict]:
+    """Carry forward any user-resolved judgment for matching text instead of
+    overwriting it with a fresh classify_relevance call — a manual answer
+    should survive an unrelated profile edit, not get silently re-asked.
+    """
+    resolved_by_text = {e["situation"]: e for e in (old or []) if e.get("userResolved")}
+    return [
+        dict(resolved_by_text[entry["situation"]]) if entry["situation"] in resolved_by_text
+        else {**entry, "userResolved": False}
+        for entry in fresh
+    ]
 
 
 class TopicService:
@@ -96,7 +112,76 @@ class TopicService:
         )
         if not topic:
             raise HTTPException(status_code=404, detail="Topic not found")
+        return await self._ensure_l1_scope(topic, user_id)
+
+    async def _ensure_l1_scope(self, topic: dict, user_id: str) -> dict:
+        """Lazily (re)compute and cache l1_scope on the topic doc.
+
+        Single choke point for every read path (GET /topic/{id} and the
+        pre-turn fetch in TopicChatService.handle_message both call
+        get_topic()) — see .kiro/specs/topic-scoping/design.md. A stamp
+        mismatch or missing l1_scope triggers a recompute; a failed
+        classify_relevance call is logged and the topic is returned
+        unchanged, so a failed attempt never looks fresh (no partial write).
+        """
+        profile = await profiles_col().find_one({"user_id": user_id}, {"_id": 0})
+        if not profile:
+            return topic
+
+        situations, contexts = extract_situations_and_contexts(profile)
+        focus_areas = extract_focus_areas(profile)
+        current_stamp = compute_profile_stamp(situations, contexts, focus_areas)
+
+        if topic.get("profileStamp") == current_stamp and "l1_scope" in topic:
+            return topic
+
+        try:
+            fresh = await classify_relevance(topic["title"], situations, contexts, focus_areas)
+        except Exception:
+            logger.exception(
+                "classify_relevance failed for topic=%s user=%s",
+                topic.get("topicId"), user_id,
+            )
+            return topic
+
+        l1_scope = _merge_l1_scope(topic.get("l1_scope"), fresh)
+        await topics_col().update_one(
+            {"topicId": topic["topicId"], "userId": user_id},
+            {"$set": {"l1_scope": l1_scope, "profileStamp": current_stamp}},
+        )
+        topic["l1_scope"] = l1_scope
+        topic["profileStamp"] = current_stamp
         return topic
+
+    async def resolve_l1_scope_item(
+        self, topic_id: str, user_id: str, situation: str, relevant: bool
+    ) -> None:
+        """Persist a user's manual answer for one l1_scope entry (normally
+        one judged "uncertain"). Marks it userResolved so a later
+        profile-triggered recompute carries the answer forward instead of
+        re-asking — see _merge_l1_scope.
+
+        Raises:
+            HTTPException: 404 if the topic isn't found/owned, or if no
+                l1_scope entry matches `situation`.
+        """
+        topic = await topics_col().find_one(
+            {"topicId": topic_id, "userId": user_id}, {"_id": 0},
+        )
+        if not topic:
+            raise HTTPException(status_code=404, detail="Topic not found")
+
+        l1_scope = topic.get("l1_scope") or []
+        entry = next((e for e in l1_scope if e.get("situation") == situation), None)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="No matching l1_scope entry")
+
+        entry["verdict"] = "relevant" if relevant else "irrelevant"
+        entry["userResolved"] = True
+        await topics_col().update_one(
+            {"topicId": topic_id, "userId": user_id},
+            {"$set": {"l1_scope": l1_scope}},
+        )
 
     # --- Listing ---
 

@@ -1,5 +1,17 @@
 # Requirements Document
 
+> **Status note (2026-08-23):** `unified-backend/app/services/topic_router.py`
+> shipped as an interim implementation of this same problem — a Haiku
+> forced-tool_use call (MATCH / AMBIGUOUS / NEW), including a 4-candidate
+> AMBIGUOUS pick-list not covered by Requirement 4.3 below. It directly
+> contradicts this doc's "Out of scope: An LLM tiebreak or LLM classification
+> of any kind" decision. Kept deliberately: it works, it's tested
+> (`tests/unit/test_topic_router.py`, `tests/evals/test_topic_router.py`), and
+> replacing it wasn't asked for. This spec remains the intended embedding-based
+> replacement — reconcile the two (migrate to embeddings, or update this doc to
+> ratify the LLM approach and drop/relocate the AMBIGUOUS requirement) before
+> starting implementation here.
+
 ## Introduction
 
 The welcome screen lets a user type without picking a topic. When they send,

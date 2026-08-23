@@ -13,6 +13,8 @@ export interface AttachmentPreviewProps {
   onRemove: (index: number) => void;
   onClearAll: () => void;
   onToggleSkipReview: () => void;
+  /** Whether to show the "Skip Review" toggle — irrelevant where there's no review step. Default true. */
+  showSkipReview?: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export function AttachmentPreview({
   onRemove,
   onClearAll,
   onToggleSkipReview,
+  showSkipReview = true,
 }: AttachmentPreviewProps) {
   if (fileResults.length === 0 && !warning) return null;
 
@@ -71,23 +74,25 @@ export function AttachmentPreview({
           ))}
 
           <div className="chat-document-actions-row">
-            <label
-              className="chat-document-skip-review"
-              title="When enabled, extracted facts are written directly to your profile without review"
-            >
-              <input
-                type="checkbox"
-                className="chat-document-skip-review-input"
-                checked={skipReview}
-                onChange={onToggleSkipReview}
-                disabled={disabled}
-                aria-label="Skip Review"
-              />
-              <span className="chat-document-skip-review-track" aria-hidden="true">
-                <span className="chat-document-skip-review-thumb" />
-              </span>
-              <span className="chat-document-skip-review-label">Skip Review</span>
-            </label>
+            {showSkipReview && (
+              <label
+                className="chat-document-skip-review"
+                title="When enabled, extracted facts are written directly to your profile without review"
+              >
+                <input
+                  type="checkbox"
+                  className="chat-document-skip-review-input"
+                  checked={skipReview}
+                  onChange={onToggleSkipReview}
+                  disabled={disabled}
+                  aria-label="Skip Review"
+                />
+                <span className="chat-document-skip-review-track" aria-hidden="true">
+                  <span className="chat-document-skip-review-thumb" />
+                </span>
+                <span className="chat-document-skip-review-label">Skip Review</span>
+              </label>
+            )}
 
             <button
               type="button"

@@ -9,6 +9,7 @@ from app.services.prompt_store import (
     _format_episodes,
     _format_focus_areas,
     _format_learning_context,
+    _format_taught_concepts,
     _interpolate,
 )
 
@@ -294,6 +295,33 @@ class TestFormatFocusAreas:
         ]
         result = _format_focus_areas(profile, l1_scope=l1_scope)
         assert "Kubernetes" in result
+
+
+class TestFormatTaughtConcepts:
+    """TS-1: episodic memory of specific things taught in this topic."""
+
+    def test_empty_or_none_shows_placeholder(self):
+        assert _format_taught_concepts(None) == "(nothing recorded yet)"
+        assert _format_taught_concepts([]) == "(nothing recorded yet)"
+
+    def test_formats_as_bullet_list(self):
+        result = _format_taught_concepts(["Signed URLs in CloudFront", "Signed Cookies in CloudFront"])
+        assert result == "- Signed URLs in CloudFront\n- Signed Cookies in CloudFront"
+
+    def test_injected_into_prompt(self):
+        context = {
+            "profile": {}, "skill": {}, "episodes": [],
+            "taught_concepts": ["Signed URLs in CloudFront"],
+        }
+        result = get_system_prompt("socratic", context)
+        assert "Already Taught In This Topic" in result
+        assert "Signed URLs in CloudFront" in result
+
+    def test_no_taught_concepts_placeholder_in_prompt(self):
+        context = {"profile": {}, "skill": {}, "episodes": []}
+        result = get_system_prompt("socratic", context)
+        assert "(nothing recorded yet)" in result
+        assert "{{taught_concepts}}" not in result
 
 
 class TestStyleNotes:

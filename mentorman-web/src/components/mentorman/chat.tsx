@@ -9,13 +9,25 @@ import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
 import { SubtopicWeightsModal } from './SubtopicWeightsModal';
+import { UncertainRelevanceModal, type UncertainL1ScopeItem } from './UncertainRelevanceModal';
+import { L1MemoryModal } from './L1MemoryModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
-import { AttachButton } from './chat/AttachButton';
 import { AttachmentPreview } from './chat/AttachmentPreview';
-import { DocumentUploadFlow } from './chat/DocumentUploadFlow';
+import { AttachButton } from './chat/AttachButton';
 import { useAttachedFiles } from '@/lib/chat-upload/useAttachedFiles';
-import type { UseDocumentUploadFlowReturn } from '@/lib/chat-upload/useDocumentUploadFlow';
 import type { CoreProfile } from '@/lib/mentorman-api';
+
+// Must match _META_MARKER in unified-backend/app/services/topic_chat_service.py
+const META_MARKER = '\x00META\x00';
+
+// One entry from a topic's l1_scope (situations + contexts + focus_areas
+// judged against the topic — see .kiro/specs/topic-scoping).
+export interface L1ScopeEntry {
+  situation: string;
+  verdict: 'relevant' | 'irrelevant' | 'uncertain';
+  reason: string;
+  userResolved?: boolean;
+}
 
 function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
   return (
@@ -83,24 +95,22 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onDocumentSubmit }: {
+function Composer({ mode, tone, onSend, busy, disabled, sessionId, onAttachSend }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
-  onUpload?: (file: File) => void;
   /** Session ID for the document uploader. */
   sessionId?: string;
-  /** Called when Send submits staged document attachments. */
-  onDocumentSubmit?: (payload: { files: File[]; skipReview: boolean; message?: string }) => void;
+  /** Called when Send submits staged file attachments alongside the typed text. */
+  onAttachSend?: (text: string, files: File[]) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const attachment = useAttachedFiles();
-  const canAttach = !!(sessionId && onDocumentSubmit);
+  const canAttach = !!(sessionId && onAttachSend);
 
   const grow = () => {
     const el = ref.current;
@@ -108,8 +118,8 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onD
   };
 
   // One Send action for both text and attachments — if valid files are
-  // staged, send submits the document-upload job (with the typed text as
-  // optional context); otherwise it sends the typed text as a chat message.
+  // staged, they're folded straight into this turn's chat message; otherwise
+  // it's a plain text send.
   const hasDocsToSend = canAttach && attachment.hasValidFiles;
   const canSubmit = !!val.trim() || hasDocsToSend;
 
@@ -120,7 +130,7 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onD
     if (ref.current) ref.current.style.height = 'auto';
     if (hasDocsToSend) {
       const validFiles = attachment.fileResults.filter(r => r.error === null).map(r => r.file);
-      onDocumentSubmit!({ files: validFiles, skipReview: attachment.skipReview, message: text || undefined });
+      onAttachSend!(text, validFiles);
       attachment.clearAll();
     } else {
       onSend(text);
@@ -144,6 +154,7 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onD
               onRemove={attachment.removeFile}
               onClearAll={attachment.clearAll}
               onToggleSkipReview={attachment.toggleSkipReview}
+              showSkipReview={false}
             />
           )}
           <textarea
@@ -157,28 +168,6 @@ function Composer({ mode, tone, onSend, busy, disabled, onUpload, sessionId, onD
           />
           <div className="composer-tools">
             <button className="tool-btn" title="Code block">{'</>'}</button>
-            {onUpload && (
-              <>
-                <button
-                  className="tool-btn"
-                  title="Upload résumé (PDF) or LeetCode (CSV)"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Icon name="upload" size={13} />
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.csv"
-                  style={{ display: 'none' }}
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    e.target.value = ''; // allow re-selecting the same file
-                    if (file) onUpload(file);
-                  }}
-                />
-              </>
-            )}
             {canAttach && <AttachButton disabled={disabled} onSelect={attachment.selectFiles} />}
             <div className="spacer" />
             <button className="send-btn" onClick={submit} disabled={busy || disabled || !canSubmit} title="Send">
@@ -258,11 +247,20 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<QuickReplyOption[]>([]);
   const [topicTitle, setTopicTitle] = useState<string>('New Topic');
+  // Full l1_scope for the current topic (situations + contexts + focus_areas,
+  // see .kiro/specs/topic-scoping) — source of truth for both the topic-open
+  // uncertain-items modal and SubtopicWeightsModal's goal-card filtering.
+  const [l1Scope, setL1Scope] = useState<L1ScopeEntry[]>([]);
+  // l1_scope entries the classifier judged "uncertain" and the user hasn't
+  // resolved yet — surfaced via UncertainRelevanceModal on topic open.
+  const [uncertainItems, setUncertainItems] = useState<UncertainL1ScopeItem[]>([]);
+  const [showUncertainModal, setShowUncertainModal] = useState(false);
+  // Same modal, reused to gate opening the weights picker specifically on
+  // uncertain focus_areas/context that its goal cards would otherwise use.
+  const [weightsGateItems, setWeightsGateItems] = useState<UncertainL1ScopeItem[]>([]);
+  const [showWeightsGate, setShowWeightsGate] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const greetedRef = useRef(false);
-
-  // Document upload flow controller ref — shared between DocumentUploadFlow and Composer
-  const docFlowRef = useRef<UseDocumentUploadFlowReturn | null>(null);
 
   // Load messages when topicId changes
   useEffect(() => {
@@ -278,11 +276,18 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     setBusy(true);
     greetedRef.current = true;
 
-    // Fetch topic metadata for title
+    // Fetch topic metadata for title + surface any unresolved uncertain
+    // l1_scope entries (see .kiro/specs/topic-scoping).
     fetch(`/api/topic/${topicId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!cancelled && data?.title) setTopicTitle(data.title);
+        if (cancelled) return;
+        if (data?.title) setTopicTitle(data.title);
+        const scope: L1ScopeEntry[] = data?.l1_scope || [];
+        setL1Scope(scope);
+        const uncertain = scope.filter(e => e.verdict === 'uncertain' && !e.userResolved);
+        setUncertainItems(uncertain);
+        setShowUncertainModal(uncertain.length > 0);
       })
       .catch(() => {});
 
@@ -332,26 +337,59 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs, busy, suggestions]);
 
-  // Send a message to the topic
-  const send = useCallback(async (text: string) => {
+  // Send a message to the topic. The backend streams the reply token-by-token
+  // (a mentor turn can loop on a tool call before answering, so total time
+  // can exceed what feels good for a single blocking wait — streaming is
+  // what keeps it feeling responsive). A trailing "\x00META\x00{...}" marker
+  // carries {mode, suggestions}, since those can't ride on headers once the
+  // stream (and its 200) has already started.
+  const send = useCallback(async (
+    text: string,
+    opts?: { attachments?: { name: string; size: number }[]; backendContent?: string },
+  ) => {
     if (!topicId) return;
-    const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now() };
+    const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now(), attachments: opts?.attachments };
     setMsgs(prev => [...prev, userMsg]);
     setSuggestions([]);
     setBusy(true);
+    const mentorId = 'm' + Date.now();
     try {
       const res = await fetch(`/api/topic/${topicId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: text, mode }),
+        body: JSON.stringify({ content: opts?.backendContent ?? text, mode }),
       });
-      const data = await res.json();
-      if (data.error) {
-        setMsgs(prev => [...prev, { who: 'mentor', text: data.error, _id: 'err' + Date.now() }]);
-      } else {
-        setMsgs(prev => [...prev, { who: 'mentor', text: data.response, label: data.mode ? String(data.mode).toUpperCase() : undefined, _id: 'm' + Date.now() }]);
-        setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+
+      // Pre-flight rejections (e.g. topic at capacity) come back as plain
+      // JSON before any streaming starts — everything else is a stream.
+      if (res.headers.get('content-type')?.includes('application/json')) {
+        const data = await res.json();
+        setMsgs(prev => [...prev, { who: 'mentor', text: data.error || "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() }]);
+        return;
       }
+      if (!res.body) throw new Error('No response body');
+
+      setMsgs(prev => [...prev, { who: 'mentor', text: '', _id: mentorId }]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let full = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        full += decoder.decode(value, { stream: true });
+        const metaIdx = full.indexOf(META_MARKER);
+        const visible = metaIdx === -1 ? full : full.slice(0, metaIdx);
+        setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visible } : m));
+      }
+
+      const metaIdx = full.indexOf(META_MARKER);
+      const visibleFinal = metaIdx === -1 ? full : full.slice(0, metaIdx);
+      let meta: { mode?: string; suggestions?: QuickReplyOption[] } | null = null;
+      if (metaIdx !== -1) {
+        try { meta = JSON.parse(full.slice(metaIdx + META_MARKER.length)); } catch { /* malformed trailer — show text as-is */ }
+      }
+      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
+      setSuggestions(Array.isArray(meta?.suggestions) ? meta.suggestions : []);
     } catch {
       setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() }]);
     } finally {
@@ -411,49 +449,59 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     send(text);
   }, [topicId, pendingFirst, loadedFor, send]);
 
-  // Upload a résumé/LeetCode file mid-chat; status surfaces as a system
-  // message in the thread (server accepts PDF/CSV, extracts in the
-  // background, and context_assembler reads the chunks into every mentor
-  // call afterward — see app/routers/ingest.py).
-  const uploadFile = useCallback(async (file: File) => {
-    const sysId = 'sys' + Date.now();
-    setMsgs(prev => [...prev, { who: 'system', text: `Uploading ${file.name}…`, _id: sysId }]);
-    try {
-      const fd = new FormData();
-      fd.append('files', file);
-      const res = await fetch('/api/ingest', { method: 'POST', body: fd });
-      const text = !res.ok
-        ? (res.status === 400 ? 'Unsupported file — use a PDF or CSV.' : 'Upload failed — try again.')
-        : `${file.name} uploaded — your mentor will use it shortly.`;
-      setMsgs(prev => prev.map(m => (m._id === sysId ? { ...m, text } : m)));
-    } catch {
-      setMsgs(prev => prev.map(m => (m._id === sysId ? { ...m, text: 'Connection error — try again.' } : m)));
-    }
-  }, []);
+  // Persist the user's answer for one uncertain l1_scope entry. Updates local
+  // state optimistically so the weights-modal gate (below) and any later
+  // reopen within this session see the resolved verdict immediately, without
+  // waiting on the network round trip. The POST itself is fire-and-forget —
+  // a failure just means it gets asked again next topic open, same as skipping.
+  const resolveUncertain = useCallback((situation: string, relevant: boolean) => {
+    if (!topicId) return;
+    setL1Scope(prev => prev.map(e => e.situation === situation
+      ? { ...e, verdict: relevant ? 'relevant' as const : 'irrelevant' as const, userResolved: true }
+      : e
+    ));
+    fetch(`/api/topic/${topicId}/l1-scope/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ situation, relevant }),
+    }).catch(() => {});
+  }, [topicId]);
 
-  /**
-   * Handle multi-format document upload submission from the composer's Send.
-   * Delegates to the DocumentUploadFlow controller (non-blocking).
-   * The chat session remains fully functional during upload processing.
-   * Requirements: 5.3, 6.1, 9.3
-   */
-  const handleDocumentSubmit = useCallback((payload: { files: File[]; skipReview: boolean; message?: string }) => {
-    if (!docFlowRef.current) return;
-    // Add a system message to acknowledge the upload started
-    const fileNames = payload.files.map(f => f.name).join(', ');
-    setMsgs(prev => [...prev, {
-      who: 'system',
-      text: `Uploading ${payload.files.length} document${payload.files.length > 1 ? 's' : ''}: ${fileNames}`,
-      _id: 'doc-upload-' + Date.now(),
-    }]);
-    // Trigger the upload flow — this is async but non-blocking for chat
-    docFlowRef.current.submitUpload(payload);
-  }, []);
+  // Fold attached files straight into this turn's chat message — no upload
+  // job, no profile-extraction/proposal pipeline. The file's text becomes
+  // part of what the mentor reads for this one turn; the chat bubble shows
+  // the typed text (if any) plus a plain file chip, same as any chat app.
+  const handleAttachSend = useCallback((text: string, files: File[]) => {
+    const attachments = files.map(f => ({ name: f.name, size: f.size }));
+    Promise.all(files.map(f => f.text().catch(() => ''))).then(contents => {
+      const fileBlocks = files.map((f, i) => `[Attached file: ${f.name}]\n${contents[i]}`).join('\n\n');
+      const backendContent = [text, fileBlocks].filter(Boolean).join('\n\n');
+      send(text, { attachments, backendContent });
+    });
+  }, [send]);
 
   // Export the full topic transcript (all messages, not just the loaded page)
   // as a local .md file for offline analysis.
   const [exporting, setExporting] = useState(false);
   const [showWeights, setShowWeights] = useState(false);
+  const [showL1Memory, setShowL1Memory] = useState(false);
+
+  // Opening the weights picker: if any focus_area/context text its goal
+  // cards would use is still "uncertain" and unresolved, resolve those
+  // right here first — same modal as topic-open, scoped to just this
+  // subset — instead of silently proceeding with a stale/unfiltered card.
+  const openWeights = useCallback(() => {
+    const cardTexts = new Set(
+      [...(profile?.focus_areas ?? []), profile?.learning_context_detail?.label].filter(Boolean) as string[]
+    );
+    const pending = l1Scope.filter(e => e.verdict === 'uncertain' && !e.userResolved && cardTexts.has(e.situation));
+    if (pending.length > 0) {
+      setWeightsGateItems(pending);
+      setShowWeightsGate(true);
+    } else {
+      setShowWeights(true);
+    }
+  }, [profile, l1Scope]);
   const exportTranscript = useCallback(async () => {
     if (!topicId || exporting) return;
     setExporting(true);
@@ -544,9 +592,17 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           {false && <ToneBar tone={tone} onTone={setTone} />}
           <button
             className="icon-btn"
+            title="Scoped User Memory for this topic"
+            aria-label="Scoped User Memory for this topic"
+            onClick={() => setShowL1Memory(true)}
+          >
+            <Icon name="target" />
+          </button>
+          <button
+            className="icon-btn"
             title="Where should you focus?"
             aria-label="Where should you focus?"
-            onClick={() => setShowWeights(true)}
+            onClick={openWeights}
           >
             <Icon name="chart" />
           </button>
@@ -569,6 +625,31 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         topicId={topicId}
         topicTitle={topicTitle}
         profile={profile}
+        l1Scope={l1Scope}
+      />
+
+      <L1MemoryModal
+        open={showL1Memory}
+        topicTitle={topicTitle}
+        entries={l1Scope}
+        onResolve={resolveUncertain}
+        onClose={() => setShowL1Memory(false)}
+      />
+
+      <UncertainRelevanceModal
+        open={showUncertainModal}
+        topicTitle={topicTitle}
+        items={uncertainItems}
+        onAnswer={resolveUncertain}
+        onClose={() => setShowUncertainModal(false)}
+      />
+
+      <UncertainRelevanceModal
+        open={showWeightsGate}
+        topicTitle={topicTitle}
+        items={weightsGateItems}
+        onAnswer={resolveUncertain}
+        onClose={() => { setShowWeightsGate(false); setShowWeights(true); }}
       />
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
@@ -608,15 +689,6 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
               />
             </div>
           )}
-
-          {/* Document upload flow — renders inline, non-blocking (Req: 9.3) */}
-          {topicId && (
-            <DocumentUploadFlow
-              sessionId={topicId}
-              existingStyleNotes={profile?.style_notes}
-              flowRef={docFlowRef}
-            />
-          )}
         </div>
       </div>
 
@@ -625,9 +697,8 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         tone={tone}
         onSend={send}
         busy={busy}
-        onUpload={uploadFile}
         sessionId={topicId ?? undefined}
-        onDocumentSubmit={topicId ? handleDocumentSubmit : undefined}
+        onAttachSend={topicId ? handleAttachSend : undefined}
       />
     </div>
   );

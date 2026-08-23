@@ -6,6 +6,7 @@ import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
 import { SpeakButton } from './SpeakButton';
 import { MODES, type Session } from './data';
+import { truncateFilename, formatFileSize } from '@/lib/chat-upload/utils';
 import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
 
 // ---- tiny inline markdown: **bold**, *italic*, ~~strike~~, `code`, [links](url) ----
@@ -318,12 +319,23 @@ export function ModeBadge({ label, inline }: { label: string; inline?: boolean }
 
 export function Bubble({ who, item, delay }: {
   who: 'mentor' | 'user';
-  item: { text: string; label?: string; code?: string; nudge?: string };
+  item: { text: string; label?: string; code?: string; nudge?: string; attachments?: { name: string; size: number }[] };
   delay?: number;
 }) {
   return (
     <Msg who={who} delay={delay} modeLabel={item.label}>
       <div className="bubble">
+        {item.attachments && item.attachments.length > 0 && (
+          <div className="chat-document-preview-area" role="list" aria-label="Attached files">
+            {item.attachments.map((a, i) => (
+              <div key={`${a.name}-${i}`} className="chat-document-chip" role="listitem">
+                <Icon name="doc" size={13} />
+                <span className="chat-document-chip-name" title={a.name}>{truncateFilename(a.name)}</span>
+                <span className="chat-document-chip-size">{formatFileSize(a.size)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {fmt(item.text)}
         {item.nudge && (
           <div className="nudge">

@@ -81,10 +81,24 @@ _COMPACTION_TOOL_SCHEMA = {
                 },
                 "description": "Skill updates detected from the conversation. Empty array if no progress detected.",
             },
+            "taught_concepts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Specific things the mentor taught in this excerpt, one concise "
+                    "entry per concept — e.g. 'Signed URLs/Cookies in CloudFront using "
+                    "the direct-URL method'. Only concepts actually explained, not ones "
+                    "merely mentioned in passing. Empty array if nothing new was taught."
+                ),
+            },
         },
-        "required": ["summary", "skill_updates"],
+        "required": ["summary", "skill_updates", "taught_concepts"],
     },
 }
+
+MAX_TAUGHT_CONCEPTS = 30
+"""Cap on a topic's stored taughtConcepts list — oldest dropped past this,
+same bounded-growth intent as the rolling summary itself."""
 
 # Valid skill levels for validation
 _VALID_LEVELS = {"beginner", "intermediate", "advanced", "expert"}
@@ -464,9 +478,15 @@ class CompactionService:
         # Validate each skill update
         validated_updates = _validate_skill_updates(raw_skill_updates)
 
+        raw_taught_concepts = tool_input.get("taught_concepts", [])
+        if not isinstance(raw_taught_concepts, list):
+            raw_taught_concepts = []
+        taught_concepts = [c.strip() for c in raw_taught_concepts if isinstance(c, str) and c.strip()]
+
         return {
             "summary": summary.strip(),
             "skill_updates": validated_updates if validated_updates else None,
+            "taught_concepts": taught_concepts,
         }
 
     # ------------------------------------------------------------------
@@ -503,6 +523,38 @@ class CompactionService:
         skill_updates = llm_result.get("skill_updates")
         if skill_updates:
             await self._apply_skill_updates(user_id, skill_updates)
+
+        taught_concepts = llm_result.get("taught_concepts")
+        if taught_concepts:
+            await self._apply_taught_concepts(topic_id, user_id, taught_concepts)
+
+    async def _apply_taught_concepts(self, topic_id: str, user_id: str, new_concepts: list[str]) -> None:
+        """Append newly-taught concepts onto the topic's `taughtConcepts` list —
+        an L3 (episodic memory) record, same tier as the cross-topic session
+        summaries in `_recent_episodes`, just topic-scoped and concept-grained
+        instead of cross-topic and narrative-grained (TS-1: episodic memory
+        should say what was previously taught in a topic, not just a vague
+        session narrative). Deduplicated, capped at MAX_TAUGHT_CONCEPTS
+        (oldest dropped first). Best-effort: a failure here never blocks the
+        summary/skill-update write it rides alongside.
+        """
+        try:
+            topic = await topics_col().find_one(
+                {"topicId": topic_id, "userId": user_id}, {"_id": 0, "taughtConcepts": 1},
+            )
+            if topic is None:
+                return
+            existing = topic.get("taughtConcepts") or []
+            merged = existing + [c for c in new_concepts if c not in existing]
+            merged = merged[-MAX_TAUGHT_CONCEPTS:]
+            await topics_col().update_one(
+                {"topicId": topic_id, "userId": user_id},
+                {"$set": {"taughtConcepts": merged}},
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to persist taught_concepts for topic=%s user=%s: %s", topic_id, user_id, e,
+            )
 
     async def compact(self, topic_id: str, user_id: str) -> dict | None:
         """Execute compaction for a topic.
@@ -718,6 +770,7 @@ class CompactionService:
         llm_result = await self._call_merge_summarization_llm(existing_summary, selected)
         summary_text = llm_result["summary"]
         skill_updates = llm_result.get("skill_updates")
+        taught_concepts = llm_result.get("taught_concepts")
 
         # Step 5: Build the replacement RollingSummary — reuse the existing
         # block's id/from-timestamp when merging, so this is a replace-in-place,
@@ -827,6 +880,9 @@ class CompactionService:
         # compactions is never re-derived (Req 5.1, 5.2).
         if skill_updates:
             await self._apply_skill_updates(user_id, skill_updates)
+
+        if taught_concepts:
+            await self._apply_taught_concepts(topic_id, user_id, taught_concepts)
 
         logger.info(
             "Compaction completed — topic=%s, messages_compacted=%d, tokens_reclaimed=%d",

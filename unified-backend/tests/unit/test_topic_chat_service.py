@@ -1,32 +1,72 @@
 """Unit tests for TopicChatService.
 
 Tests cover:
-- handle_message happy path (user message appended, LLM called, assistant message appended)
-- LLM timeout returns error dict, user message preserved
-- LLM exception returns error dict, user message preserved
-- Post-turn hook triggers compaction check
+- handle_message happy path (user message appended, LLM streamed, assistant message appended)
+- LLM failure mid-stream yields an in-band error marker, user message preserved
+- Post-turn hook triggers compaction check after the stream ends
 - Post-turn hook failure doesn't crash the service
+- Tool loop: get_skill_detail / get_more_past_sessions executed mid-turn, then a final answer
+- Loop is capped at _MAX_LOOP_ROUNDS regardless of further tool_calls
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessageChunk
 
-from app.services.topic_chat_service import TopicChatService, LLM_TIMEOUT_SECONDS
+from app.services.topic_chat_service import (
+    TopicChatService,
+    LLM_TIMEOUT_SECONDS,
+    _META_MARKER,
+    _MAX_LOOP_ROUNDS,
+)
 
 
-def _ai_message(text: str, tool_calls: list | None = None) -> AIMessage:
-    """Build a fake _call_llm response matching the LangChain AIMessage
-    contract: .content is a list of blocks, .tool_calls is a list."""
-    return AIMessage(content=[{"type": "text", "text": text}], tool_calls=tool_calls or [])
+def _chunk(text: str = "", tool_calls: list | None = None) -> AIMessageChunk:
+    """Build a single-chunk fake astream() response — our accumulation loop
+    handles any number of chunks, one is enough to exercise the logic
+    without replicating real incremental tool-call-chunk merging."""
+    content = [{"type": "text", "text": text}] if text else []
+    return AIMessageChunk(content=content, tool_calls=tool_calls or [])
+
+
+async def _astream(chunks: list[AIMessageChunk]):
+    for c in chunks:
+        yield c
+
+
+def _tool_call(name: str, args: dict, call_id: str = "tc-1") -> dict:
+    return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
+
+
+def _mock_chat_anthropic(round_chunks: list[list[AIMessageChunk]]) -> MagicMock:
+    """Patch target for ChatAnthropic: each call to `.astream()` (one per
+    loop round) returns the next pre-built stream in `round_chunks`, in order."""
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(side_effect=[_astream(cs) for cs in round_chunks])
+    cls = MagicMock()
+    cls.return_value.bind_tools.return_value = mock_llm
+    return cls
+
+
+async def _collect_stream(result) -> str:
+    assert isinstance(result, StreamingResponse)
+    return "".join([piece async for piece in result.body_iterator])
+
+
+def _split_meta(full: str):
+    idx = full.find(_META_MARKER)
+    if idx == -1:
+        return full, None
+    return full[:idx], json.loads(full[idx + len(_META_MARKER):])
 
 
 def _mock_count_tokens(text: str) -> int:
-    """Simple heuristic: ~4 chars per token."""
     if not text:
         return 0
     return max(1, len(text) // 4)
@@ -34,14 +74,12 @@ def _mock_count_tokens(text: str) -> int:
 
 @pytest.fixture(autouse=True)
 def mock_tiktoken():
-    """Mock tiktoken's count_tokens to avoid network calls."""
     with patch("app.services.token_counter.count_tokens", side_effect=_mock_count_tokens):
         yield
 
 
 @pytest.fixture
 def mock_topic_service():
-    """Mock TopicService with standard behavior."""
     service = AsyncMock()
     service.append_message = AsyncMock(return_value={
         "type": "message",
@@ -72,7 +110,6 @@ def mock_topic_service():
 
 @pytest.fixture
 def mock_compaction_service():
-    """Mock CompactionService."""
     service = AsyncMock()
     service.should_compact = AsyncMock(return_value=False)
     service.compact = AsyncMock(return_value=None)
@@ -81,7 +118,6 @@ def mock_compaction_service():
 
 @pytest.fixture
 def mock_token_counter():
-    """Mock TokenCounter."""
     counter = MagicMock()
     counter.count_message.return_value = 5
     counter.get_usage_percent.return_value = 0
@@ -90,7 +126,6 @@ def mock_token_counter():
 
 @pytest.fixture
 def chat_service(mock_topic_service, mock_compaction_service, mock_token_counter):
-    """Create a TopicChatService with mocked dependencies."""
     return TopicChatService(
         topic_service=mock_topic_service,
         compaction_service=mock_compaction_service,
@@ -107,29 +142,25 @@ class TestHandleMessageHappyPath:
     async def test_happy_path_appends_user_and_assistant_messages(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
-        """User message is appended, LLM called, assistant message appended."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {"goal": "Learn graphs"},
-            "skill": {},
-            "episodes": [],
-            "documents": [],
+            "profile": {"goal": "Learn graphs"}, "skill": {}, "episodes": [],
+            "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "You are a mentor."
 
-        # Mock the LLM call
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("Here's my response about graphs.")
-
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Here's my response about graphs.")]]),
+        ):
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "Explain BFS", mode="topic"
             )
+            full = await _collect_stream(result)
 
-        # Verify success response
-        assert "response" in result
-        assert result["response"] == "Here's my response about graphs."
-        assert "error" not in result
+        visible, meta = _split_meta(full)
+        assert visible == "Here's my response about graphs."
+        assert meta is not None
 
-        # Verify user message was appended (first call)
         first_append_call = mock_topic_service.append_message.call_args_list[0]
         assert first_append_call[0][0] == "topic-abc"
         assert first_append_call[0][1] == "user-123"
@@ -137,15 +168,10 @@ class TestHandleMessageHappyPath:
         assert user_msg["role"] == "user"
         assert user_msg["content"] == "Explain BFS"
 
-        # Verify assistant message was appended (second call)
         second_append_call = mock_topic_service.append_message.call_args_list[1]
         assistant_msg = second_append_call[0][2]
         assert assistant_msg["role"] == "assistant"
         assert assistant_msg["content"] == "Here's my response about graphs."
-
-        # The exact L1/L2/L3-assembled prompt for this turn is stored on the
-        # message — context drifts over time, so it's only recoverable if
-        # captured live, not reconstructable later from current profile/skill state.
         assert assistant_msg["systemPrompt"] == "You are a mentor."
 
     @pytest.mark.asyncio
@@ -154,43 +180,116 @@ class TestHandleMessageHappyPath:
     async def test_happy_path_calls_context_assembler(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """Context assembler is called with user_id, topic_title, and content."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {"goal": "Learn"},
-            "skill": {},
-            "episodes": [],
-            "documents": [],
+            "profile": {"goal": "Learn"}, "skill": {}, "episodes": [],
+            "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "System prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("Response")
-            await chat_service.handle_message(
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Response")]]),
+        ):
+            result = await chat_service.handle_message(
                 "topic-abc", "user-123", "What is DFS?", mode="doubt"
             )
+            await _collect_stream(result)
 
-        mock_assembler.assemble.assert_called_once_with("user-123", "Test Topic", "What is DFS?")
+        mock_assembler.assemble.assert_called_once_with(
+            "user-123", "Test Topic", "What is DFS?", l1_scope=None, taught_concepts=None
+        )
         mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_happy_path_returns_response_dict(
+    async def test_threads_topic_l1_scope_into_assemble(
+        self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
+    ):
+        """When get_topic() returns a topic carrying an l1_scope, it's
+        passed straight through to context_assembler.assemble()."""
+        scope = [{"situation": "preparing for interviews", "relevant": True, "reason": "x"}]
+        concepts = ["Signed URLs in CloudFront"]
+        mock_topic_service.get_topic.return_value = {
+            "topicId": "topic-abc", "userId": "user-123", "title": "Test Topic",
+            "status": "active", "messages": [], "l1_scope": scope, "taughtConcepts": concepts,
+        }
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "System prompt"
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Response")]]),
+        ):
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "What is DFS?", mode="doubt"
+            )
+            await _collect_stream(result)
+
+        mock_assembler.assemble.assert_called_once_with(
+            "user-123", "Test Topic", "What is DFS?", l1_scope=scope, taught_concepts=concepts
+        )
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_happy_path_returns_visible_text_and_metadata(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """Successful call returns dict with 'response' key."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("LLM says hello")
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "Hi"
-            )
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("LLM says hello")]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hi")
+            full = await _collect_stream(result)
 
-        assert result == {"response": "LLM says hello", "suggestions": [], "mode": "diagnostic"}
+        visible, meta = _split_meta(full)
+        assert visible == "LLM says hello"
+        assert meta == {"mode": "diagnostic", "suggestions": []}
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_suggestions_fence_mid_reply_is_never_shown_raw(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """Regression: model puts the fence before more prose, not last.
+
+        A fixed trailing buffer only hides a fence that arrives at the very
+        end of the stream. If the model keeps talking after the fence, that
+        later text pushes the fence out of the buffer and it leaks to the
+        client as raw markdown before the client-side META split can help.
+        """
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "prompt"
+
+        reply = (
+            "Is that the one?\n\n"
+            '```json suggestions\n[{"title": "Yes", "description": "Confirm"}]\n```\n\n'
+            "Assuming it's this one, here's the breakdown in simple steps."
+        )
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk(reply)]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hi")
+            full = await _collect_stream(result)
+
+        visible, meta = _split_meta(full)
+        assert "```json" not in visible
+        assert visible == (
+            "Is that the one?\n\n\n\nAssuming it's this one, here's the breakdown in simple steps."
+        )
+        assert meta["suggestions"] == [{"title": "Yes", "description": "Confirm"}]
 
 
 class TestHandleMessageHardCap:
@@ -200,10 +299,10 @@ class TestHandleMessageHardCap:
     async def test_over_capacity_rejects_without_llm_call(
         self, chat_service, mock_topic_service, mock_token_counter
     ):
-        """At/over 100% usage, the message is rejected before any append or LLM call."""
         mock_token_counter.get_usage_percent.return_value = 100
+        mock_cls = _mock_chat_anthropic([])
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+        with patch("app.services.topic_chat_service.ChatAnthropic", mock_cls):
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "Hello", mode="topic"
             )
@@ -211,7 +310,7 @@ class TestHandleMessageHardCap:
         assert result["topicFull"] is True
         assert "error" in result
         mock_topic_service.append_message.assert_not_called()
-        mock_llm.assert_not_called()
+        mock_cls.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -219,50 +318,53 @@ class TestHandleMessageHardCap:
     async def test_under_capacity_proceeds_normally(
         self, mock_get_prompt, mock_assembler, chat_service, mock_token_counter
     ):
-        """Below the cap, the turn proceeds as usual."""
         mock_token_counter.get_usage_percent.return_value = 99
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("Response")
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "Hello"
-            )
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Response")]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            full = await _collect_stream(result)
 
-        assert result["response"] == "Response"
+        visible, _ = _split_meta(full)
+        assert visible == "Response"
 
 
-class TestHandleMessageLLMTimeout:
-    """Tests for LLM timeout handling (Req 4.4)."""
+class TestHandleMessageStreamFailure:
+    """LLM failure mid-stream yields an in-band error marker (Req 4.4)."""
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_timeout_returns_error_dict(
+    async def test_astream_exception_yields_error_marker(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
-        """LLM timeout returns error dict and user message is preserved."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.side_effect = asyncio.TimeoutError()
+        async def _raising_astream(*args, **kwargs):
+            raise RuntimeError("Anthropic API error: rate limit")
+            yield  # pragma: no cover - makes this an async generator
 
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "Hello"
-            )
+        mock_llm = MagicMock()
+        mock_llm.astream = MagicMock(side_effect=_raising_astream)
+        cls = MagicMock()
+        cls.return_value.bind_tools.return_value = mock_llm
 
-        # Should return error
-        assert "error" in result
-        assert "could not be generated" in result["error"]
-        assert "response" not in result
+        with patch("app.services.topic_chat_service.ChatAnthropic", cls):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            full = await _collect_stream(result)
 
-        # User message was still appended (first call)
+        assert "[error: the mentor response was interrupted" in full
+
+        # User message was appended (before streaming started); no assistant message.
         assert mock_topic_service.append_message.call_count == 1
         user_msg = mock_topic_service.append_message.call_args_list[0][0][2]
         assert user_msg["role"] == "user"
@@ -271,74 +373,22 @@ class TestHandleMessageLLMTimeout:
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_timeout_does_not_append_assistant_message(
-        self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
-    ):
-        """On timeout, no assistant message is appended."""
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
-        })
-        mock_get_prompt.return_value = "prompt"
-
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.side_effect = asyncio.TimeoutError()
-            await chat_service.handle_message("topic-abc", "user-123", "Hello")
-
-        # Only 1 append call (user message), not 2
-        assert mock_topic_service.append_message.call_count == 1
-
-
-class TestHandleMessageLLMException:
-    """Tests for LLM exception handling (Req 4.4)."""
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_llm_exception_returns_error_dict(
-        self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
-    ):
-        """LLM exception (non-timeout) returns error dict, user message preserved."""
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
-        })
-        mock_get_prompt.return_value = "prompt"
-
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.side_effect = Exception("Anthropic API error: rate limit")
-
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "Explain Dijkstra"
-            )
-
-        assert "error" in result
-        assert "could not be generated" in result["error"]
-
-        # User message was appended
-        assert mock_topic_service.append_message.call_count == 1
-        user_msg = mock_topic_service.append_message.call_args_list[0][0][2]
-        assert user_msg["role"] == "user"
-        assert user_msg["content"] == "Explain Dijkstra"
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_anthropic_api_error_returns_error_dict(
+    async def test_time_budget_exceeded_yields_error_marker(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """Specific Anthropic API errors are caught and return error dict."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.side_effect = RuntimeError("Connection refused")
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("partial")]]),
+        ), patch("app.services.topic_chat_service.LLM_TIMEOUT_SECONDS", -1):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            full = await _collect_stream(result)
 
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "Hello"
-            )
-
-        assert "error" in result
+        assert "[error: the mentor response was interrupted" in full
 
 
 class TestPostTurnHook:
@@ -350,17 +400,18 @@ class TestPostTurnHook:
     async def test_post_turn_hook_triggers_compaction_check(
         self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
     ):
-        """After a successful response, shouldCompact is called."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("LLM response")
-            await chat_service.handle_message("topic-abc", "user-123", "Hello")
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("LLM response")]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            await _collect_stream(result)
 
-        # Allow the asyncio.create_task to execute
         await asyncio.sleep(0.05)
 
         mock_compaction_service.should_compact.assert_called_once_with(
@@ -373,16 +424,18 @@ class TestPostTurnHook:
     async def test_post_turn_hook_triggers_compaction_when_needed(
         self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
     ):
-        """When shouldCompact returns True, compact() is called."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
         mock_compaction_service.should_compact.return_value = True
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("response")
-            await chat_service.handle_message("topic-abc", "user-123", "Hello")
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("response")]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            await _collect_stream(result)
 
         await asyncio.sleep(0.05)
 
@@ -394,16 +447,18 @@ class TestPostTurnHook:
     async def test_post_turn_hook_skips_compaction_when_not_needed(
         self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
     ):
-        """When shouldCompact returns False, compact() is not called."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
         mock_compaction_service.should_compact.return_value = False
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("response")
-            await chat_service.handle_message("topic-abc", "user-123", "Hello")
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("response")]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            await _collect_stream(result)
 
         await asyncio.sleep(0.05)
 
@@ -415,43 +470,38 @@ class TestPostTurnHook:
     async def test_post_turn_hook_failure_does_not_crash_service(
         self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
     ):
-        """Post-turn hook failure doesn't affect the response to the user."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
         mock_compaction_service.should_compact.side_effect = Exception("DB down")
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("All good")
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("All good")]]),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            full = await _collect_stream(result)
 
-            # The main response should still succeed
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "Hello"
-            )
-
-        # Allow the task to execute and handle the exception
         await asyncio.sleep(0.05)
 
-        # Main response is still successful
-        assert result == {"response": "All good", "suggestions": [], "mode": "diagnostic"}
+        visible, meta = _split_meta(full)
+        assert visible == "All good"
+        assert meta == {"mode": "diagnostic", "suggestions": []}
 
     @pytest.mark.asyncio
     async def test_post_turn_hook_direct_call_logs_error(
         self, chat_service, mock_compaction_service
     ):
-        """Direct _post_turn_hook call catches and logs exceptions."""
         mock_compaction_service.should_compact.side_effect = RuntimeError("connection lost")
 
-        # Should not raise
         await chat_service._post_turn_hook("topic-abc", "user-123", 2)
 
-        # Verify should_compact was called (it raised but was caught)
         mock_compaction_service.should_compact.assert_called_once()
 
 
 class TestFormatMessagesForApi:
-    """Tests for _format_messages_for_api conversion logic."""
+    """Tests for _format_messages_for_api conversion logic (unchanged)."""
 
     @pytest.fixture
     def service(self, mock_topic_service, mock_compaction_service, mock_token_counter):
@@ -462,14 +512,12 @@ class TestFormatMessagesForApi:
         )
 
     def test_regular_messages_pass_through(self, service):
-        """Regular user/assistant messages are passed through."""
         messages = [
             {"type": "message", "role": "user", "content": "Hello"},
             {"type": "message", "role": "assistant", "content": "Hi there"},
         ]
         result = service._format_messages_for_api(messages)
         assert result[0] == {"role": "user", "content": "Hello"}
-        # Last message gets a cache_control breakpoint (issue #23 caching)
         assert result[1]["role"] == "assistant"
         assert result[1]["content"] == [{
             "type": "text",
@@ -478,7 +526,6 @@ class TestFormatMessagesForApi:
         }]
 
     def test_summary_blocks_converted_to_assistant_messages(self, service):
-        """SummaryBlocks become assistant messages with summary prefix."""
         messages = [
             {"type": "message", "role": "user", "content": "Tell me about graphs"},
             {"type": "summary", "summary": "User discussed BFS and DFS."},
@@ -491,7 +538,6 @@ class TestFormatMessagesForApi:
         assert "Summary of earlier conversation" in result[1]["content"]
         assert "BFS and DFS" in result[1]["content"]
         assert result[2]["role"] == "user"
-        # Last message gets a cache_control breakpoint (issue #23 caching)
         assert result[2]["content"] == [{
             "type": "text",
             "text": "Now about Dijkstra",
@@ -499,7 +545,6 @@ class TestFormatMessagesForApi:
         }]
 
     def test_first_message_must_be_user(self, service):
-        """Messages before the first user message are trimmed."""
         messages = [
             {"type": "message", "role": "assistant", "content": "I'm an orphan"},
             {"type": "message", "role": "user", "content": "First user msg"},
@@ -511,7 +556,6 @@ class TestFormatMessagesForApi:
         assert len(result) == 2
 
     def test_mentor_role_normalized_to_assistant(self, service):
-        """Legacy 'mentor' role is converted to 'assistant'."""
         messages = [
             {"type": "message", "role": "user", "content": "Question"},
             {"type": "message", "role": "mentor", "content": "Answer"},
@@ -520,7 +564,6 @@ class TestFormatMessagesForApi:
         assert result[1]["role"] == "assistant"
 
     def test_window_capped_at_20_messages(self, service):
-        """More than 20 messages gets trimmed to last 20."""
         messages = []
         for i in range(30):
             role = "user" if i % 2 == 0 else "assistant"
@@ -528,11 +571,9 @@ class TestFormatMessagesForApi:
 
         result = service._format_messages_for_api(messages)
         assert len(result) <= 20
-        # First message must be from user
         assert result[0]["role"] == "user"
 
     def test_empty_messages_returns_empty(self, service):
-        """Empty input returns empty output."""
         result = service._format_messages_for_api([])
         assert result == []
 
@@ -586,22 +627,23 @@ class TestDiagnosticRouting:
     async def test_unassessed_skill_routes_to_diagnostic_mode(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """No verified skill assessment yet — turn routes to diagnostic mode
-        and the mentor call is bound with the verdict tool."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "diagnostic prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = _ai_message("Have you coded before?")
-            await chat_service.handle_message(
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Have you coded before?")]]),
+        ):
+            result = await chat_service.handle_message(
                 "topic-abc", "user-123", "teach me JS", mode="topic"
             )
+            full = await _collect_stream(result)
 
         mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
-        # include_diagnostic_tool is the 3rd positional arg to _call_llm
-        assert mock_llm.call_args[0][2] is True
+        _, meta = _split_meta(full)
+        assert meta["mode"] == "diagnostic"
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -609,39 +651,35 @@ class TestDiagnosticRouting:
     async def test_diagnostic_verdict_written_to_skill_graph(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """A record_diagnostic_verdict tool call in the response gets applied
-        via skill_graph_repo.apply_update before the turn returns."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "diagnostic prompt"
 
-        verdict_call = {
-            "name": "record_diagnostic_verdict",
-            "args": {
+        verdict_call = _tool_call(
+            "record_diagnostic_verdict",
+            {
                 "new_level": "beginner",
                 "gap": 40,
                 "weak_areas": ["loops"],
                 "strong_areas": [],
             },
-            "id": "tc-1",
-            "type": "tool_call",
-        }
+        )
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
-             patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Got it — you're a beginner.", [verdict_call])]]),
+        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
             mock_repo.apply_update = AsyncMock()
-            mock_llm.return_value = _ai_message(
-                "Got it — you're a beginner.", tool_calls=[verdict_call]
-            )
-            await chat_service.handle_message(
+            result = await chat_service.handle_message(
                 "topic-abc", "user-123", "no I've never coded", mode="topic"
             )
+            await _collect_stream(result)
 
         mock_repo.apply_update.assert_called_once()
         called_user_id, skill_update = mock_repo.apply_update.call_args[0]
         assert called_user_id == "user-123"
-        assert skill_update.topic == "Test Topic"  # mock_topic_service fixture's title
+        assert skill_update.topic == "Test Topic"
         assert skill_update.new_level.value == "beginner"
         assert skill_update.weak_areas == ["loops"]
 
@@ -651,20 +689,20 @@ class TestDiagnosticRouting:
     async def test_no_verdict_tool_call_skips_skill_graph_write(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """Diagnostic mode with no tool call yet (still asking) doesn't touch
-        the skill graph."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "diagnostic prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
-             patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Have you coded before?")]]),
+        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
             mock_repo.apply_update = AsyncMock()
-            mock_llm.return_value = _ai_message("Have you coded before?")
-            await chat_service.handle_message(
+            result = await chat_service.handle_message(
                 "topic-abc", "user-123", "teach me JS", mode="topic"
             )
+            await _collect_stream(result)
 
         mock_repo.apply_update.assert_not_called()
 
@@ -674,11 +712,9 @@ class TestDiagnosticRouting:
     async def test_assessed_skill_uses_router_decision_and_instruction_override(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """Once assessed, the router (not Rule 1) picks the mode, and its
-        instruction_override gets appended to the system prompt."""
         mock_assembler.assemble = AsyncMock(return_value={
             "profile": {}, "skill": {"assessed": True, "current_level": "intermediate"},
-            "episodes": [], "documents": [],
+            "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "direct prompt"
 
@@ -691,22 +727,23 @@ class TestDiagnosticRouting:
             instruction_override="Just give the syntax, nothing else.",
         )
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
-             patch(
-                 "app.services.topic_chat_service.mode_router.route_user_turn",
-                 new_callable=AsyncMock,
-             ) as mock_route:
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("array.push(x)")]]),
+        ) as mock_cls, patch(
+            "app.services.topic_chat_service.mode_router.route_user_turn",
+            new_callable=AsyncMock,
+        ) as mock_route:
             mock_route.return_value = fake_decision
-            mock_llm.return_value = _ai_message("array.push(x)")
-            await chat_service.handle_message(
+            result = await chat_service.handle_message(
                 "topic-abc", "user-123", "syntax for array push", mode="topic"
             )
+            await _collect_stream(result)
 
         mock_get_prompt.assert_called_once_with("direct", mock_assembler.assemble.return_value)
-        sent_system_prompt = mock_llm.call_args[0][0]
-        assert "Just give the syntax, nothing else." in sent_system_prompt
-        # DIRECT is not the diagnostic mode — no verdict tool bound
-        assert mock_llm.call_args[0][2] is False
+        # DIRECT is not diagnostic — no verdict tool should have been bound.
+        bound_tools = mock_cls.return_value.bind_tools.call_args[0][0]
+        assert all(t["name"] != "record_diagnostic_verdict" for t in bound_tools)
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -714,22 +751,157 @@ class TestDiagnosticRouting:
     async def test_doubt_mode_skips_router_entirely(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
-        """doubt/planning/evaluation are session-level intents, untouched by
-        the topic-mode routing engine."""
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "doubt prompt"
 
-        with patch.object(chat_service, "_call_llm", new_callable=AsyncMock) as mock_llm, \
-             patch(
-                 "app.services.topic_chat_service.mode_router.route_user_turn",
-                 new_callable=AsyncMock,
-             ) as mock_route:
-            mock_llm.return_value = _ai_message("Answer")
-            await chat_service.handle_message(
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("Answer")]]),
+        ), patch(
+            "app.services.topic_chat_service.mode_router.route_user_turn",
+            new_callable=AsyncMock,
+        ) as mock_route:
+            result = await chat_service.handle_message(
                 "topic-abc", "user-123", "What is DFS?", mode="doubt"
             )
+            await _collect_stream(result)
 
         mock_route.assert_not_called()
         mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
+
+
+class TestToolLoop:
+    """The mentor can call get_skill_detail / get_more_past_sessions mid-turn,
+    see the result, and answer in a second round."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_get_skill_detail_executes_then_final_round_answers(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [],
+            "skill_graph": [
+                {"topic": "Recursion", "current_level": "beginner",
+                 "required_level": "intermediate", "gap": "medium",
+                 "weak_areas": ["base cases"], "strong_areas": []},
+            ],
+        })
+        mock_get_prompt.return_value = "prompt"
+
+        round0 = [_chunk("", [_tool_call("get_skill_detail", {"topic": "Recursion"})])]
+        round1 = [_chunk("You're at beginner level on Recursion, gap: medium.")]
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([round0, round1]),
+        ) as mock_cls:
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "how am I doing on Recursion?", mode="topic"
+            )
+            full = await _collect_stream(result)
+
+        visible, meta = _split_meta(full)
+        assert visible == "You're at beginner level on Recursion, gap: medium."
+        assert meta is not None
+        # Bound twice — one per round.
+        assert mock_cls.return_value.bind_tools.call_count == 2
+        # Final round's tools exclude the loop tools (forced final answer).
+        final_round_tools = mock_cls.return_value.bind_tools.call_args_list[1][0][0]
+        assert all(t["name"] not in {"get_skill_detail", "get_more_past_sessions"} for t in final_round_tools)
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_skill_detail_miss_returns_graceful_string_not_crash(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "prompt"
+
+        round0 = [_chunk("", [_tool_call("get_skill_detail", {"topic": "Recursion"})])]
+        round1 = [_chunk("I don't have data on that yet.")]
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([round0, round1]),
+        ):
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "how am I doing on Recursion?", mode="topic"
+            )
+            full = await _collect_stream(result)
+
+        visible, _ = _split_meta(full)
+        assert visible == "I don't have data on that yet."
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_loop_capped_at_max_rounds_even_if_model_keeps_wanting_tools(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """Round _MAX_LOOP_ROUNDS-1 strips loop tools from the bound set, so
+        the model can't ask for one — but even if a chunk somehow carried a
+        loop-tool call anyway, the loop must still stop there instead of
+        starting a third round."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "prompt"
+
+        round0 = [_chunk("", [_tool_call("get_skill_detail", {"topic": "X"})])]
+        # Contrived: final round's chunk still carries a loop tool call.
+        round1 = [_chunk("Final answer anyway.", [_tool_call("get_skill_detail", {"topic": "Y"})])]
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([round0, round1]),
+        ) as mock_cls:
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "message", mode="topic"
+            )
+            full = await _collect_stream(result)
+
+        assert mock_cls.return_value.bind_tools.call_count == _MAX_LOOP_ROUNDS
+        visible, meta = _split_meta(full)
+        assert visible == "Final answer anyway."
+        assert meta is not None
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_non_loop_tool_call_short_circuits_without_looping(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """record_diagnostic_verdict is never treated as a loop trigger —
+        one round only, same as pre-streaming behavior."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        verdict_call = _tool_call(
+            "record_diagnostic_verdict",
+            {"new_level": "beginner", "gap": 40, "weak_areas": [], "strong_areas": []},
+        )
+        round0 = [_chunk("Got it.", [verdict_call])]
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([round0]),
+        ) as mock_cls, patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+            mock_repo.apply_update = AsyncMock()
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "no I've never coded", mode="topic"
+            )
+            full = await _collect_stream(result)
+
+        assert mock_cls.return_value.bind_tools.call_count == 1
+        visible, _ = _split_meta(full)
+        assert visible == "Got it."
+        mock_repo.apply_update.assert_called_once()

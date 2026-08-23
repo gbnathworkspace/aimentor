@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.config.settings import get_settings
+from app.services.topic_router import TopicRouteResult
 
 
 @pytest.fixture(autouse=True)
@@ -137,6 +138,94 @@ class TestListTopics:
 
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+class TestRouteTopic:
+    @pytest.mark.asyncio
+    async def test_route_topic_match_returns_id_and_title(self, auth_headers):
+        topics_list = [
+            {"topicId": "t1", "title": "React", "subject": "Frontend"},
+            {"topicId": "t2", "title": "SQL Basics", "subject": ""},
+        ]
+        mock_service = AsyncMock()
+        mock_service.list_topics = AsyncMock(return_value=topics_list)
+
+        with patch("app.routers.topics._topic_service", mock_service), \
+             patch("app.routers.topics.route_topic", AsyncMock(return_value=TopicRouteResult(topic_id="t1"))) as mock_route:
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topics/route",
+                    headers=auth_headers,
+                    json={"text": "explain useEffect"},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"topicId": "t1", "title": "React", "candidates": []}
+        mock_route.assert_awaited_once_with("explain useEffect", topics_list)
+
+    @pytest.mark.asyncio
+    async def test_route_topic_ambiguous_returns_candidates(self, auth_headers):
+        topics_list = [
+            {"topicId": "t1", "title": "React", "subject": "Frontend"},
+            {"topicId": "t3", "title": "Vue", "subject": "Frontend"},
+        ]
+        mock_service = AsyncMock()
+        mock_service.list_topics = AsyncMock(return_value=topics_list)
+
+        with patch("app.routers.topics._topic_service", mock_service), \
+             patch("app.routers.topics.route_topic", AsyncMock(return_value=TopicRouteResult(related_ids=["t1", "t3"]))):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topics/route",
+                    headers=auth_headers,
+                    json={"text": "explain component state"},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "topicId": None,
+            "title": None,
+            "candidates": [
+                {"topicId": "t1", "title": "React"},
+                {"topicId": "t3", "title": "Vue"},
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_route_topic_no_match_returns_nulls(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.list_topics = AsyncMock(return_value=[])
+
+        with patch("app.routers.topics._topic_service", mock_service), \
+             patch("app.routers.topics.route_topic", AsyncMock(return_value=TopicRouteResult())):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topics/route",
+                    headers=auth_headers,
+                    json={"text": "plan a wedding"},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"topicId": None, "title": None, "candidates": []}
+
+    @pytest.mark.asyncio
+    async def test_route_topic_empty_text_422(self, auth_headers):
+        from app.main import app
+
+        async with await _client(app) as client:
+            resp = await client.post(
+                "/api/topics/route",
+                headers=auth_headers,
+                json={"text": ""},
+            )
+
+        assert resp.status_code == 422
 
 
 class TestGetTopic:
@@ -325,6 +414,79 @@ class TestDeleteTopic:
 
         async with await _client(app) as client:
             resp = await client.delete("/api/topic/topic-abc")
+
+        assert resp.status_code == 401
+
+
+class TestResolveL1Scope:
+    @pytest.mark.asyncio
+    async def test_resolve_success(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.resolve_l1_scope_item = AsyncMock(return_value=None)
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topic/topic-abc/l1-scope/resolve",
+                    headers=auth_headers,
+                    json={"situation": "preparing for interviews", "relevant": True},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        mock_service.resolve_l1_scope_item.assert_awaited_once_with(
+            "topic-abc", "user-123", "preparing for interviews", True
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_topic_not_found_returns_404(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.resolve_l1_scope_item = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Topic not found")
+        )
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topic/nonexistent/l1-scope/resolve",
+                    headers=auth_headers,
+                    json={"situation": "x", "relevant": False},
+                )
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_resolve_no_matching_entry_returns_404(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.resolve_l1_scope_item = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="No matching l1_scope entry")
+        )
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topic/topic-abc/l1-scope/resolve",
+                    headers=auth_headers,
+                    json={"situation": "not in the list", "relevant": True},
+                )
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_resolve_no_auth_returns_401(self):
+        from app.main import app
+
+        async with await _client(app) as client:
+            resp = await client.post(
+                "/api/topic/topic-abc/l1-scope/resolve",
+                json={"situation": "x", "relevant": True},
+            )
 
         assert resp.status_code == 401
 

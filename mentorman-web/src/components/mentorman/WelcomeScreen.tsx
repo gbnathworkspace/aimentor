@@ -2,7 +2,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
-import { detectTopic } from '../../lib/topics/detectTopic';
 import { relativeTime } from '../../lib/topics/relativeTime';
 import type { TopicListItem } from '../../lib/topics/types';
 
@@ -40,18 +39,23 @@ export interface WelcomeScreenProps {
  * The chat panel's empty state: a greeting, a topic picker, a composer, and four
  * starter prompts.
  *
- * The picker is optional. Send without choosing and the message is matched
- * against your existing topics: a hit offers to continue that thread, a miss
- * opens a new topic titled from the message (so there's no naming step).
- * Choosing from the picker skips the guess entirely.
+ * The picker is optional. Send without choosing and the message is routed
+ * against your existing topics by a Haiku call (app/services/topic_router.py):
+ * a hit offers to continue that thread, a miss opens a new topic titled from
+ * the message (so there's no naming step). Choosing from the picker skips
+ * the routing call entirely.
  */
 export function WelcomeScreen({ userName, busy, error, onStart, onNav }: WelcomeScreenProps) {
   const [text, setText] = useState('');
   const [focus, setFocus] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // null = the user hasn't chosen, so submitting runs topic detection first.
+  // null = the user hasn't chosen, so submitting routes to a topic first.
   const [picked, setPicked] = useState<Pick | null>(null);
   const [detected, setDetected] = useState<TopicListItem | null>(null);
+  // Set when the router can't confidently pick one topic but found a few
+  // plausible ones (up to 4) — a short pick-list instead of a single guess.
+  const [ambiguous, setAmbiguous] = useState<TopicListItem[] | null>(null);
+  const [routing, setRouting] = useState(false);
   const [topics, setTopics] = useState<TopicListItem[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -62,9 +66,9 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
       .catch(() => {});
   }, []);
 
-  const canSend = text.trim().length > 0 && !busy;
+  const canSend = text.trim().length > 0 && !busy && !routing;
 
-  const submit = () => {
+  const submit = async () => {
     if (!canSend) return;
     const body = text.trim();
     if (picked) {
@@ -73,10 +77,33 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
     }
     // No explicit choice — offer the topic this sounds like before opening a
     // new one, so related work doesn't scatter across duplicate topics.
-    const guess = detectTopic(body, topics);
-    if (guess) {
-      setDetected(guess);
-      return;
+    setRouting(true);
+    try {
+      const res = await fetch('/api/topics/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: body }),
+      });
+      const data = res.ok ? await res.json() : null;
+      const match = data?.topicId ? topics.find((t) => t.topicId === data.topicId) : null;
+      if (match) {
+        setDetected(match);
+        return;
+      }
+      const candidateIds: string[] = Array.isArray(data?.candidates)
+        ? data.candidates.map((c: { topicId: string }) => c.topicId)
+        : [];
+      const candidates = candidateIds
+        .map((id) => topics.find((t) => t.topicId === id))
+        .filter((t): t is TopicListItem => !!t);
+      if (candidates.length > 0) {
+        setAmbiguous(candidates);
+        return;
+      }
+    } catch {
+      // Fail open to a new topic — same behavior as a genuine "no match".
+    } finally {
+      setRouting(false);
     }
     onStart(body, null);
   };
@@ -85,6 +112,7 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
     setPicked(p);
     setMenuOpen(false);
     setDetected(null);
+    setAmbiguous(null);
     ref.current?.focus();
   };
 
@@ -109,7 +137,7 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
             className="btn btn-sm btn-ghost"
             type="button"
             style={{ whiteSpace: 'nowrap' }}
-            onClick={() => { setText(''); setDetected(null); setPicked(NEW_TOPIC); ref.current?.focus(); }}
+            onClick={() => { setText(''); setDetected(null); setAmbiguous(null); setPicked(NEW_TOPIC); ref.current?.focus(); }}
           >
             <Icon name="edit" size={13} /> New Topic
           </button>
@@ -189,7 +217,7 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
               style={{ minHeight: 46 }}
               onFocus={() => setFocus(true)}
               onBlur={() => setFocus(false)}
-              onChange={(e) => { setText(e.target.value); setDetected(null); }}
+              onChange={(e) => { setText(e.target.value); setDetected(null); setAmbiguous(null); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
             />
             <div className="composer-tools">
@@ -208,7 +236,7 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
                 type="button"
                 onClick={submit}
                 disabled={!canSend}
-                title={busy ? 'Starting…' : 'Send'}
+                title={busy ? 'Starting…' : routing ? 'Finding the right topic…' : 'Send'}
                 aria-label="Send"
               >
                 <Icon name="arrowUp" size={16} />
@@ -261,6 +289,33 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDetected(null); setMenuOpen(true); }}>
                 Not this — pick a different topic
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ambiguous && (
+        <div className="skip-dialog-overlay" onClick={() => setAmbiguous(null)}>
+          <div className="skip-dialog welcome-route" onClick={(e) => e.stopPropagation()}>
+            <div className="onb-card-icon" style={{ marginBottom: 10 }}><Icon name="target" size={15} /></div>
+            <div className="skip-dialog-title">Which topic is this?</div>
+            <div className="skip-dialog-desc">
+              A few of your chats could fit — pick one to continue it, or start something new.
+            </div>
+            <div className="welcome-route-actions welcome-route-actions-list">
+              {ambiguous.map((t) => (
+                <button
+                  key={t.topicId}
+                  type="button"
+                  className="btn btn-ghost btn-sm welcome-route-candidate"
+                  onClick={() => onStart(text.trim(), t.topicId)}
+                >
+                  {t.title}
+                </button>
+              ))}
+              <button type="button" className="btn btn-accent btn-sm" onClick={() => onStart(text.trim(), null)}>
+                None of these — start a new topic
               </button>
             </div>
           </div>

@@ -19,6 +19,7 @@ from app.auth.dependencies import require_auth
 from app.config.database import weight_nudges_col
 from app.services.topic_service import TopicService
 from app.services.topic_chat_service import TopicChatService
+from app.services.topic_router import route_topic
 from app.services.subtopic_weights import derive_subtopic_weights, get_subtopics
 
 router = APIRouter(prefix="/api", tags=["Topics"])
@@ -44,11 +45,26 @@ class UpdateTopicRequest(BaseModel):
     subject: Optional[str] = Field(default=None, max_length=60)
 
 
+class RouteTopicRequest(BaseModel):
+    """Request body for routing a welcome-screen message to an existing topic."""
+
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
 class SendMessageRequest(BaseModel):
     """Request body for sending a message within a topic."""
 
     content: str = Field(..., min_length=1, max_length=50000)
     mode: str = Field(default="topic")
+
+
+class ResolveL1ScopeRequest(BaseModel):
+    """Request body for manually resolving an l1_scope entry (see
+    .kiro/specs/topic-scoping) — normally one the classifier judged
+    "uncertain"."""
+
+    situation: str = Field(..., min_length=1, max_length=500)
+    relevant: bool
 
 
 class SubtopicWeightsRequest(BaseModel):
@@ -114,6 +130,27 @@ async def list_topics(user_id: str = Depends(require_auth)):
     """
     topics = await _topic_service.list_topics(user_id)
     return topics
+
+
+@router.post("/topics/route")
+async def route_topic_endpoint(body: RouteTopicRequest, user_id: str = Depends(require_auth)):
+    """Suggest which existing topic (if any) a welcome-screen message
+    continues — a semantic judgment call replacing the old client-side
+    keyword-overlap heuristic. Still just a suggestion: the frontend shows
+    it as a confirm/override dialog (a single match) or a short pick-list
+    (an ambiguous call, up to 4 candidates), never a silent reroute.
+    """
+    topics = await _topic_service.list_topics(user_id)
+    titles_by_id = {t["topicId"]: t["title"] for t in topics}
+    result = await route_topic(body.text, topics)
+
+    if result.topic_id:
+        return {"topicId": result.topic_id, "title": titles_by_id.get(result.topic_id), "candidates": []}
+
+    candidates = [
+        {"topicId": tid, "title": titles_by_id[tid]} for tid in result.related_ids if tid in titles_by_id
+    ]
+    return {"topicId": None, "title": None, "candidates": candidates}
 
 
 @router.get("/topics/archived")
@@ -204,6 +241,22 @@ async def send_message(
     """
     result = await _chat_service.handle_message(topic_id, user_id, body.content, body.mode)
     return result
+
+
+@router.post("/topic/{topic_id}/l1-scope/resolve")
+async def resolve_l1_scope(
+    topic_id: str, body: ResolveL1ScopeRequest, user_id: str = Depends(require_auth)
+):
+    """Manually resolve one l1_scope entry — normally one classify_relevance
+    judged "uncertain". The answer is marked userResolved and survives a
+    later profile-triggered recompute (see TopicService._merge_l1_scope).
+
+    See .kiro/specs/topic-scoping.
+    """
+    await _topic_service.resolve_l1_scope_item(
+        topic_id, user_id, body.situation, body.relevant
+    )
+    return {"ok": True}
 
 
 @router.post("/topic/{topic_id}/subtopic-weights", response_model=SubtopicWeightsResponse)

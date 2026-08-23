@@ -210,6 +210,18 @@ def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | Non
     return " — ".join(parts) if parts else "Not specified"
 
 
+def _format_taught_concepts(taught_concepts: list[str] | None) -> str:
+    """Format the topic's accumulated taughtConcepts list (see
+    CompactionService._apply_taught_concepts, TS-1) — an L3 episodic memory
+    record (same tier as _format_episodes below), scoped to this topic and
+    concept-grained rather than cross-topic and narrative-grained. Specific
+    things already taught in this topic, so the mentor doesn't re-teach from
+    scratch or contradict what it already said."""
+    if not taught_concepts:
+        return "(nothing recorded yet)"
+    return "\n".join(f"- {c}" for c in taught_concepts)
+
+
 def _format_focus_areas(profile: dict[str, Any], l1_scope: list[dict] | None = None) -> str:
     """Format the L1 focus_areas list for the prompt, filtered to what's
     relevant to the current topic when a scope is available — same rule as
@@ -298,6 +310,7 @@ def _build_context_variables(
         "gap": skill.get("gap", "Unknown"),
         # L3 Episodes
         "episodes": _format_episodes(episodes),
+        "taught_concepts": _format_taught_concepts(context.get("taught_concepts")),
         # Uploaded documents (ingested files)
         "documents": _format_documents(context.get("documents", [])),
         # Mode

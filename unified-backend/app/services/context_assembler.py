@@ -36,16 +36,30 @@ logger = logging.getLogger(__name__)
 _MAX_DOCUMENT_CHUNKS = 12
 
 
-async def assemble(user_id: str, topic: str, query: str) -> dict:
+async def assemble(
+    user_id: str, topic: str, query: str,
+    l1_scope: list[dict] | None = None, taught_concepts: list[str] | None = None,
+) -> dict:
     """Gather L1 profile, L2 skill, and L3 episodes for the given user/topic.
 
     Args:
         user_id: The authenticated user's ID.
         topic: The current mentoring topic.
         query: The user's latest message (used for vector search).
+        l1_scope: The topic's cached relevance judgments (see
+            TopicService._ensure_l1_scope), if the caller has a topic
+            document to read one from. Passed straight through to the
+            returned dict — not fetched here, since assemble() only knows
+            a topic title, not a topic id.
+        taught_concepts: The topic's accumulated `taughtConcepts` list (see
+            CompactionService._apply_taught_concepts, TS-1) — an L3 episodic
+            record, same tier as `episodes` below, just topic-scoped and
+            concept-grained instead of cross-topic and narrative-grained.
+            Same pass-through-only treatment as l1_scope, for the same reason.
 
     Returns:
-        A dict with keys: profile, skill, episodes.
+        A dict with keys: profile, skill, episodes, documents, skill_graph,
+        l1_scope, taught_concepts.
 
     Raises:
         HTTPException(400): If no profile exists for the user.
@@ -99,6 +113,8 @@ async def assemble(user_id: str, topic: str, query: str) -> dict:
         "episodes": episodes,
         "documents": documents,
         "skill_graph": skill_graph,
+        "l1_scope": l1_scope,
+        "taught_concepts": taught_concepts,
     }
 
 
@@ -113,6 +129,16 @@ async def _fetch_documents(user_id: str, limit: int = _MAX_DOCUMENT_CHUNKS) -> l
     except Exception as e:
         logger.warning("Document fetch failed for user=%s: %s. Returning no documents.", user_id, e)
         return []
+
+
+async def fetch_additional_episodes(user_id: str, topic: str | None, limit: int) -> list:
+    """Public wrapper for on-demand episode lookup (get_more_past_sessions tool).
+
+    Same recency-based fetch as the default 3 injected into every turn's
+    context, just callable again with a higher limit when the mentor asks
+    for more mid-turn.
+    """
+    return await _recent_episodes(user_id, topic, limit)
 
 
 async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:

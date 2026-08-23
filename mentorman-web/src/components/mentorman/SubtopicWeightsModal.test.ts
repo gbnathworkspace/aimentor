@@ -59,6 +59,21 @@ describe('buildGoalCards', () => {
     expect(cards.map((c) => c.key)).toEqual(['revise']);
   });
 
+  it('flags focus/context cards as fromL1Scope, but not revise', () => {
+    const cards = buildGoalCards(
+      profileWith({
+        focus_areas: ['System design'],
+        learning_context: 'job_interview',
+        learning_context_detail: { label: 'FAANG interviews' } as any,
+      }),
+      'AWS CI/CD'
+    );
+    const byKey = Object.fromEntries(cards.map((c) => [c.key, c.fromL1Scope]));
+    expect(byKey['focus:System design']).toBe(true);
+    expect(byKey['context']).toBe(true);
+    expect(byKey['revise']).toBeUndefined();
+  });
+
   it('adds a context card only for a non-default learning context', () => {
     expect(
       buildGoalCards(profileWith({ learning_context: 'self_directed' }), 'AWS CI/CD')
@@ -69,5 +84,65 @@ describe('buildGoalCards', () => {
     const ctx = cards.find((c) => c.key === 'context');
     expect(ctx?.tag).toBe('INTERVIEW');
     expect(ctx?.title).toBe('Job Interview');
+  });
+
+  it('drops a focus area l1_scope judged irrelevant to this topic', () => {
+    const cards = buildGoalCards(
+      profileWith({ focus_areas: ['System design', 'Behavioral interviews'] }),
+      'AWS CI/CD',
+      [{ situation: 'Behavioral interviews', verdict: 'irrelevant' }]
+    );
+    const focusTitles = cards.filter((c) => c.key.startsWith('focus:')).map((c) => c.title);
+    expect(focusTitles).toEqual(['System design']);
+  });
+
+  it('keeps a focus area with no l1_scope verdict yet (unfiltered fallback)', () => {
+    const cards = buildGoalCards(
+      profileWith({ focus_areas: ['System design'] }),
+      'AWS CI/CD',
+      []
+    );
+    expect(cards.some((c) => c.key === 'focus:System design')).toBe(true);
+  });
+
+  it('keeps a focus area judged "uncertain" — callers resolve before calling this', () => {
+    const cards = buildGoalCards(
+      profileWith({ focus_areas: ['System design'] }),
+      'AWS CI/CD',
+      [{ situation: 'System design', verdict: 'uncertain' }]
+    );
+    expect(cards.some((c) => c.key === 'focus:System design')).toBe(true);
+  });
+
+  it('ranks a "relevant"-judged focus area ahead of an unjudged one, regardless of profile order', () => {
+    const cards = buildGoalCards(
+      profileWith({ focus_areas: ['Behavioral interviews', 'System design'] }),
+      'AWS CI/CD',
+      [{ situation: 'System design', verdict: 'relevant' }]
+    );
+    const focusTitles = cards.filter((c) => c.key.startsWith('focus:')).map((c) => c.title);
+    expect(focusTitles).toEqual(['System design', 'Behavioral interviews']);
+  });
+
+  it('ranks a "relevant"-judged focus area ahead of an "uncertain" one', () => {
+    const cards = buildGoalCards(
+      profileWith({ focus_areas: ['Behavioral interviews', 'System design'] }),
+      'AWS CI/CD',
+      [
+        { situation: 'Behavioral interviews', verdict: 'uncertain' },
+        { situation: 'System design', verdict: 'relevant' },
+      ]
+    );
+    const focusTitles = cards.filter((c) => c.key.startsWith('focus:')).map((c) => c.title);
+    expect(focusTitles).toEqual(['System design', 'Behavioral interviews']);
+  });
+
+  it('drops the context card when its label is judged irrelevant', () => {
+    const cards = buildGoalCards(
+      profileWith({ learning_context: 'job_interview', learning_context_detail: { label: 'Job Interview' } as any }),
+      'AWS CI/CD',
+      [{ situation: 'Job Interview', verdict: 'irrelevant' }]
+    );
+    expect(cards.some((c) => c.key === 'context')).toBe(false);
   });
 });

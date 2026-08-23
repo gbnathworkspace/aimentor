@@ -103,7 +103,7 @@ describe('UploadStatusIndicator — polling behavior (fetch mock)', () => {
       { status: 'pending', files: [], proposals: null, failedFiles: [], createdAt: '' },
       { status: 'extracting', files: [], proposals: null, failedFiles: [], createdAt: '' },
       { status: 'synthesizing', files: [], proposals: null, failedFiles: [], createdAt: '' },
-      { status: 'done', files: [], proposals: [{ field: 'focus_areas' }], failedFiles: [], createdAt: '' },
+      { status: 'done', files: [], proposals: [{ field: 'situation' }], failedFiles: [], createdAt: '' },
     ];
 
     const fetchMock = vi.fn().mockImplementation(async () => ({

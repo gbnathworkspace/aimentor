@@ -3,9 +3,9 @@
 from the Topic Scoping design doc's own eval plan).
 
 Each case is (topic, list, text, expected_relevant, category). `list` is
-which of classify_relevance's two input lists `text` belongs to
-("situations" or "contexts") — the function treats both identically, so
-this only matters for exercising both code paths.
+inert case metadata from when classify_relevance took two separate input
+lists (situations/contexts) — it's a single "Facts About You" list now (see
+l1_scope.extract_situations), so `list` no longer selects a code path.
 
 Scope note: the source doc asks for ~15-20 hand-labeled cases per category
 (100-150 total), reviewed by a human. This set is deliberately smaller

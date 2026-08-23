@@ -177,15 +177,17 @@ async def _apply_proposals_directly(
             notes.append(new_note)
             update["style_notes"] = notes[-5:]  # FIFO cap at 5
 
-        elif field == ProposableField.FOCUS_AREA.value:
-            # Append focus area (deduplication already done by synthesizer)
-            focus_areas = list(update.get("focus_areas", profile.get("focus_areas") or []))
-            new_area = proposed_value.get("value", "")
-            if new_area and not any(
-                existing.lower() == new_area.lower() for existing in focus_areas
+        elif field == ProposableField.SITUATION.value:
+            # Append fact/situation (deduplication already done by synthesizer)
+            detail = update.get("learning_context_detail") or dict(profile.get("learning_context_detail") or {})
+            ctx = detail.get("learning_context") or profile.get("learning_context") or "self_directed"
+            situations = list(detail.get("situations") or [])
+            new_situation = proposed_value.get("value", "")
+            if new_situation and not any(
+                existing.lower() == new_situation.lower() for existing in situations
             ):
-                focus_areas.append(new_area)
-            update["focus_areas"] = focus_areas
+                situations.append(new_situation)
+            update["learning_context_detail"] = {**detail, "learning_context": ctx, "situations": situations[:20]}
 
     if update:
         await profiles_col().update_one(

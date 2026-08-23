@@ -84,9 +84,7 @@ async def test_classify_relevance_accuracy():
     case_rows: list[dict] = []
 
     for case in EVAL_CASES:
-        situations = [case["text"]] if case["list"] == "situations" else []
-        contexts = [case["text"]] if case["list"] == "contexts" else []
-        judgments = await classify_relevance(case["topic"], situations, contexts)
+        judgments = await classify_relevance(case["topic"], [case["text"]])
         verdict = judgments[0]["verdict"]
         # "uncertain" is included, same as production's interim policy
         # (see prompt_store._format_learning_context) — scored against

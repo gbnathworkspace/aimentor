@@ -28,12 +28,14 @@ describe('buildGoalCards', () => {
   it('drops near-duplicate focus areas and caps at two', () => {
     const cards = buildGoalCards(
       profileWith({
-        focus_areas: [
-          'Enterprise REST API development and system design',
-          'Enterprise REST API design and scalability',
-          'AWS Lambda cold starts',
-          'Behavioral interviews',
-        ],
+        learning_context_detail: {
+          situations: [
+            'Enterprise REST API development and system design',
+            'Enterprise REST API design and scalability',
+            'AWS Lambda cold starts',
+            'Behavioral interviews',
+          ],
+        } as any,
       }),
       'AWS CI/CD'
     );
@@ -46,7 +48,7 @@ describe('buildGoalCards', () => {
 
   it('omits per-card descriptions for focus areas so they never repeat a generic line', () => {
     const cards = buildGoalCards(
-      profileWith({ focus_areas: ['System design', 'Behavioral interviews'] }),
+      profileWith({ learning_context_detail: { situations: ['System design', 'Behavioral interviews'] } as any }),
       'AWS CI/CD'
     );
     const focusCards = cards.filter((c) => c.key.startsWith('focus:'));
@@ -62,9 +64,8 @@ describe('buildGoalCards', () => {
   it('flags focus/context cards as fromL1Scope, but not revise', () => {
     const cards = buildGoalCards(
       profileWith({
-        focus_areas: ['System design'],
         learning_context: 'job_interview',
-        learning_context_detail: { label: 'FAANG interviews' } as any,
+        learning_context_detail: { label: 'FAANG interviews', situations: ['System design'] } as any,
       }),
       'AWS CI/CD'
     );
@@ -88,7 +89,7 @@ describe('buildGoalCards', () => {
 
   it('drops a focus area l1_scope judged irrelevant to this topic', () => {
     const cards = buildGoalCards(
-      profileWith({ focus_areas: ['System design', 'Behavioral interviews'] }),
+      profileWith({ learning_context_detail: { situations: ['System design', 'Behavioral interviews'] } as any }),
       'AWS CI/CD',
       [{ situation: 'Behavioral interviews', verdict: 'irrelevant' }]
     );
@@ -98,7 +99,7 @@ describe('buildGoalCards', () => {
 
   it('keeps a focus area with no l1_scope verdict yet (unfiltered fallback)', () => {
     const cards = buildGoalCards(
-      profileWith({ focus_areas: ['System design'] }),
+      profileWith({ learning_context_detail: { situations: ['System design'] } as any }),
       'AWS CI/CD',
       []
     );
@@ -107,7 +108,7 @@ describe('buildGoalCards', () => {
 
   it('keeps a focus area judged "uncertain" — callers resolve before calling this', () => {
     const cards = buildGoalCards(
-      profileWith({ focus_areas: ['System design'] }),
+      profileWith({ learning_context_detail: { situations: ['System design'] } as any }),
       'AWS CI/CD',
       [{ situation: 'System design', verdict: 'uncertain' }]
     );
@@ -116,7 +117,7 @@ describe('buildGoalCards', () => {
 
   it('ranks a "relevant"-judged focus area ahead of an unjudged one, regardless of profile order', () => {
     const cards = buildGoalCards(
-      profileWith({ focus_areas: ['Behavioral interviews', 'System design'] }),
+      profileWith({ learning_context_detail: { situations: ['Behavioral interviews', 'System design'] } as any }),
       'AWS CI/CD',
       [{ situation: 'System design', verdict: 'relevant' }]
     );
@@ -126,7 +127,7 @@ describe('buildGoalCards', () => {
 
   it('ranks a "relevant"-judged focus area ahead of an "uncertain" one', () => {
     const cards = buildGoalCards(
-      profileWith({ focus_areas: ['Behavioral interviews', 'System design'] }),
+      profileWith({ learning_context_detail: { situations: ['Behavioral interviews', 'System design'] } as any }),
       'AWS CI/CD',
       [
         { situation: 'Behavioral interviews', verdict: 'uncertain' },

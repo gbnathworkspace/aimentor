@@ -1,7 +1,7 @@
 """LLM-powered L1 fact synthesis for the chat document upload pipeline.
 
 Takes extracted document text and produces structured field proposals
-conforming to the L1 memory schema (style_notes, focus_areas). Validates
+conforming to the L1 memory schema (style_notes, situations). Validates
 proposals against schema constraints and handles LLM errors with retry logic.
 
 This module is part of the Document Ingestion Pipeline and does NOT
@@ -54,14 +54,14 @@ contains clear, relevant evidence):
       "source_quote": "verbatim text from the document supporting this (max 200 chars)"
     }
   ],
-  "focus_areas": ["short phrase describing a learning focus area (max 60 chars each)"]
+  "situations": ["short phrase describing a fact/situation about the learner (max 60 chars each)"]
 }
 
 Rules:
 - Only propose fields when you have CLEAR evidence in the text. Do not guess or infer without support.
 - Each style_note MUST include a source_quote that is a VERBATIM span from the input text (not paraphrased).
 - source_quote must be at most 200 characters.
-- Each focus_area must be at most 60 characters.
+- Each situation must be at most 60 characters.
 - note in style_notes must be at most 140 characters.
 - Return ONLY valid JSON, no markdown formatting, no explanation outside the JSON.
 - If nothing relevant is found, return an empty JSON object: {}
@@ -175,16 +175,16 @@ def _validate_style_notes(
     return validated
 
 
-def _validate_focus_areas(areas: list[str]) -> list[str]:
-    """Validate focus area entries — each must be ≤ 60 characters.
+def _validate_situations(items: list[str]) -> list[str]:
+    """Validate situation entries — each must be ≤ 60 characters.
 
     Args:
-        areas: Raw focus area strings from LLM.
+        items: Raw situation strings from LLM.
 
     Returns:
-        List of valid focus area strings (≤ 60 chars, non-empty).
+        List of valid situation strings (≤ 60 chars, non-empty).
     """
-    return [a for a in areas if a and len(a) <= 60]
+    return [s for s in items if s and len(s) <= 60]
 
 
 def _build_proposals(
@@ -217,63 +217,63 @@ def _build_proposals(
                 "reason": f"Style insight from uploaded document",
             })
 
-    # Focus areas proposals — one per area
-    if synthesis_output.focus_areas:
-        valid_areas = _validate_focus_areas(synthesis_output.focus_areas)
-        for area in valid_areas:
+    # Situation proposals — one per fact
+    if synthesis_output.situations:
+        valid_situations = _validate_situations(synthesis_output.situations)
+        for situation in valid_situations:
             proposals.append({
-                "field": ProposableField.FOCUS_AREA.value,
-                "proposed_value": {"value": area},
-                "reason": "Focus area identified from uploaded document",
+                "field": ProposableField.SITUATION.value,
+                "proposed_value": {"value": situation},
+                "reason": "Fact identified from uploaded document",
             })
 
     return proposals
 
 
 async def _get_user_profile_state(user_id: str) -> dict:
-    """Fetch the user's current focus_areas and style_notes from their profile.
+    """Fetch the user's current situations and style_notes from their profile.
 
-    Used by the accumulation logic to deduplicate focus areas and detect
+    Used by the accumulation logic to deduplicate situations and detect
     style note cap conditions.
 
     Args:
         user_id: The authenticated user's ID.
 
     Returns:
-        Dict with 'focus_areas' (list[str]) and 'style_notes' (list[dict]).
+        Dict with 'situations' (list[str]) and 'style_notes' (list[dict]).
         Returns empty lists if the profile doesn't exist.
     """
     profile = await profiles_col().find_one(
         {"user_id": user_id},
-        {"focus_areas": 1, "style_notes": 1},
+        {"learning_context_detail": 1, "style_notes": 1},
     )
     if not profile:
-        return {"focus_areas": [], "style_notes": []}
+        return {"situations": [], "style_notes": []}
     return {
-        "focus_areas": profile.get("focus_areas") or [],
+        "situations": (profile.get("learning_context_detail") or {}).get("situations") or [],
         "style_notes": profile.get("style_notes") or [],
     }
 
 
-def deduplicate_focus_areas(
-    proposed_areas: list[str],
-    existing_areas: list[str],
+def deduplicate_situations(
+    proposed: list[str],
+    existing: list[str],
 ) -> list[str]:
-    """Remove proposed focus areas that are case-insensitive duplicates of existing ones.
+    """Remove proposed situations that are case-insensitive duplicates of existing ones.
 
-    Compares each proposed focus area against all existing focus areas using
-    case-insensitive exact string matching. Only focus areas with no match
+    Compares each proposed situation against all existing situations using
+    case-insensitive exact string matching. Only situations with no match
     in the existing list are returned.
 
     Args:
-        proposed_areas: List of proposed focus area strings from LLM.
-        existing_areas: List of existing focus area strings from user's profile.
+        proposed: List of proposed situation strings from LLM.
+        existing: List of existing situation strings from user's profile.
 
     Returns:
-        List of proposed focus areas that are NOT duplicates of existing ones.
+        List of proposed situations that are NOT duplicates of existing ones.
     """
-    existing_lower = {area.lower() for area in existing_areas}
-    return [area for area in proposed_areas if area.lower() not in existing_lower]
+    existing_lower = {s.lower() for s in existing}
+    return [s for s in proposed if s.lower() not in existing_lower]
 
 
 def flag_style_notes_at_cap(
@@ -318,10 +318,10 @@ async def accumulate_proposals(
     proposals: list[dict],
     user_id: str,
 ) -> list[dict]:
-    """Apply accumulation logic: deduplicate focus areas and flag style notes at cap.
+    """Apply accumulation logic: deduplicate situations and flag style notes at cap.
 
     This function ensures that:
-    - Proposed focus_areas that are case-insensitive duplicates of existing ones
+    - Proposed situations that are case-insensitive duplicates of existing ones
       are discarded (Requirement 7.2).
     - When the user already has 5 style notes, new style_note proposals are
       flagged with `requires_replacement=True` for the replacement flow
@@ -341,23 +341,23 @@ async def accumulate_proposals(
 
     # Fetch current profile state
     profile_state = await _get_user_profile_state(user_id)
-    existing_focus_areas = profile_state["focus_areas"]
+    existing_situations = profile_state["situations"]
     existing_style_notes = profile_state["style_notes"]
     existing_style_notes_count = len(existing_style_notes)
 
-    # Step 1: Deduplicate focus area proposals against existing focus areas
+    # Step 1: Deduplicate situation proposals against existing situations
     accumulated = []
     for proposal in proposals:
-        if proposal["field"] == ProposableField.FOCUS_AREA.value:
-            proposed_area = proposal["proposed_value"].get("value", "")
+        if proposal["field"] == ProposableField.SITUATION.value:
+            proposed_situation = proposal["proposed_value"].get("value", "")
             # Only keep if not a case-insensitive duplicate
-            deduped = deduplicate_focus_areas([proposed_area], existing_focus_areas)
+            deduped = deduplicate_situations([proposed_situation], existing_situations)
             if deduped:
                 accumulated.append(proposal)
             else:
                 logger.info(
-                    "Discarding duplicate focus area proposal: %r (already exists)",
-                    proposed_area,
+                    "Discarding duplicate situation proposal: %r (already exists)",
+                    proposed_situation,
                 )
         else:
             accumulated.append(proposal)
@@ -515,7 +515,7 @@ async def synthesize_l1_facts(
     # Step 7: Build validated proposals
     proposals = _build_proposals(synthesis_output, job_id)
 
-    # Step 8: Accumulation — deduplicate focus areas and flag style notes at cap
+    # Step 8: Accumulation — deduplicate situations and flag style notes at cap
     proposals = await accumulate_proposals(proposals, user_id)
 
     return SynthesisResult(

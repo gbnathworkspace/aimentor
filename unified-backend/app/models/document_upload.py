@@ -93,8 +93,8 @@ class L1SynthesisOutput(BaseModel):
 
     Attributes:
         style_notes: Proposed style note entries with source quotes.
-        focus_areas: Proposed focus area strings (max 60 chars each).
+        situations: Proposed fact/situation strings (max 60 chars each).
     """
 
     style_notes: Optional[list[SynthesizedStyleNote]] = None
-    focus_areas: Optional[list[str]] = None
+    situations: Optional[list[str]] = None

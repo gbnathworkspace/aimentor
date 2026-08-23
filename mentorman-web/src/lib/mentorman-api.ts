@@ -11,10 +11,8 @@
 
 export interface LearningContextDetail {
   learning_context: string;
-  contexts?: string[];
   label?: string | null;
   situations?: string[];
-  structured?: Record<string, string>;
 }
 
 export interface StyleNote {
@@ -28,7 +26,7 @@ export interface StyleNote {
 // Proposed by the post-session profiling agent (app/services/profiling_agent.py),
 // awaiting accept/dismiss via POST /api/profile/pending-changes/{field}/(accept|dismiss).
 export interface PendingProfileChange {
-  field: 'style_note' | 'focus_area';
+  field: 'style_note' | 'situation';
   proposed_value: Record<string, string>;
   reason: string;
   session_id: string;
@@ -38,7 +36,6 @@ export interface PendingProfileChange {
 export interface CoreProfile {
   learning_context?: string | null;
   learning_context_detail?: LearningContextDetail | null;
-  focus_areas: string[];
   explanation_style: string;
   challenge_tolerance: string;
   feedback_tone: string;

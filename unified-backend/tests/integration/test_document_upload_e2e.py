@@ -113,7 +113,7 @@ class TestFullUploadFlow:
             "skip_review": False,
             "proposals": [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "Cloud Architecture"},
                     "reason": "Document mentions extensive AWS experience",
                     "sourceFilename": "resume.txt",
@@ -142,7 +142,7 @@ class TestFullUploadFlow:
             body = response.json()
             assert body["status"] == "done"
             assert body["proposalCount"] == 1
-            assert body["proposals"][0]["field"] == "focus_area"
+            assert body["proposals"][0]["field"] == "situation"
             assert body["proposals"][0]["proposed_value"]["value"] == "Cloud Architecture"
 
     @pytest.mark.asyncio
@@ -154,11 +154,11 @@ class TestFullUploadFlow:
         # Profile with a document-sourced pending change
         profile_doc = {
             "user_id": user_id,
-            "focus_areas": ["Python"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["Python"]},
             "style_notes": [],
             "pending_changes": [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "Cloud Architecture"},
                     "reason": "Extracted from uploaded document",
                     "session_id": job_id,
@@ -167,7 +167,6 @@ class TestFullUploadFlow:
                 }
             ],
             "learning_context": None,
-            "learning_context_detail": None,
             "explanation_style": "hint-first",
             "challenge_tolerance": "medium",
             "feedback_tone": "encouraging",
@@ -175,7 +174,9 @@ class TestFullUploadFlow:
 
         # After accepting, the updated profile
         updated_profile = {**profile_doc}
-        updated_profile["focus_areas"] = ["Python", "Cloud Architecture"]
+        updated_profile["learning_context_detail"] = {
+            "learning_context": "self_directed", "situations": ["Python", "Cloud Architecture"],
+        }
         updated_profile["pending_changes"] = []
 
         mock_col = MagicMock()
@@ -188,13 +189,13 @@ class TestFullUploadFlow:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/api/profile/pending-changes/focus_area/accept",
+                    "/api/profile/pending-changes/situation/accept",
                     headers=auth_headers,
                 )
 
             assert response.status_code == 200
             body = response.json()
-            assert "Cloud Architecture" in body["focusAreas"]
+            assert "Cloud Architecture" in body["learningContextDetail"]["situations"]
             assert body["pendingChanges"] == []
 
     @pytest.mark.asyncio
@@ -205,11 +206,11 @@ class TestFullUploadFlow:
 
         profile_doc = {
             "user_id": user_id,
-            "focus_areas": ["Python"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["Python"]},
             "style_notes": [],
             "pending_changes": [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "Cloud Architecture"},
                     "reason": "Extracted from uploaded document",
                     "session_id": job_id,
@@ -221,7 +222,7 @@ class TestFullUploadFlow:
 
         dismissed_profile = {**profile_doc}
         dismissed_profile["pending_changes"] = []
-        dismissed_profile["focus_areas"] = ["Python"]  # unchanged
+        # situations unchanged
 
         mock_col = MagicMock()
         mock_col.find_one = AsyncMock(return_value=profile_doc)
@@ -233,14 +234,14 @@ class TestFullUploadFlow:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/api/profile/pending-changes/focus_area/dismiss",
+                    "/api/profile/pending-changes/situation/dismiss",
                     headers=auth_headers,
                 )
 
             assert response.status_code == 200
             body = response.json()
-            # Focus areas unchanged after dismiss
-            assert body["focusAreas"] == ["Python"]
+            # Situations unchanged after dismiss
+            assert body["learningContextDetail"]["situations"] == ["Python"]
             assert body["pendingChanges"] == []
 
 
@@ -638,7 +639,7 @@ class TestDocumentSourcedProposals:
 
         # Create pending change with document_upload source
         pending_change = {
-            "field": "focus_area",
+            "field": "situation",
             "proposed_value": {"value": "ML Engineering"},
             "reason": "Document discusses ML pipeline work",
             "session_id": job_id,
@@ -648,11 +649,10 @@ class TestDocumentSourcedProposals:
 
         profile_doc = {
             "user_id": user_id,
-            "focus_areas": ["Python"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["Python"]},
             "style_notes": [],
             "pending_changes": [pending_change],
             "learning_context": None,
-            "learning_context_detail": None,
             "explanation_style": "hint-first",
             "challenge_tolerance": "medium",
             "feedback_tone": "encouraging",
@@ -667,7 +667,9 @@ class TestDocumentSourcedProposals:
         async def capture_update(filter_doc, update_doc, **kwargs):
             update_calls.append((filter_doc, update_doc))
             result = {**profile_doc}
-            result["focus_areas"] = ["Python", "ML Engineering"]
+            result["learning_context_detail"] = {
+                "learning_context": "self_directed", "situations": ["Python", "ML Engineering"],
+            }
             result["pending_changes"] = []
             return result
 
@@ -679,7 +681,7 @@ class TestDocumentSourcedProposals:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/api/profile/pending-changes/focus_area/accept",
+                    "/api/profile/pending-changes/situation/accept",
                     headers=auth_headers,
                 )
 
@@ -689,7 +691,7 @@ class TestDocumentSourcedProposals:
             # document-sourced pending change (it matched by field name)
             assert len(update_calls) == 1
             _, update_doc = update_calls[0]
-            # The $set should contain focus_areas with the new value appended
-            set_doc = update_doc["$set"]
-            assert "ML Engineering" in set_doc["focus_areas"]
-            assert "Python" in set_doc["focus_areas"]
+            # The $set should contain situations with the new value appended
+            situations = update_doc["$set"]["learning_context_detail"]["situations"]
+            assert "ML Engineering" in situations
+            assert "Python" in situations

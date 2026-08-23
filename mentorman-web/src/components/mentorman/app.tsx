@@ -28,6 +28,12 @@ export function MentorManApp() {
   const [chatKey, setChatKey] = useState(0);
   const [sidebarView, setSidebarView] = useState<'topics' | 'archived'>('topics');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Settings renders as a modal over whichever main view was active — remember it so
+  // closing the modal returns there instead of always landing on chat.
+  const [lastMainView, setLastMainView] = useState<'chat' | 'dashboard' | 'admin'>('chat');
+  useEffect(() => {
+    if (view === 'chat' || view === 'dashboard' || view === 'admin') setLastMainView(view);
+  }, [view]);
 
   // Fetch user name via /api/me
   useEffect(() => {
@@ -170,7 +176,7 @@ export function MentorManApp() {
       ) : (
         <>
           {sidebarContent}
-          {view === 'chat' && (
+          {lastMainView === 'chat' && (
             <ChatPanel
               key={chatKey}
               topicId={activeTopic}
@@ -187,18 +193,23 @@ export function MentorManApp() {
               onStartDeferredOnboarding={() => setView('deferred-onboarding')}
             />
           )}
-          {view === 'dashboard' && (
+          {lastMainView === 'dashboard' && (
             <Dashboard onStartTopic={startTopic} profile={profile} />
           )}
+          {lastMainView === 'admin' && <AdminUsers />}
           {view === 'settings' && (
-            <Settings
-              profile={profile}
-              onReset={() => { setProfile(null); setView('onboarding'); }}
-              onStartDeferredOnboarding={() => setView('deferred-onboarding')}
-              onSaved={refreshProfile}
-            />
+            <div className="settings-modal-overlay" onClick={() => setView(lastMainView)}>
+              <div className="settings-modal" onClick={e => e.stopPropagation()}>
+                <Settings
+                  profile={profile}
+                  onReset={() => { setProfile(null); setView('onboarding'); }}
+                  onStartDeferredOnboarding={() => setView('deferred-onboarding')}
+                  onSaved={refreshProfile}
+                  onClose={() => setView(lastMainView)}
+                />
+              </div>
+            </div>
           )}
-          {view === 'admin' && <AdminUsers />}
         </>
       )}
     </div>

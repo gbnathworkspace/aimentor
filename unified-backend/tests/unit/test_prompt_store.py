@@ -7,7 +7,6 @@ from app.services.prompt_store import (
     get_onboarding_prompt,
     get_system_prompt,
     _format_episodes,
-    _format_focus_areas,
     _format_learning_context,
     _format_taught_concepts,
     _interpolate,
@@ -39,8 +38,7 @@ class TestGetSystemPrompt:
         context = {
             "profile": {
                 "learning_context": "job_interview",
-                "learning_context_detail": {"label": "Crack FAANG"},
-                "focus_areas": ["System Design", "DSA"],
+                "learning_context_detail": {"label": "Crack FAANG", "situations": ["System Design", "DSA"]},
                 "explanation_style": "answer-first",
                 "challenge_tolerance": "high",
                 "feedback_tone": "direct",
@@ -51,18 +49,18 @@ class TestGetSystemPrompt:
         result = get_system_prompt("planning", context)
         assert "job_interview" in result
         assert "Crack FAANG" in result
-        assert "System Design, DSA" in result
+        assert "System Design" in result
+        assert "DSA" in result
         assert "answer-first" in result
         assert "high" in result
         assert "direct" in result
 
-    def test_injects_every_context_and_situation(self):
+    def test_injects_every_situation(self):
         """No entry is "active" — all of them reach the prompt."""
         context = {
             "profile": {
                 "learning_context": "job_interview",
                 "learning_context_detail": {
-                    "contexts": ["job_interview", "competitive_test"],
                     "label": "interviewing for staff roles",
                     "situations": [
                         "interviewing for staff roles",
@@ -74,8 +72,8 @@ class TestGetSystemPrompt:
             "episodes": [],
         }
         result = get_system_prompt("planning", context)
-        assert "job_interview, competitive_test" in result
         assert "leading the backend rewrite" in result
+        assert "job_interview" in result
         # `label` duplicates situations[0] — injected once, not twice
         assert result.count("interviewing for staff roles") == 1
 
@@ -199,8 +197,11 @@ class TestFormatLearningContext:
     def profile(self):
         return {
             "learning_context_detail": {
-                "situations": ["preparing for interview backend engineer", "casually looking for frontend"],
-                "contexts": ["senior backend, Mumbai"],
+                "situations": [
+                    "preparing for interview backend engineer",
+                    "casually looking for frontend",
+                    "senior backend, Mumbai",
+                ],
             }
         }
 
@@ -248,53 +249,6 @@ class TestFormatLearningContext:
         ]
         result = _format_learning_context(profile, l1_scope=l1_scope)
         assert "preparing for interview backend engineer" in result
-
-
-class TestFormatFocusAreas:
-    """Topic Scoping: l1_scope also filters _format_focus_areas's output,
-    same rule as _format_learning_context (see topics-scoping follow-up:
-    focus_areas is classified by classify_relevance but wasn't being
-    filtered into the mentor prompt)."""
-
-    @pytest.fixture
-    def profile(self):
-        return {"focus_areas": ["Kubernetes", "AWS networking", "System design interviews"]}
-
-    def _judgment(self, text: str, verdict: str) -> dict:
-        return {"situation": text, "verdict": verdict, "reason": "because"}
-
-    def test_l1_scope_none_is_unfiltered(self, profile):
-        result = _format_focus_areas(profile, l1_scope=None)
-        assert "Kubernetes, AWS networking, System design interviews" == result
-
-    def test_l1_scope_empty_list_is_not_specified(self, profile):
-        assert _format_focus_areas(profile, l1_scope=[]) == "Not specified"
-
-    def test_l1_scope_filters_to_relevant_only(self, profile):
-        l1_scope = [
-            self._judgment("Kubernetes", "relevant"),
-            self._judgment("AWS networking", "irrelevant"),
-            self._judgment("System design interviews", "irrelevant"),
-        ]
-        result = _format_focus_areas(profile, l1_scope=l1_scope)
-        assert result == "Kubernetes"
-
-    def test_all_irrelevant_is_not_specified_not_unfiltered(self, profile):
-        l1_scope = [
-            self._judgment("Kubernetes", "irrelevant"),
-            self._judgment("AWS networking", "irrelevant"),
-            self._judgment("System design interviews", "irrelevant"),
-        ]
-        assert _format_focus_areas(profile, l1_scope=l1_scope) == "Not specified"
-
-    def test_uncertain_is_included(self, profile):
-        l1_scope = [
-            self._judgment("Kubernetes", "uncertain"),
-            self._judgment("AWS networking", "irrelevant"),
-            self._judgment("System design interviews", "irrelevant"),
-        ]
-        result = _format_focus_areas(profile, l1_scope=l1_scope)
-        assert "Kubernetes" in result
 
 
 class TestFormatTaughtConcepts:

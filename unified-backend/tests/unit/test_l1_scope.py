@@ -8,7 +8,7 @@ Covers:
   silently mis-zipping
 - classify_relevance returns a real three-way verdict (relevant/irrelevant/
   uncertain), not a bool with bias baked in
-- extract_situations_and_contexts label-folding / fallback behavior
+- extract_situations label-folding / fallback behavior
 - compute_profile_stamp stability
 """
 
@@ -21,18 +21,13 @@ from app.services.l1_scope import (
     _RelevanceJudgments,
     classify_relevance,
     compute_profile_stamp,
-    extract_focus_areas,
-    extract_situations_and_contexts,
+    extract_situations,
 )
 
 
-def _judgments(situation_judgments=None, context_judgments=None, focus_area_judgments=None):
-    """Build a _RelevanceJudgments response, defaulting unused lists to empty."""
-    return _RelevanceJudgments(
-        situation_judgments=situation_judgments or [],
-        context_judgments=context_judgments or [],
-        focus_area_judgments=focus_area_judgments or [],
-    )
+def _judgments(situation_judgments=None):
+    """Build a _RelevanceJudgments response, defaulting to empty."""
+    return _RelevanceJudgments(situation_judgments=situation_judgments or [])
 
 
 def _mock_chat_anthropic(response: _RelevanceJudgments):
@@ -48,7 +43,7 @@ class TestClassifyRelevanceEmptyInput:
     @pytest.mark.asyncio
     async def test_returns_empty_list_without_llm_call(self):
         with patch("app.services.l1_scope.ChatAnthropic") as mock_cls:
-            result = await classify_relevance("React", [], [])
+            result = await classify_relevance("React", [])
         assert result == []
         mock_cls.assert_not_called()
 
@@ -60,38 +55,18 @@ class TestClassifyRelevanceTextFidelity:
         the returned `situation` field can only have come from our input
         list, never from anything the model produced."""
         situations = ["preparing for interview backend engineer", "casually looking for frontend"]
-        contexts = ["senior backend, Mumbai"]
         response = _judgments(
             situation_judgments=[
                 _Judgment(verdict="relevant", reason="interview prep is relevant"),
                 _Judgment(verdict="irrelevant", reason="not topical"),
             ],
-            context_judgments=[_Judgment(verdict="uncertain", reason="could go either way")],
         )
         with patch("app.services.l1_scope.ChatAnthropic", _mock_chat_anthropic(response)):
-            result = await classify_relevance("System Design", situations, contexts)
+            result = await classify_relevance("System Design", situations)
 
         assert result == [
             {"situation": situations[0], "verdict": "relevant", "reason": "interview prep is relevant"},
             {"situation": situations[1], "verdict": "irrelevant", "reason": "not topical"},
-            {"situation": contexts[0], "verdict": "uncertain", "reason": "could go either way"},
-        ]
-
-    @pytest.mark.asyncio
-    async def test_focus_areas_are_also_position_paired(self):
-        focus_areas = ["Enterprise REST API development", "AI/ML integration"]
-        response = _judgments(
-            focus_area_judgments=[
-                _Judgment(verdict="relevant", reason="on topic"),
-                _Judgment(verdict="irrelevant", reason="unrelated"),
-            ],
-        )
-        with patch("app.services.l1_scope.ChatAnthropic", _mock_chat_anthropic(response)):
-            result = await classify_relevance("React", [], [], focus_areas)
-
-        assert result == [
-            {"situation": focus_areas[0], "verdict": "relevant", "reason": "on topic"},
-            {"situation": focus_areas[1], "verdict": "irrelevant", "reason": "unrelated"},
         ]
 
     @pytest.mark.asyncio
@@ -101,23 +76,7 @@ class TestClassifyRelevanceTextFidelity:
         )
         with patch("app.services.l1_scope.ChatAnthropic", _mock_chat_anthropic(response)):
             with pytest.raises(ValueError, match="count mismatch"):
-                await classify_relevance("React", ["a", "b"], [])
-
-    @pytest.mark.asyncio
-    async def test_raises_on_context_judgment_count_mismatch(self):
-        response = _judgments(
-            context_judgments=[_Judgment(verdict="relevant", reason="x"), _Judgment(verdict="irrelevant", reason="y")],
-        )
-        with patch("app.services.l1_scope.ChatAnthropic", _mock_chat_anthropic(response)):
-            with pytest.raises(ValueError, match="count mismatch"):
-                await classify_relevance("React", [], ["only one context"])
-
-    @pytest.mark.asyncio
-    async def test_raises_on_focus_area_judgment_count_mismatch(self):
-        response = _judgments()  # 0 focus_area_judgments, but 1 given
-        with patch("app.services.l1_scope.ChatAnthropic", _mock_chat_anthropic(response)):
-            with pytest.raises(ValueError, match="count mismatch"):
-                await classify_relevance("React", [], [], ["one focus area"])
+                await classify_relevance("React", ["a", "b"])
 
 
 class TestClassifyRelevancePromptAsksThreeWay:
@@ -131,58 +90,44 @@ class TestClassifyRelevancePromptAsksThreeWay:
         mock_llm = MagicMock()
         mock_llm.with_structured_output.return_value = mock_structured
         with patch("app.services.l1_scope.ChatAnthropic", MagicMock(return_value=mock_llm)):
-            await classify_relevance("React", ["a"], [])
+            await classify_relevance("React", ["a"])
 
         sent_prompt = " ".join(mock_structured.ainvoke.call_args[0][0].split())
         assert "'relevant', 'irrelevant', or 'uncertain'" in sent_prompt
 
 
-class TestExtractFocusAreas:
-    def test_returns_focus_areas_list(self):
-        assert extract_focus_areas({"focus_areas": ["a", "b"]}) == ["a", "b"]
-
-    def test_missing_field_returns_empty_list(self):
-        assert extract_focus_areas({}) == []
-
-
-class TestExtractSituationsAndContexts:
+class TestExtractSituations:
     def test_folds_label_into_situations_when_absent(self):
-        profile = {"learning_context_detail": {"situations": ["b"], "contexts": ["c"], "label": "a"}}
-        situations, contexts = extract_situations_and_contexts(profile)
+        profile = {"learning_context_detail": {"situations": ["b"], "label": "a"}}
+        situations = extract_situations(profile)
         assert situations == ["a", "b"]
-        assert contexts == ["c"]
 
     def test_does_not_duplicate_label_already_present(self):
         profile = {"learning_context_detail": {"situations": ["a", "b"], "label": "a"}}
-        situations, _ = extract_situations_and_contexts(profile)
+        situations = extract_situations(profile)
         assert situations == ["a", "b"]
 
-    def test_falls_back_to_learning_context_when_contexts_empty(self):
-        profile = {"learning_context": "job_interview", "learning_context_detail": {}}
-        _, contexts = extract_situations_and_contexts(profile)
-        assert contexts == ["job_interview"]
+    def test_folds_in_learning_context_when_not_already_present(self):
+        profile = {"learning_context": "job_interview", "learning_context_detail": {"situations": ["a"]}}
+        situations = extract_situations(profile)
+        assert situations == ["a", "job_interview"]
 
-    def test_empty_profile_returns_empty_lists(self):
-        assert extract_situations_and_contexts({}) == ([], [])
+    def test_does_not_duplicate_learning_context_already_present(self):
+        profile = {"learning_context": "job_interview", "learning_context_detail": {"situations": ["job_interview"]}}
+        situations = extract_situations(profile)
+        assert situations == ["job_interview"]
+
+    def test_empty_profile_returns_empty_list(self):
+        assert extract_situations({}) == []
 
 
 class TestComputeProfileStamp:
     def test_stable_for_identical_input(self):
-        s1 = compute_profile_stamp(["a", "b"], ["c"], ["d"])
-        s2 = compute_profile_stamp(["a", "b"], ["c"], ["d"])
+        s1 = compute_profile_stamp(["a", "b"])
+        s2 = compute_profile_stamp(["a", "b"])
         assert s1 == s2
 
     def test_changes_when_situations_change(self):
-        s1 = compute_profile_stamp(["a"], ["c"], [])
-        s2 = compute_profile_stamp(["a", "b"], ["c"], [])
-        assert s1 != s2
-
-    def test_changes_when_contexts_change(self):
-        s1 = compute_profile_stamp(["a"], ["c"], [])
-        s2 = compute_profile_stamp(["a"], ["c", "d"], [])
-        assert s1 != s2
-
-    def test_changes_when_focus_areas_change(self):
-        s1 = compute_profile_stamp(["a"], ["c"], ["d"])
-        s2 = compute_profile_stamp(["a"], ["c"], ["d", "e"])
+        s1 = compute_profile_stamp(["a"])
+        s2 = compute_profile_stamp(["a", "b"])
         assert s1 != s2

@@ -21,15 +21,15 @@ class LearningContextDetail(BaseModel):
     # well-known defaults, but the field itself no longer restricts users to
     # those 5 values.
     learning_context: str = Field(max_length=60)
-    # Every context the user is in at once (e.g. interviewing *and* sitting an
-    # exam). `learning_context` above stays the first entry so the many readers
-    # of that single-value field keep working. All of these reach the prompt.
-    contexts: list[str] = Field(default_factory=list, max_length=20)
     label: Optional[str] = Field(default=None, max_length=120)
     # e.g. "senior backend, Mumbai, 20 LPA" / "CBSE 9th standard, science stream"
-    # Free-text situations (e.g. "leading the backend rewrite", "interviewing for
-    # senior roles). All are injected — none is "active". FIFO-capped, newest
-    # first; `label` mirrors the first entry for readers that predate this list.
+    # Free-text facts about the user (e.g. "leading the backend rewrite",
+    # "interviewing for senior roles"). All are injected — none is "active".
+    # FIFO-capped, newest first; `label` mirrors the first entry for readers
+    # that predate this list. There is no separate `contexts` field any
+    # more — it duplicated this same list with no UI of its own (see
+    # l1_scope.extract_situations, which folds `learning_context` in here
+    # too instead of keeping a second parallel list).
     situations: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -54,10 +54,11 @@ class ProposableField(str, Enum):
     or the document upload pipeline may propose changes for.
 
     Session-derived proposals cover style_note. Document-upload proposals
-    additionally cover focus_area (appended to the focus_areas list)."""
+    additionally cover situation (appended to learning_context_detail.situations,
+    i.e. "Facts About You")."""
 
     STYLE_NOTE = "style_note"                          # one new note to add
-    FOCUS_AREA = "focus_area"                          # one new focus area to append
+    SITUATION = "situation"                            # one new fact to append
 
 
 class PendingProfileChange(BaseModel):
@@ -65,7 +66,7 @@ class PendingProfileChange(BaseModel):
 
     proposed_value's shape depends on `field`:
       - style_note: {"category": "<StyleNoteCategory>", "note": "<str>"}
-      - focus_area: {"value": "<str>"}
+      - situation: {"value": "<str>"}
     """
 
     field: ProposableField
@@ -87,7 +88,6 @@ class ProfileCreate(BaseModel):
     learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
-    focus_areas: list[str] = []
     explanation_style: Literal["hint-first", "answer-first"] = "hint-first"
     challenge_tolerance: Literal["low", "medium", "high"] = "medium"
     feedback_tone: Literal["direct", "encouraging"] = "encouraging"
@@ -109,7 +109,6 @@ class ProfileUpdate(BaseModel):
     learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
-    focus_areas: Optional[list[str]] = None
     explanation_style: Optional[Literal["hint-first", "answer-first"]] = None
     challenge_tolerance: Optional[Literal["low", "medium", "high"]] = None
     feedback_tone: Optional[Literal["direct", "encouraging"]] = None
@@ -132,7 +131,6 @@ class ProfileResponse(BaseModel):
     learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
-    focus_areas: list[str] = []
     explanation_style: Literal["hint-first", "answer-first"] = "hint-first"
     challenge_tolerance: Literal["low", "medium", "high"] = "medium"
     feedback_tone: Literal["direct", "encouraging"] = "encouraging"

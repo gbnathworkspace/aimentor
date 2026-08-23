@@ -5,7 +5,7 @@ Validates that:
   and session_id=job_id (Task 1.3, Requirements 5.1, 5.4)
 - The existing accept_pending_change path works with document-upload tagged entries
 - The existing dismiss_pending_change path works with document-upload tagged entries
-- The new FOCUS_AREA proposable field is accepted and appended correctly
+- The SITUATION proposable field is accepted and appended correctly
 """
 
 from datetime import datetime, timezone
@@ -31,7 +31,7 @@ class TestPendingProfileChangeSourceType:
 
     def test_source_type_document_upload(self):
         change = PendingProfileChange(
-            field=ProposableField.FOCUS_AREA,
+            field=ProposableField.SITUATION,
             proposed_value={"value": "System Design"},
             reason="Extracted from resume.pdf",
             session_id="job-uuid-123",
@@ -40,11 +40,11 @@ class TestPendingProfileChangeSourceType:
         )
         assert change.source_type == "document_upload"
         assert change.session_id == "job-uuid-123"
-        assert change.field == ProposableField.FOCUS_AREA
+        assert change.field == ProposableField.SITUATION
 
     def test_source_type_serializes_correctly(self):
         change = PendingProfileChange(
-            field=ProposableField.FOCUS_AREA,
+            field=ProposableField.SITUATION,
             proposed_value={"value": "System Design"},
             reason="From uploaded notes",
             session_id="job-456",
@@ -68,22 +68,22 @@ class TestPendingProfileChangeSourceType:
         assert data["source_type"] is None
 
 
-class TestFocusAreaProposableField:
-    """FOCUS_AREA enum value in ProposableField."""
+class TestSituationProposableField:
+    """SITUATION enum value in ProposableField."""
 
-    def test_focus_area_in_proposable_fields(self):
-        assert "focus_area" in {f.value for f in ProposableField}
+    def test_situation_in_proposable_fields(self):
+        assert "situation" in {f.value for f in ProposableField}
 
-    def test_create_focus_area_pending_change(self):
+    def test_create_situation_pending_change(self):
         change = PendingProfileChange(
-            field=ProposableField.FOCUS_AREA,
+            field=ProposableField.SITUATION,
             proposed_value={"value": "Distributed Systems"},
             reason="Resume mentions distributed systems experience",
             session_id="job-789",
             source_type="document_upload",
             created_at=datetime.now(timezone.utc),
         )
-        assert change.field == ProposableField.FOCUS_AREA
+        assert change.field == ProposableField.SITUATION
         assert change.proposed_value == {"value": "Distributed Systems"}
 
 
@@ -91,15 +91,15 @@ class TestAcceptPendingChangeWithDocUpload:
     """accept_pending_change works with document-upload tagged entries."""
 
     @pytest.mark.asyncio
-    async def test_accept_focus_area_appends_to_list(self):
+    async def test_accept_situation_appends_to_list(self):
         from app.routers.profile import accept_pending_change
 
         doc_with_pending = {
             "user_id": "user-1",
-            "focus_areas": ["Python", "AWS"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["Python", "AWS"]},
             "pending_changes": [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "System Design"},
                     "reason": "Extracted from JD",
                     "session_id": "job-abc",
@@ -108,32 +108,37 @@ class TestAcceptPendingChangeWithDocUpload:
                 }
             ],
         }
-        result_doc = {**doc_with_pending, "focus_areas": ["Python", "AWS", "System Design"], "pending_changes": []}
+        result_doc = {
+            **doc_with_pending,
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["Python", "AWS", "System Design"]},
+            "pending_changes": [],
+        }
 
         with patch("app.routers.profile.profiles_col") as mock_col:
             mock_col.return_value.find_one = AsyncMock(return_value=doc_with_pending)
             mock_col.return_value.find_one_and_update = AsyncMock(return_value=result_doc)
 
             with patch("app.routers.profile.require_auth", return_value="user-1"):
-                result = await accept_pending_change(field="focus_area", user_id="user-1")
+                result = await accept_pending_change(field="situation", user_id="user-1")
 
-            # Verify update was called with focus_areas including the new entry
+            # Verify update was called with situations including the new entry
             update_call = mock_col.return_value.find_one_and_update.call_args
             update_set = update_call.args[1]["$set"]
-            assert "System Design" in update_set["focus_areas"]
-            assert "Python" in update_set["focus_areas"]
-            assert "AWS" in update_set["focus_areas"]
+            situations = update_set["learning_context_detail"]["situations"]
+            assert "System Design" in situations
+            assert "Python" in situations
+            assert "AWS" in situations
 
     @pytest.mark.asyncio
-    async def test_accept_focus_area_deduplicates_case_insensitive(self):
+    async def test_accept_situation_deduplicates_case_insensitive(self):
         from app.routers.profile import accept_pending_change
 
         doc_with_pending = {
             "user_id": "user-1",
-            "focus_areas": ["python", "AWS"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["python", "AWS"]},
             "pending_changes": [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "Python"},  # duplicate (case-insensitive)
                     "reason": "From document",
                     "session_id": "job-abc",
@@ -148,12 +153,12 @@ class TestAcceptPendingChangeWithDocUpload:
             mock_col.return_value.find_one = AsyncMock(return_value=doc_with_pending)
             mock_col.return_value.find_one_and_update = AsyncMock(return_value=result_doc)
 
-            await accept_pending_change(field="focus_area", user_id="user-1")
+            await accept_pending_change(field="situation", user_id="user-1")
 
             update_call = mock_col.return_value.find_one_and_update.call_args
             update_set = update_call.args[1]["$set"]
             # Should NOT have added "Python" since "python" already exists
-            assert update_set["focus_areas"] == ["python", "AWS"]
+            assert update_set["learning_context_detail"]["situations"] == ["python", "AWS"]
 
     @pytest.mark.asyncio
     async def test_accept_document_upload_style_note_works(self):
@@ -192,14 +197,14 @@ class TestDismissPendingChangeWithDocUpload:
     """dismiss_pending_change works with document-upload tagged entries."""
 
     @pytest.mark.asyncio
-    async def test_dismiss_focus_area_removes_pending(self):
+    async def test_dismiss_situation_removes_pending(self):
         from app.routers.profile import dismiss_pending_change
 
         doc_with_pending = {
             "user_id": "user-1",
             "pending_changes": [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "ML Engineering"},
                     "reason": "From uploaded syllabus",
                     "session_id": "job-def",
@@ -214,7 +219,7 @@ class TestDismissPendingChangeWithDocUpload:
             mock_col.return_value.find_one = AsyncMock(return_value=doc_with_pending)
             mock_col.return_value.find_one_and_update = AsyncMock(return_value=result_doc)
 
-            await dismiss_pending_change(field="focus_area", user_id="user-1")
+            await dismiss_pending_change(field="situation", user_id="user-1")
 
             update_call = mock_col.return_value.find_one_and_update.call_args
             update_set = update_call.args[1]["$set"]

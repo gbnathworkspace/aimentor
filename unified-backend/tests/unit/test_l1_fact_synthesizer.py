@@ -11,7 +11,7 @@ from app.models.profile import ProposableField, StyleNoteCategory
 from app.services.l1_fact_synthesizer import (
     SynthesisResult,
     _build_proposals,
-    _validate_focus_areas,
+    _validate_situations,
     _validate_style_notes,
     synthesize_l1_facts,
     truncate_to_token_limit,
@@ -154,31 +154,31 @@ class TestValidateStyleNotes:
         assert result[1].category == StyleNoteCategory.CONTEXT
 
 
-class TestValidateFocusAreas:
-    """Tests for focus area validation."""
+class TestValidateSituations:
+    """Tests for situation validation."""
 
-    def test_valid_focus_areas(self):
+    def test_valid_situations(self):
         areas = ["System Design", "Dynamic Programming", "SQL Optimization"]
-        result = _validate_focus_areas(areas)
+        result = _validate_situations(areas)
         assert result == areas
 
     def test_exceeds_60_chars_discarded(self):
         areas = ["Short", "x" * 61, "Also valid"]
-        result = _validate_focus_areas(areas)
+        result = _validate_situations(areas)
         assert result == ["Short", "Also valid"]
 
     def test_exactly_60_chars_accepted(self):
         areas = ["x" * 60]
-        result = _validate_focus_areas(areas)
+        result = _validate_situations(areas)
         assert len(result) == 1
 
     def test_empty_string_discarded(self):
         areas = ["Valid", "", "Also valid"]
-        result = _validate_focus_areas(areas)
+        result = _validate_situations(areas)
         assert result == ["Valid", "Also valid"]
 
     def test_empty_list(self):
-        result = _validate_focus_areas([])
+        result = _validate_situations([])
         assert result == []
 
 
@@ -201,13 +201,13 @@ class TestBuildProposals:
         assert proposals[0]["proposed_value"]["category"] == "motivation"
         assert proposals[0]["proposed_value"]["source_quote"] == "I prefer hands-on projects"
 
-    def test_focus_area_proposals(self):
+    def test_situation_proposals(self):
         output = L1SynthesisOutput(
-            focus_areas=["System Design", "Distributed Systems"],
+            situations=["System Design", "Distributed Systems"],
         )
         proposals = _build_proposals(output, "job-1")
         assert len(proposals) == 2
-        assert proposals[0]["field"] == ProposableField.FOCUS_AREA.value
+        assert proposals[0]["field"] == ProposableField.SITUATION.value
         assert proposals[0]["proposed_value"] == {"value": "System Design"}
         assert proposals[1]["proposed_value"] == {"value": "Distributed Systems"}
 
@@ -218,7 +218,7 @@ class TestBuildProposals:
 
     def test_combined_proposals(self):
         output = L1SynthesisOutput(
-            focus_areas=["API Design"],
+            situations=["API Design"],
             style_notes=[
                 SynthesizedStyleNote(
                     category=StyleNoteCategory.PACING,
@@ -231,7 +231,7 @@ class TestBuildProposals:
         assert len(proposals) == 2
         fields = [p["field"] for p in proposals]
         assert ProposableField.STYLE_NOTE.value in fields
-        assert ProposableField.FOCUS_AREA.value in fields
+        assert ProposableField.SITUATION.value in fields
 
 
 class TestSynthesizeL1Facts:
@@ -254,7 +254,7 @@ class TestSynthesizeL1Facts:
     async def test_llm_returns_valid_json(self):
         """Mocking the LLM call to return valid proposals."""
         llm_response = json.dumps({
-            "focus_areas": ["Backend Development", "System Design"],
+            "situations": ["Backend Development", "System Design"],
         })
 
         mock_message = MagicMock()
@@ -279,7 +279,7 @@ class TestSynthesizeL1Facts:
 
         assert result.success is True
         assert result.error is None
-        assert len(result.proposals) == 2  # 2 focus_areas
+        assert len(result.proposals) == 2  # 2 situations
 
     @pytest.mark.asyncio
     async def test_llm_returns_empty_json(self):
@@ -356,7 +356,7 @@ class TestSynthesizeL1Facts:
     @pytest.mark.asyncio
     async def test_llm_call_succeeds_on_retry(self):
         """LLM call fails first time but succeeds on retry."""
-        llm_response = json.dumps({"focus_areas": ["System Design"]})
+        llm_response = json.dumps({"situations": ["System Design"]})
 
         mock_message = MagicMock()
         mock_text_block = MagicMock()
@@ -393,7 +393,7 @@ class TestSynthesizeL1Facts:
     @pytest.mark.asyncio
     async def test_llm_call_succeeds_on_first_try_no_retry(self):
         """LLM call succeeds on first attempt — no retry or delay."""
-        llm_response = json.dumps({"focus_areas": ["Python"]})
+        llm_response = json.dumps({"situations": ["Python"]})
 
         mock_message = MagicMock()
         mock_text_block = MagicMock()
@@ -531,7 +531,7 @@ class TestSynthesizeL1Facts:
     @pytest.mark.asyncio
     async def test_llm_returns_code_fenced_json(self):
         """LLM wraps JSON in markdown code fences — should still parse."""
-        llm_response = '```json\n{"focus_areas": ["Python"]}\n```'
+        llm_response = '```json\n{"situations": ["Python"]}\n```'
 
         mock_message = MagicMock()
         mock_text_block = MagicMock()

@@ -36,8 +36,7 @@ def profile_with_situations():
     return {
         "user_id": "user-abc",
         "learning_context_detail": {
-            "situations": ["preparing for interview backend engineer"],
-            "contexts": ["senior backend, Mumbai"],
+            "situations": ["preparing for interview backend engineer", "senior backend, Mumbai"],
         },
     }
 
@@ -55,7 +54,7 @@ class TestGetTopicL1ScopeCacheHit:
         self, mock_topics_col, mock_profiles_col, mock_classify,
         topic_service, base_topic, profile_with_situations,
     ):
-        stamp = compute_profile_stamp(["preparing for interview backend engineer"], ["senior backend, Mumbai"], [])
+        stamp = compute_profile_stamp(["preparing for interview backend engineer", "senior backend, Mumbai"])
         topic = {**base_topic, "l1_scope": [_judgment("x", "relevant")], "profileStamp": stamp}
 
         mock_topics = AsyncMock()
@@ -76,15 +75,15 @@ class TestGetTopicL1ScopeCacheHit:
     @patch("app.services.topic_service.classify_relevance")
     @patch("app.services.topic_service.profiles_col")
     @patch("app.services.topic_service.topics_col")
-    async def test_focus_area_change_invalidates_cache(
+    async def test_situation_change_invalidates_cache(
         self, mock_topics_col, mock_profiles_col, mock_classify,
         topic_service, base_topic, profile_with_situations,
     ):
-        """A stamp computed before focus_areas existed must not match a
-        profile that now has them — otherwise a focus_areas edit would
-        silently never trigger a recompute."""
+        """A stamp computed before a new situation existed must not match a
+        profile that now has it — otherwise the edit would silently never
+        trigger a recompute."""
         stale_stamp = compute_profile_stamp(
-            ["preparing for interview backend engineer"], ["senior backend, Mumbai"], [],
+            ["preparing for interview backend engineer", "senior backend, Mumbai"],
         )
         topic = {**base_topic, "l1_scope": [_judgment("x", "relevant")], "profileStamp": stale_stamp}
 
@@ -92,7 +91,15 @@ class TestGetTopicL1ScopeCacheHit:
         mock_topics.find_one.return_value = topic
         mock_topics_col.return_value = mock_topics
 
-        profile = {**profile_with_situations, "focus_areas": ["Enterprise REST API development"]}
+        profile = {
+            **profile_with_situations,
+            "learning_context_detail": {
+                "situations": [
+                    "preparing for interview backend engineer",
+                    "Enterprise REST API development",
+                ],
+            },
+        }
         mock_profiles = AsyncMock()
         mock_profiles.find_one.return_value = profile
         mock_profiles_col.return_value = mock_profiles
@@ -102,7 +109,10 @@ class TestGetTopicL1ScopeCacheHit:
         await topic_service.get_topic("topic-123", "user-abc")
 
         mock_classify.assert_called_once()
-        assert mock_classify.call_args[0][3] == ["Enterprise REST API development"]
+        assert mock_classify.call_args[0][1] == [
+            "preparing for interview backend engineer",
+            "Enterprise REST API development",
+        ]
 
 
 class TestGetTopicL1ScopeCacheMiss:

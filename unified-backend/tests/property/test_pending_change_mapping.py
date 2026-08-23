@@ -47,11 +47,11 @@ def random_valid_proposals(draw):
 
     for _ in range(num_proposals):
         field_type = draw(st.sampled_from([
-            ProposableField.FOCUS_AREA,
+            ProposableField.SITUATION,
             ProposableField.STYLE_NOTE,
         ]))
 
-        if field_type == ProposableField.FOCUS_AREA:
+        if field_type == ProposableField.SITUATION:
             proposals.append({
                 "field": field_type.value,
                 "proposed_value": {

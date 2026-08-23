@@ -1,7 +1,7 @@
 """Unit tests for accumulation logic and deduplication in l1_fact_synthesizer.
 
 Tests cover:
-- Focus area deduplication (case-insensitive exact match) — Requirement 7.2
+- Situation deduplication (case-insensitive exact match) — Requirement 7.2
 - Style note cap detection and flagging — Requirements 7.3, 7.4
 - Accumulation invariant (additive only, no overwrites) — Requirement 7.1
 """
@@ -14,56 +14,56 @@ from app.models.profile import ProposableField
 from app.services.l1_fact_synthesizer import (
     MAX_STYLE_NOTES,
     accumulate_proposals,
-    deduplicate_focus_areas,
+    deduplicate_situations,
     flag_style_notes_at_cap,
 )
 
 
-class TestDeduplicateFocusAreas:
-    """Tests for case-insensitive focus area deduplication (Requirement 7.2)."""
+class TestDeduplicateSituations:
+    """Tests for case-insensitive situation deduplication (Requirement 7.2)."""
 
     def test_no_duplicates_all_kept(self):
         proposed = ["System Design", "Backend Development"]
         existing = ["Frontend", "DevOps"]
-        result = deduplicate_focus_areas(proposed, existing)
+        result = deduplicate_situations(proposed, existing)
         assert result == ["System Design", "Backend Development"]
 
     def test_exact_case_match_removed(self):
         proposed = ["System Design", "Backend Development"]
         existing = ["System Design", "DevOps"]
-        result = deduplicate_focus_areas(proposed, existing)
+        result = deduplicate_situations(proposed, existing)
         assert result == ["Backend Development"]
 
     def test_case_insensitive_match_removed(self):
         proposed = ["system design", "BACKEND DEVELOPMENT"]
         existing = ["System Design", "Backend Development"]
-        result = deduplicate_focus_areas(proposed, existing)
+        result = deduplicate_situations(proposed, existing)
         assert result == []
 
     def test_mixed_case_partial_duplicates(self):
         proposed = ["System Design", "API Design", "backend development"]
         existing = ["system design", "Backend Development"]
-        result = deduplicate_focus_areas(proposed, existing)
+        result = deduplicate_situations(proposed, existing)
         assert result == ["API Design"]
 
     def test_empty_proposed_returns_empty(self):
-        result = deduplicate_focus_areas([], ["System Design"])
+        result = deduplicate_situations([], ["System Design"])
         assert result == []
 
     def test_empty_existing_all_kept(self):
         proposed = ["System Design", "Backend"]
-        result = deduplicate_focus_areas(proposed, [])
+        result = deduplicate_situations(proposed, [])
         assert result == ["System Design", "Backend"]
 
     def test_both_empty(self):
-        result = deduplicate_focus_areas([], [])
+        result = deduplicate_situations([], [])
         assert result == []
 
     def test_whitespace_not_normalized(self):
         """Only exact case-insensitive match — leading/trailing spaces are significant."""
         proposed = [" System Design ", "System Design"]
         existing = ["System Design"]
-        result = deduplicate_focus_areas(proposed, existing)
+        result = deduplicate_situations(proposed, existing)
         # " System Design " has leading/trailing space — NOT a match
         assert result == [" System Design "]
 
@@ -71,7 +71,7 @@ class TestDeduplicateFocusAreas:
         """Case-insensitive works for basic ASCII."""
         proposed = ["PYTHON", "python", "Python"]
         existing = ["python"]
-        result = deduplicate_focus_areas(proposed, existing)
+        result = deduplicate_situations(proposed, existing)
         assert result == []
 
 
@@ -104,8 +104,8 @@ class TestFlagStyleNotesAtCap:
 
     def test_non_style_note_proposals_untouched(self):
         proposals = [
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Python"}, "reason": "r"},
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "SQL"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Python"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "SQL"}, "reason": "r"},
         ]
         result = flag_style_notes_at_cap(proposals, existing_style_notes_count=5)
         assert len(result) == 2
@@ -114,9 +114,9 @@ class TestFlagStyleNotesAtCap:
 
     def test_mixed_proposals_only_style_notes_flagged(self):
         proposals = [
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Python"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Python"}, "reason": "r"},
             {"field": ProposableField.STYLE_NOTE.value, "proposed_value": {"note": "test"}, "reason": "r"},
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "SQL"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "SQL"}, "reason": "r"},
         ]
         result = flag_style_notes_at_cap(proposals, existing_style_notes_count=5)
         assert "requires_replacement" not in result[0]
@@ -153,15 +153,15 @@ class TestAccumulateProposals:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_focus_area_dedup_removes_duplicates(self):
+    async def test_situation_dedup_removes_duplicates(self):
         proposals = [
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "System Design"}, "reason": "r"},
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Python"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "System Design"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Python"}, "reason": "r"},
         ]
         with patch(
             "app.services.l1_fact_synthesizer._get_user_profile_state",
             new_callable=AsyncMock,
-            return_value={"focus_areas": ["system design"], "style_notes": []},
+            return_value={"situations": ["system design"], "style_notes": []},
         ):
             result = await accumulate_proposals(proposals, "user-1")
 
@@ -178,7 +178,7 @@ class TestAccumulateProposals:
         with patch(
             "app.services.l1_fact_synthesizer._get_user_profile_state",
             new_callable=AsyncMock,
-            return_value={"focus_areas": [], "style_notes": five_notes},
+            return_value={"situations": [], "style_notes": five_notes},
         ):
             result = await accumulate_proposals(proposals, "user-1")
 
@@ -194,7 +194,7 @@ class TestAccumulateProposals:
         with patch(
             "app.services.l1_fact_synthesizer._get_user_profile_state",
             new_callable=AsyncMock,
-            return_value={"focus_areas": [], "style_notes": three_notes},
+            return_value={"situations": [], "style_notes": three_notes},
         ):
             result = await accumulate_proposals(proposals, "user-1")
 
@@ -205,15 +205,15 @@ class TestAccumulateProposals:
     async def test_combined_dedup_and_flagging(self):
         """Both dedup and flagging apply to a mixed set of proposals."""
         proposals = [
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Python"}, "reason": "r"},
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "SQL"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Python"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "SQL"}, "reason": "r"},
             {"field": ProposableField.STYLE_NOTE.value, "proposed_value": {"note": "fast pace"}, "reason": "r"},
         ]
         five_notes = [{"category": "pacing", "note": f"note {i}"} for i in range(5)]
         with patch(
             "app.services.l1_fact_synthesizer._get_user_profile_state",
             new_callable=AsyncMock,
-            return_value={"focus_areas": ["python"], "style_notes": five_notes},
+            return_value={"situations": ["python"], "style_notes": five_notes},
         ):
             result = await accumulate_proposals(proposals, "user-1")
 
@@ -222,13 +222,13 @@ class TestAccumulateProposals:
         # Style note is flagged (5 existing)
         assert len(result) == 2
         fields = [p["field"] for p in result]
-        assert ProposableField.FOCUS_AREA.value in fields
+        assert ProposableField.SITUATION.value in fields
         assert ProposableField.STYLE_NOTE.value in fields
 
-        # Verify the correct focus area survived
-        focus_proposals = [p for p in result if p["field"] == ProposableField.FOCUS_AREA.value]
-        assert len(focus_proposals) == 1
-        assert focus_proposals[0]["proposed_value"]["value"] == "SQL"
+        # Verify the correct situation survived
+        situation_proposals = [p for p in result if p["field"] == ProposableField.SITUATION.value]
+        assert len(situation_proposals) == 1
+        assert situation_proposals[0]["proposed_value"]["value"] == "SQL"
 
         # Verify style note is flagged
         style_proposals = [p for p in result if p["field"] == ProposableField.STYLE_NOTE.value]
@@ -238,13 +238,13 @@ class TestAccumulateProposals:
     async def test_no_profile_found_empty_state(self):
         """When user has no profile, all proposals pass through without dedup or flags."""
         proposals = [
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Python"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Python"}, "reason": "r"},
             {"field": ProposableField.STYLE_NOTE.value, "proposed_value": {"note": "fast"}, "reason": "r"},
         ]
         with patch(
             "app.services.l1_fact_synthesizer._get_user_profile_state",
             new_callable=AsyncMock,
-            return_value={"focus_areas": [], "style_notes": []},
+            return_value={"situations": [], "style_notes": []},
         ):
             result = await accumulate_proposals(proposals, "user-1")
 
@@ -255,14 +255,14 @@ class TestAccumulateProposals:
     async def test_proposals_are_additive_never_removes(self):
         """Accumulation NEVER removes non-duplicate proposals — only discards exact dups."""
         proposals = [
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Algorithms"}, "reason": "r"},
-            {"field": ProposableField.FOCUS_AREA.value, "proposed_value": {"value": "Concurrency"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Algorithms"}, "reason": "r"},
+            {"field": ProposableField.SITUATION.value, "proposed_value": {"value": "Concurrency"}, "reason": "r"},
             {"field": ProposableField.STYLE_NOTE.value, "proposed_value": {"note": "prefers examples"}, "reason": "r"},
         ]
         with patch(
             "app.services.l1_fact_synthesizer._get_user_profile_state",
             new_callable=AsyncMock,
-            return_value={"focus_areas": ["Data Structures"], "style_notes": []},
+            return_value={"situations": ["Data Structures"], "style_notes": []},
         ):
             result = await accumulate_proposals(proposals, "user-1")
 

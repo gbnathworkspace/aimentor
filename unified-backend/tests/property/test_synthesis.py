@@ -143,10 +143,10 @@ def valid_synthesis_output(draw):
             })
         data["style_notes"] = notes
 
-    # Optionally include focus_areas
+    # Optionally include situations
     if draw(st.booleans()):
         num_areas = draw(st.integers(min_value=1, max_value=5))
-        data["focus_areas"] = draw(
+        data["situations"] = draw(
             st.lists(
                 st.text(min_size=1, max_size=60),
                 min_size=num_areas,
@@ -229,9 +229,9 @@ def test_schema_validation_accepts_well_formed(data):
             assert len(note.source_quote) <= 200
             assert len(note.note) <= 140
 
-    if "focus_areas" in data:
-        assert output.focus_areas is not None
-        assert len(output.focus_areas) == len(data["focus_areas"])
+    if "situations" in data:
+        assert output.situations is not None
+        assert len(output.situations) == len(data["situations"])
 
 
 # Feature: chat-document-upload, Property 11: LLM output schema validation (reject path)

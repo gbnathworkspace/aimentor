@@ -44,7 +44,7 @@ class TestValidateSignal:
 
     def test_rejects_missing_reason(self):
         raw = {
-            "field": "focus_area",
+            "field": "situation",
             "proposed_value": {"value": "System Design"},
         }
         assert _validate_signal(raw, "session-1") is None
@@ -55,7 +55,7 @@ class TestValidateSignal:
 
     def test_truncates_long_reason(self):
         raw = {
-            "field": "focus_area",
+            "field": "situation",
             "proposed_value": {"value": "System Design"},
             "reason": "x" * 500,
         }
@@ -87,7 +87,7 @@ class TestProposeChanges:
 
             await propose_changes("u1", "s1", [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "System Design"},
                     "reason": "evidence",
                 }
@@ -97,12 +97,12 @@ class TestProposeChanges:
             call_args = mock_col.return_value.update_one.call_args.args
             new_pending = call_args[1]["$set"]["pending_changes"]
             assert len(new_pending) == 1
-            assert new_pending[0]["field"] == "focus_area"
+            assert new_pending[0]["field"] == "situation"
 
     @pytest.mark.asyncio
     async def test_replaces_existing_pending_for_same_field(self):
         existing_pending = [{
-            "field": "focus_area",
+            "field": "situation",
             "proposed_value": {"value": "Old Area"},
             "reason": "old evidence",
             "session_id": "s0",
@@ -114,7 +114,7 @@ class TestProposeChanges:
 
             await propose_changes("u1", "s1", [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "System Design"},
                     "reason": "new evidence",
                 }
@@ -140,7 +140,7 @@ class TestProposeChanges:
 
             await propose_changes("u1", "s1", [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "System Design"},
                     "reason": "new evidence",
                 }
@@ -149,7 +149,7 @@ class TestProposeChanges:
             call_args = mock_col.return_value.update_one.call_args.args
             new_pending = call_args[1]["$set"]["pending_changes"]
             fields = {p["field"] for p in new_pending}
-            assert fields == {"style_note", "focus_area"}
+            assert fields == {"style_note", "situation"}
 
     @pytest.mark.asyncio
     async def test_never_raises_on_db_failure(self):
@@ -158,7 +158,7 @@ class TestProposeChanges:
             # Should not raise
             await propose_changes("u1", "s1", [
                 {
-                    "field": "focus_area",
+                    "field": "situation",
                     "proposed_value": {"value": "System Design"},
                     "reason": "evidence",
                 }

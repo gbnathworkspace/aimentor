@@ -117,7 +117,7 @@ class TestGetJobStatus:
         created = datetime(2026, 7, 23, 10, 0, 0, tzinfo=timezone.utc)
         proposals = [
             {
-                "field": "focus_areas",
+                "field": "situation",
                 "proposedValue": "Machine Learning",
                 "reason": "Mentioned frequently in resume",
                 "sourceFilename": "resume.pdf",
@@ -159,7 +159,7 @@ class TestGetJobStatus:
             "files": [
                 {"filename": "resume.pdf", "status": "extracted", "error": None},
             ],
-            "proposals": [{"field": "focus_areas", "proposedValue": "ML"}],
+            "proposals": [{"field": "situation", "proposedValue": "ML"}],
             "proposal_count": 1,
             "created_at": created,
         })
@@ -189,7 +189,7 @@ class TestGetJobStatus:
                 {"filename": "corrupted.xlsx", "status": "failed", "error": "File could not be read"},
                 {"filename": "empty.txt", "status": "failed", "error": "no extractable content"},
             ],
-            "proposals": [{"field": "focus_areas", "proposedValue": "Python"}],
+            "proposals": [{"field": "situation", "proposedValue": "Python"}],
             "proposal_count": 1,
             "created_at": created,
         })

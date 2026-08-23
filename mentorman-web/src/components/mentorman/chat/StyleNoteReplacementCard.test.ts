@@ -166,7 +166,7 @@ describe('StyleNoteReplacementCard — requires_replacement detection', () => {
   it('non-style_note proposal with requires_replacement shows normal accept/dismiss', () => {
     const proposal = {
       id: 'p3',
-      field: 'focus_areas',
+      field: 'situation',
       proposedValue: { value: 'Machine Learning' },
       requires_replacement: true,
       status: 'pending' as const,

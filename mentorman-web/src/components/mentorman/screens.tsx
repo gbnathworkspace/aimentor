@@ -9,15 +9,35 @@ import type { CoreProfile } from '@/lib/mentorman-api';
 import { SkipButton } from './SkipButton';
 import { SkipConfirmationDialog } from './SkipConfirmationDialog';
 import { CompleteSetupSection } from './CompleteSetupSection';
-import { ListModal } from './ListModal';
 
-const LEGACY_CONTEXT_LABELS: Record<string, string> = {
-  job_interview: 'Job interview',
-  high_stakes_exam: 'High-stakes exam',
-  competitive_test: 'Competitive test',
-  self_directed: 'Self-directed',
-  other: 'Other',
+// ponytail: no backend classifier for fact quality — this is a keyword/length
+// heuristic, not a real vagueness judgment. Swap for a real signal (LLM
+// classification, or a flag the profiling agent sets) if it needs to be sharp.
+const VAGUE_WORDS = /\b(sometimes|kind of|sort of|maybe|a bit|a little|stuff|things|somewhat|generally|usually|often|whatever|etc)\b/i;
+function isVagueFact(text: string): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  return words.length <= 4 || VAGUE_WORDS.test(text);
+}
+
+// `topicReason` is the LLM's verdict (see fact_quality.py via the
+// /api/profile/situations/quality fetch below) for facts that read like a
+// topic/skill name instead of something true about the user — undefined
+// while that judgment hasn't loaded yet or the entry passed it.
+function factWarning(text: string, topicReason?: string): string | null {
+  if (isVagueFact(text)) return 'Too vague to act on — try naming specifics.';
+  if (topicReason) return topicReason;
+  return null;
+}
+
+// Illustrative copy for the teaching-preferences live preview — purely
+// static example text, not generated from a real answer.
+const MEMORY_PREVIEW: Record<string, string> = {
+  'hint-first|encouraging': 'Good instinct to look at the query itself. Before I answer — which column is the filter on, and can you check whether an index covers it? You are one step away.',
+  'hint-first|direct': 'Look at the filter first. Which column is it on, and is that column indexed?',
+  'answer-first|encouraging': 'The filter is not served by an index, so the planner scans the whole table. Nice catch that it slowed down as the table grew — that is exactly the signal.',
+  'answer-first|direct': 'No index on the filtered column. It is a full table scan. Add the index.',
 };
+
 import { MentorQuestionCard, QuickReplyOptions, type QuickReplyOption } from './QuestionCard';
 import { AttachButton } from './chat/AttachButton';
 import { AttachmentPreview } from './chat/AttachmentPreview';
@@ -81,7 +101,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
         const parts: string[] = [];
         if (p.learning_context) parts.push(`learning context: ${p.learning_context}`);
         if (p.learning_context_detail?.label) parts.push(`situation: ${p.learning_context_detail.label}`);
-        if (p.focus_areas?.length) parts.push(`focus areas: ${p.focus_areas.join(', ')}`);
+        if (p.learning_context_detail?.situations?.length) parts.push(`facts: ${p.learning_context_detail.situations.join(', ')}`);
         if (p.explanation_style) parts.push(`explanation style: ${p.explanation_style}`);
         if (p.challenge_tolerance) parts.push(`challenge tolerance: ${p.challenge_tolerance}`);
         if (p.feedback_tone) parts.push(`feedback tone: ${p.feedback_tone}`);
@@ -312,7 +332,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
               <h3>You&apos;re all set.</h3>
               <div className="setup-lines">
                 <div className="setup-line"><span className="k">context</span><span className="v">{profile.learning_context_label || profile.learning_context}</span></div>
-                <div className="setup-line"><span className="k">focus</span><span className="v">{profile.focus_areas.join(', ') || '—'}</span></div>
+                <div className="setup-line"><span className="k">facts</span><span className="v">{profile.focus_areas.join(', ') || '—'}</span></div>
                 <div className="setup-line"><span className="k">style</span><span className="v">{profile.explanation_style} · {profile.challenge_tolerance} · {profile.feedback_tone}</span></div>
               </div>
               <button
@@ -411,15 +431,21 @@ export function SessionEnd({ onFollow, onBack, title, summary, levelFrom, levelT
 }
 
 // ---------- Settings ----------------------------------------
-export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding }: {
+export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding, onClose }: {
   profile: CoreProfile | null;
   onReset: () => void;
   onSaved: () => void;
   onStartDeferredOnboarding?: () => void;
+  onClose?: () => void;
 }) {
   const [tab, setTab] = useState<'profile' | 'memory'>('profile');
+  const [memorySubTab, setMemorySubTab] = useState<'knows' | 'teach' | 'data'>('knows');
   const [editName, setEditName] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [wipeText, setWipeText] = useState('');
+
+  // Inline "what you've told it" editor — null id means nothing is being edited.
+  const [editingSituation, setEditingSituation] = useState<{ index: number; draft: string } | null>(null);
 
   const [explanationVal, setExplanationVal] = useState(profile?.explanation_style ?? 'hint-first');
   const [challengeVal, setChallengeVal] = useState(profile?.challenge_tolerance ?? 'medium');
@@ -429,9 +455,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const [situationsOpen, setSituationsOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
-  const [focusAreasOpen, setFocusAreasOpen] = useState(false);
 
   // Session-scoped dismiss for the "Complete Your Profile" prompt — closing it
   // shouldn't need a backend flag, but it should stay closed while browsing
@@ -484,39 +507,81 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
     }
   };
 
-  const saveFocusAreas = (focusAreas: string[]) => save({ focus_areas: focusAreas });
 
-  // Pretty-print the legacy enum values existing profiles still carry; entries
-  // added since Context became a free-text list display as typed.
-  const contextLabel = (v: string) => LEGACY_CONTEXT_LABELS[v] ?? v;
+  const removeStyleNote = (index: number) => save({
+    style_notes: (profile?.style_notes ?? []).filter((_, i) => i !== index),
+  });
 
-  // Profiles written before contexts[] existed only have the single learning_context.
-  const contextValues = profile?.learning_context_detail?.contexts?.length
-    ? profile.learning_context_detail.contexts
-    : [profile?.learning_context ?? 'self_directed'];
+  const exportMemory = () => {
+    const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mentorman-memory.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
-  // learning_context / label mirror the first entry of their list — plenty of
-  // backend readers still take those single-value fields.
+  // learning_context / label mirror the first entry of the list — plenty of
+  // backend readers still take those single-value fields. There's no
+  // separate `contexts` field any more — it duplicated this same list with
+  // no UI of its own (see l1_scope.extract_situations).
   const saveSituations = (situations: string[]) => save({
     learning_context_detail: {
       learning_context: profile?.learning_context ?? 'self_directed',
-      contexts: contextValues,
       label: situations[0] ?? null,
       situations,
-      structured: profile?.learning_context_detail?.structured ?? {},
     },
   });
 
-  const saveContext = (contexts: string[]) => save({
-    learning_context: contexts[0] ?? 'self_directed',
-    learning_context_detail: {
-      learning_context: contexts[0] ?? 'self_directed',
-      contexts,
-      label: profile?.learning_context_detail?.label ?? null,
-      situations: profile?.learning_context_detail?.situations ?? [],
-      structured: profile?.learning_context_detail?.structured ?? {},
-    },
-  });
+  const situations = profile?.learning_context_detail?.situations ?? [];
+
+  // LLM judgment of whether each "Facts About You" entry actually states a
+  // fact vs. just names a topic (see app/services/fact_quality.py) — keyed
+  // by the joined situations list so it only refetches when that changes,
+  // not on every unrelated Settings re-render.
+  const [factQuality, setFactQuality] = useState<Record<string, { reason: string; rewrite?: string }>>({});
+  const situationsKey = situations.join(' ');
+  useEffect(() => {
+    if (situations.length === 0) { setFactQuality({}); return; }
+    let cancelled = false;
+    fetch('/api/profile/situations/quality')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.judgments) return;
+        const next: Record<string, { reason: string; rewrite?: string }> = {};
+        for (const j of data.judgments) {
+          if (j.is_fact === false) next[j.text] = { reason: j.reason, rewrite: j.rewrite ?? undefined };
+        }
+        setFactQuality(next);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [situationsKey]);
+  const applyFactRewrite = (index: number, rewrite: string) =>
+    saveSituations(situations.map((s, i) => (i === index ? rewrite : s)));
+
+  const startEditSituation = (index: number) => setEditingSituation({ index, draft: situations[index] ?? '' });
+  const addSituation = () => {
+    const next = [...situations, ''];
+    setEditingSituation({ index: next.length - 1, draft: '' });
+  };
+  const commitSituation = () => {
+    if (!editingSituation) return;
+    const { index, draft } = editingSituation;
+    const text = draft.trim();
+    const isNew = index >= situations.length;
+    if (isNew) {
+      if (text) saveSituations([...situations, text]);
+    } else if (text) {
+      saveSituations(situations.map((s, i) => (i === index ? text : s)));
+    } else {
+      saveSituations(situations.filter((_, i) => i !== index));
+    }
+    setEditingSituation(null);
+  };
+  const removeSituation = (index: number) => saveSituations(situations.filter((_, i) => i !== index));
 
   const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
@@ -557,7 +622,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
 
   const describePendingChange = (field: string, value: Record<string, unknown>): string => {
     if (field === 'style_note') return `New teaching note: "${value.note}"`;
-    if (field === 'focus_area') return `Add focus area: "${value.value}"`;
+    if (field === 'situation') return `New fact: "${value.value}"`;
     return field;
   };
 
@@ -650,6 +715,13 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
         <div className="ph-left">
           <div className="ph-title">Settings</div>
         </div>
+        {onClose && (
+          <div className="ph-right">
+            <button className="settings-modal-close" title="Close" onClick={onClose}>
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+        )}
       </div>
       <div className="settings-shell">
         <div className="settings-nav">
@@ -726,213 +798,337 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding 
           )}
 
           {tab === 'memory' && (<>
-            {memoryBadgeCount > 0 && (
-              <div className="settings-group settings-suggested">
-                <button
-                  type="button"
-                  className="settings-suggested-header"
-                  onClick={() => setSuggestedOpen(o => !o)}
-                  aria-expanded={suggestedOpen}
-                >
-                  <span className="settings-group-title">Suggested updates</span>
-                  <span className="settings-suggested-count">{memoryBadgeCount}</span>
-                  <span className="spacer" />
-                  <Icon name={suggestedOpen ? 'x' : 'chevronDown'} size={13} />
-                </button>
-                {suggestedOpen && (<>
-                  <div className="settings-group-sub">Noticed from recent sessions — nothing changes until you accept.</div>
-                  {profile!.pending_changes.map(change => (
-                    <div key={change.field} className="settings-row">
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="v" style={{ textAlign: 'left', whiteSpace: 'normal' }}>{describePendingChange(change.field, change.proposed_value)}</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{change.reason}</div>
+            <div className="settings-memory-tabs">
+              <button
+                type="button"
+                className={`settings-memory-tab ${memorySubTab === 'knows' ? 'active' : ''}`}
+                onClick={() => setMemorySubTab('knows')}
+              >
+                About You<span className="settings-memory-tab-count">{situations.length + (profile?.style_notes?.length ?? 0)}</span>
+              </button>
+              <button
+                type="button"
+                className={`settings-memory-tab ${memorySubTab === 'teach' ? 'active' : ''}`}
+                onClick={() => setMemorySubTab('teach')}
+              >
+                Preferences<span className="settings-memory-tab-count">3</span>
+              </button>
+              <button
+                type="button"
+                className={`settings-memory-tab ${memorySubTab === 'data' ? 'active' : ''}`}
+                onClick={() => setMemorySubTab('data')}
+              >
+                Import Memory
+              </button>
+            </div>
+
+            {memorySubTab === 'knows' && (<>
+              {memoryBadgeCount > 0 && (
+                <div className="settings-group settings-suggested">
+                  <button
+                    type="button"
+                    className="settings-suggested-header"
+                    onClick={() => setSuggestedOpen(o => !o)}
+                    aria-expanded={suggestedOpen}
+                  >
+                    <span className="settings-group-title">Suggested updates</span>
+                    <span className="settings-suggested-count">{memoryBadgeCount}</span>
+                    <span style={{ flex: 1 }} />
+                    <Icon name={suggestedOpen ? 'x' : 'chevronDown'} size={13} />
+                  </button>
+                  {suggestedOpen && (<>
+                    <div className="settings-group-sub">Noticed from recent sessions — nothing changes until you accept.</div>
+                    {profile!.pending_changes.map(change => (
+                      <div key={change.field} className="settings-row">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="v" style={{ textAlign: 'left', whiteSpace: 'normal' }}>{describePendingChange(change.field, change.proposed_value)}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{change.reason}</div>
+                        </div>
+                        <div className="v-wrap">
+                          <button
+                            className="btn btn-sm btn-ghost"
+                            disabled={resolvingField === change.field}
+                            onClick={() => resolvePendingChange(change.field, 'dismiss')}
+                          >
+                            Dismiss
+                          </button>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            disabled={resolvingField === change.field}
+                            onClick={() => resolvePendingChange(change.field, 'accept')}
+                          >
+                            Accept
+                          </button>
+                        </div>
                       </div>
-                      <div className="v-wrap">
+                    ))}
+                  </>)}
+                </div>
+              )}
+
+              {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && !setupPromptDismissed && (
+                <div className="settings-group">
+                  <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} onClose={() => setSetupPromptDismissed(true)} />
+                </div>
+              )}
+
+              <div className="settings-group">
+                <div className="set-header">
+                  <div className="set-label">Facts About You</div>
+                  <div className="set-header-line" />
+                  <div className="set-header-count">
+                    {situations.length > 0 ? `${situations.length} ${situations.length === 1 ? 'entry' : 'entries'}` : 'Not set'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                  {situations.map((text, i) => (
+                    editingSituation?.index === i ? (
+                      <div key={i} className="memory-fact-edit">
+                        <textarea
+                          autoFocus
+                          rows={2}
+                          value={editingSituation.draft}
+                          onChange={e => setEditingSituation({ index: i, draft: e.target.value })}
+                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button className="btn btn-accent btn-sm" onClick={commitSituation}>Done</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setEditingSituation(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={i} className="memory-fact-row" onClick={() => startEditSituation(i)}>
+                        <div className="memory-fact-text">
+                          {text}
+                          {factWarning(text, factQuality[text]?.reason) && (
+                            <div className="memory-fact-vague">
+                              <span className="memory-fact-vague-badge">!</span>
+                              {factWarning(text, factQuality[text]?.reason)}
+                              {factQuality[text]?.rewrite && (
+                                <button
+                                  type="button"
+                                  className="memory-fact-rewrite-btn"
+                                  onClick={e => { e.stopPropagation(); applyFactRewrite(i, factQuality[text]!.rewrite!); }}
+                                >
+                                  Rewrite as a fact
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <button
-                          className="btn btn-sm btn-ghost"
-                          disabled={resolvingField === change.field}
-                          onClick={() => resolvePendingChange(change.field, 'dismiss')}
+                          className="memory-fact-remove" title="Forget this"
+                          onClick={e => { e.stopPropagation(); removeSituation(i); }}
                         >
-                          Dismiss
-                        </button>
-                        <button
-                          className="btn btn-sm btn-primary"
-                          disabled={resolvingField === change.field}
-                          onClick={() => resolvePendingChange(change.field, 'accept')}
-                        >
-                          Accept
+                          <Icon name="x" size={13} />
                         </button>
                       </div>
+                    )
+                  ))}
+                  {editingSituation?.index === situations.length && (
+                    <div className="memory-fact-edit">
+                      <textarea
+                        autoFocus
+                        rows={2}
+                        placeholder="describe a situation…"
+                        value={editingSituation.draft}
+                        onChange={e => setEditingSituation({ index: situations.length, draft: e.target.value })}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button className="btn btn-accent btn-sm" onClick={commitSituation}>Done</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setEditingSituation(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                  <button type="button" className="memory-add-btn" onClick={addSituation}>+ Add a fact</button>
+                </div>
+              </div>
+
+              {/* ponytail: no session event log yet — needs a backend feed of
+                  per-session moments before this can show real entries. */}
+              <div className="settings-group">
+                <div className="set-header">
+                  <div className="set-label">Session Moments</div>
+                  <div className="set-header-line" />
+                  <div className="set-header-count">Not tracked</div>
+                </div>
+                <div className="memory-stub" style={{ marginTop: 12 }}>
+                  Session-by-session moments (stuck points, breakthroughs) aren&apos;t tracked yet.
+                </div>
+              </div>
+
+              <div className="settings-group">
+                <div className="set-header">
+                  <div className="set-label">Insights</div>
+                  <div className="set-header-line" />
+                  <div className="set-header-count">
+                    {(profile?.style_notes ?? []).length} inferred
+                  </div>
+                </div>
+                <div style={{ marginTop: 6, fontSize: '12.5px', color: 'var(--muted)' }}>Inferred, not stated. Disagree and it&apos;s dropped for good.</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                  {(profile?.style_notes ?? []).length === 0 && <div className="memory-stub">Nothing noticed yet.</div>}
+                  {(profile?.style_notes ?? []).map((note, i) => (
+                    <div key={i} className="memory-fact-row" style={{ cursor: 'default' }}>
+                      <div className="memory-fact-text">
+                        {note.note}
+                        <div style={{ marginTop: 5, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>
+                          {note.category}{note.added_at ? ` · ${note.added_at}` : ''}
+                        </div>
+                      </div>
+                      <button className="btn btn-ghost btn-sm btn-disagree" onClick={() => removeStyleNote(i)}>Disagree</button>
                     </div>
                   ))}
-                </>)}
-              </div>
-            )}
-
-            {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && !setupPromptDismissed && (
-              <div className="settings-group">
-                <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} onClose={() => setSetupPromptDismissed(true)} />
-              </div>
-            )}
-
-            <div className="settings-group">
-              <div className="settings-group-title">Learning context</div>
-
-              <div className="settings-row">
-                <div className="k">Context</div>
-                <div className="v-wrap">
-                  <button
-                    type="button"
-                    className="num-input situation-trigger"
-                    onClick={() => setContextOpen(true)}
-                  >
-                    {contextValues.length > 0
-                      ? `${contextValues.length} ${contextValues.length === 1 ? 'entry' : 'entries'}`
-                      : 'Not set'}
-                  </button>
                 </div>
               </div>
 
-              <div className="settings-row" style={{ borderBottom: 'none' }}>
-                <div className="k">Situation</div>
-                <div className="v-wrap">
-                  <button
-                    type="button"
-                    className="num-input situation-trigger"
-                    onClick={() => setSituationsOpen(true)}
-                  >
-                    {(() => {
-                      const n = profile?.learning_context_detail?.situations?.length ?? 0;
-                      return n > 0 ? `${n} ${n === 1 ? 'entry' : 'entries'}` : 'Not set';
-                    })()}
-                  </button>
+            </>)}
+
+            {memorySubTab === 'teach' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
+                <div style={{ fontSize: '13.5px', color: 'var(--muted-2)', maxWidth: 560 }}>
+                  These apply to every reply, across all topics. Pick one in each row.
                 </div>
-              </div>
-            </div>
 
-            <ListModal
-              open={contextOpen}
-              onClose={() => setContextOpen(false)}
-              title="contexts"
-              placeholder="name a context…"
-              items={contextValues}
-              format={contextLabel}
-              onSave={saveContext}
-              maxLength={60}
-            />
-
-            <ListModal
-              open={situationsOpen}
-              onClose={() => setSituationsOpen(false)}
-              title="situations"
-              placeholder="describe a situation…"
-              items={profile?.learning_context_detail?.situations ?? []}
-              onSave={saveSituations}
-            />
-
-            <div className="settings-group">
-              <div className="settings-group-title">Focus areas</div>
-              <div className="settings-row" style={{ borderBottom: 'none' }}>
-                <div className="k">Topics</div>
-                <div className="v-wrap">
-                  <button
-                    type="button"
-                    className="num-input situation-trigger"
-                    onClick={() => setFocusAreasOpen(true)}
-                  >
-                    {(profile?.focus_areas ?? []).length > 0
-                      ? `${profile!.focus_areas.length} ${profile!.focus_areas.length === 1 ? 'area' : 'areas'}`
-                      : 'Not set'}
-                  </button>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 10 }}>
+                    <div style={{ fontSize: 14, fontWeight: 550, color: 'var(--fg)' }}>Explanation style</div>
+                    <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>how a new answer opens</div>
+                  </div>
+                  <div className="memory-pref-options">
+                    {[
+                      { v: 'hint-first', name: 'Hints first', desc: 'Nudges you toward the answer before giving it.' },
+                      { v: 'answer-first', name: 'Answer first', desc: 'Answers, then explains the reasoning.' },
+                    ].map(o => (
+                      <button
+                        key={o.v}
+                        className={`memory-pref-card ${explanationVal === o.v ? 'active' : ''}`}
+                        onClick={() => { setExplanationVal(o.v); save({ explanation_style: o.v }); }}
+                      >
+                        <div className="name">{o.name}</div>
+                        <div className="desc">{o.desc}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <ListModal
-              open={focusAreasOpen}
-              onClose={() => setFocusAreasOpen(false)}
-              title="focus areas"
-              placeholder="name a topic…"
-              items={profile?.focus_areas ?? []}
-              onSave={saveFocusAreas}
-              maxLength={80}
-            />
-
-            <div className="settings-group">
-              <div className="settings-group-title">How should the mentor teach you?</div>
-              <div className="settings-group-sub">These preferences apply in every reply, across all topics and modes.</div>
-
-              <div className="settings-row">
-                <div className="k">Explanation style</div>
-                <div className="v-wrap">
-                  <select className="num-input" value={explanationVal} onChange={e => setExplanationVal(e.target.value)}>
-                    <option value="hint-first">Hints first</option>
-                    <option value="answer-first">Answer first</option>
-                  </select>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 10 }}>
+                    <div style={{ fontSize: 14, fontWeight: 550, color: 'var(--fg)' }}>Challenge tolerance</div>
+                    <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>how hard follow-up questions get</div>
+                  </div>
+                  <div className="memory-pref-options">
+                    {[
+                      { v: 'low', name: 'Gentle', desc: 'Stays close to what you already know.' },
+                      { v: 'medium', name: 'Medium', desc: 'One step beyond your current level.' },
+                      { v: 'high', name: 'Push me', desc: 'Edge cases and exam-grade traps.' },
+                    ].map(o => (
+                      <button
+                        key={o.v}
+                        className={`memory-pref-card ${challengeVal === o.v ? 'active' : ''}`}
+                        onClick={() => { setChallengeVal(o.v); save({ challenge_tolerance: o.v }); }}
+                      >
+                        <div className="name">{o.name}</div>
+                        <div className="desc">{o.desc}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="settings-row">
-                <div className="k">Challenge tolerance</div>
-                <div className="v-wrap">
-                  <select className="num-input" value={challengeVal} onChange={e => setChallengeVal(e.target.value)}>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div className="k">Feedback tone</div>
-                <div className="v-wrap">
-                  <select className="num-input" value={toneVal} onChange={e => setToneVal(e.target.value)}>
-                    <option value="direct">Direct</option>
-                    <option value="encouraging">Encouraging</option>
-                  </select>
-                </div>
-              </div>
 
-              <div className="settings-row" style={{ justifyContent: 'flex-end', borderBottom: 'none', paddingTop: 6 }}>
-                <button
-                  className="btn btn-sm btn-primary"
-                  disabled={saving || (
-                    explanationVal === (profile?.explanation_style ?? 'hint-first') &&
-                    challengeVal === (profile?.challenge_tolerance ?? 'medium') &&
-                    toneVal === (profile?.feedback_tone ?? 'encouraging')
-                  )}
-                  onClick={() => save({ explanation_style: explanationVal, challenge_tolerance: challengeVal, feedback_tone: toneVal })}
-                >
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-            </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 10 }}>
+                    <div style={{ fontSize: 14, fontWeight: 550, color: 'var(--fg)' }}>Feedback tone</div>
+                    <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>how a wrong answer is handled</div>
+                  </div>
+                  <div className="memory-pref-options">
+                    {[
+                      { v: 'encouraging', name: 'Encouraging', desc: 'Credits what was right before correcting.' },
+                      { v: 'direct', name: 'Direct', desc: 'States what was wrong, no framing.' },
+                    ].map(o => (
+                      <button
+                        key={o.v}
+                        className={`memory-pref-card ${toneVal === o.v ? 'active' : ''}`}
+                        onClick={() => { setToneVal(o.v); save({ feedback_tone: o.v }); }}
+                      >
+                        <div className="name">{o.name}</div>
+                        <div className="desc">{o.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <div className="settings-group">
-              <div className="settings-group-title" style={{ color: 'var(--danger)' }}>Danger zone</div>
-              <div className="danger-card">
-                {confirmReset ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      This clears your L1 memory (learning context, focus areas, preferences, style notes) and
-                      restarts onboarding. Your skill graph and session history are kept. Are you sure?
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="danger-btn" disabled={saving} onClick={handleReset}>Yes, reset L1 memory</button>
-                      <button className="btn btn-sm btn-ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
+                <div>
+                  <div className="set-header" style={{ marginBottom: 12 }}>
+                    <div className="set-label">Preview</div>
+                    <div className="set-header-line" />
+                  </div>
+                  <div className="memory-preview">
+                    <div className="memory-preview-label">You asked · why is this query slow?</div>
+                    <div className="memory-preview-body">
+                      {MEMORY_PREVIEW[`${explanationVal}|${toneVal}`] ?? MEMORY_PREVIEW['hint-first|encouraging']}
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <button className="danger-btn" onClick={() => setConfirmReset(true)}>Reset L1 memory</button>
-                    <div className="danger-note">Clears learning context, focus areas, and preferences, then restarts onboarding.</div>
-                  </>
-                )}
+                </div>
               </div>
-            </div>
+            )}
+
+            {memorySubTab === 'data' && (<>
+              <div className="settings-group">
+                <div className="set-header">
+                  <div className="set-label">Pause &amp; export</div>
+                  <div className="set-header-line" />
+                </div>
+                <div className="settings-row" style={{ marginTop: 12, border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '15px 17px', background: 'var(--card)' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13.5px', color: 'var(--fg)' }}>Pause memory</div>
+                    <div style={{ marginTop: 5, fontSize: '12.5px', color: 'var(--muted)' }}>Keeps everything, but the mentor answers as if it knew none of it.</div>
+                  </div>
+                  {/* ponytail: no pause flag on the profile yet — wire this up when the prompt assembler can skip L1 context on demand. */}
+                  <button className="btn btn-ghost btn-sm" disabled title="Not available yet">Coming soon</button>
+                </div>
+                <div className="settings-row" style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '15px 17px', background: 'var(--card)' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13.5px', color: 'var(--fg)' }}>Export memory</div>
+                    <div style={{ marginTop: 5, fontSize: '12.5px', color: 'var(--muted)' }}>Download everything on this page as JSON.</div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm" onClick={exportMemory}>Export</button>
+                </div>
+              </div>
+
+              <div className="settings-group">
+                <div className="set-header">
+                  <div className="set-label danger">Start over</div>
+                  <div className="set-header-line" />
+                </div>
+                <div className="danger-card" style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: '13.5px', color: 'var(--fg-dim)' }}>
+                    Deletes every item, focus area, and teaching preference. Your chat history stays. This cannot be undone.
+                  </div>
+                  {confirmReset ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--danger)' }}>TYPE &quot;WIPE&quot; TO CONFIRM</span>
+                      <input
+                        className="num-input"
+                        style={{ width: 110, fontFamily: 'var(--mono)', fontSize: 12, borderColor: 'var(--danger-line)' }}
+                        value={wipeText}
+                        placeholder="WIPE"
+                        onChange={e => setWipeText(e.target.value)}
+                      />
+                      <button className="danger-btn" disabled={saving || wipeText.trim().toUpperCase() !== 'WIPE'} onClick={handleReset}>
+                        Delete everything
+                      </button>
+                      <button className="btn btn-sm btn-ghost" onClick={() => { setConfirmReset(false); setWipeText(''); }}>Cancel</button>
+                    </div>
+                  ) : (
+                    <button className="danger-btn" style={{ alignSelf: 'flex-start' }} onClick={() => setConfirmReset(true)}>Wipe all memory</button>
+                  )}
+                </div>
+              </div>
+            </>)}
           </>)}
         </div>
       </div>
 
-      {tab === 'memory' && (
+      {tab === 'memory' && memorySubTab === 'data' && (
         <div className="settings-memory-composer">
           {memoryResult && <div className="settings-memory-result">{memoryResult}</div>}
           <div className="settings-memory-status">

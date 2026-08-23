@@ -30,10 +30,11 @@ _FALLBACK_SUMMARY = "Couldn't match that to anything in your profile — try bei
 
 
 def _build_prompt(profile: dict[str, Any], message: str) -> str:
+    situations = (profile.get("learning_context_detail") or {}).get("situations") or []
     current = {
         "learning_context": profile.get("learning_context"),
         "learning_context_label": (profile.get("learning_context_detail") or {}).get("label"),
-        "focus_areas": profile.get("focus_areas") or [],
+        "situations": [{"index": i, "text": s} for i, s in enumerate(situations)],
         "explanation_style": profile.get("explanation_style", "hint-first"),
         "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
         "feedback_tone": profile.get("feedback_tone", "encouraging"),
@@ -51,7 +52,8 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
         "optional — include a key ONLY if the instruction changes it:\n"
         '  "learning_context": one of job_interview|high_stakes_exam|competitive_test|self_directed|other\n'
         '  "learning_context_label": string\n'
-        '  "focus_areas": array of strings — the FULL replacement list, only if focus areas are being changed\n'
+        '  "add_situation": string — a new fact to add to "Facts About You"\n'
+        '  "remove_situation_indices": array of integers — indices from situations above to delete\n'
         '  "explanation_style": hint-first|answer-first\n'
         '  "challenge_tolerance": low|medium|high\n'
         '  "feedback_tone": direct|encouraging\n'
@@ -118,22 +120,37 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
     if data.get("learning_context") in _VALID_CONTEXTS:
         update["learning_context"] = data["learning_context"]
 
+    existing_detail = profile.get("learning_context_detail") or {}
+    situations = list(existing_detail.get("situations") or [])
+    label = existing_detail.get("label")
+    detail_changed = False
+
     if isinstance(data.get("learning_context_label"), str):
-        ctx = update.get("learning_context") or profile.get("learning_context") or "self_directed"
-        existing_detail = profile.get("learning_context_detail") or {}
         label = data["learning_context_label"]
-        situations = [s for s in (existing_detail.get("situations") or []) if s != label]
+        situations = [s for s in situations if s != label]
+        situations = [label, *situations]
+        detail_changed = True
+
+    remove_situation_indices = data.get("remove_situation_indices")
+    if isinstance(remove_situation_indices, list) and remove_situation_indices and all(
+        isinstance(i, int) for i in remove_situation_indices
+    ):
+        drop = set(remove_situation_indices)
+        situations = [s for i, s in enumerate(situations) if i not in drop]
+        detail_changed = True
+
+    add_situation = data.get("add_situation")
+    if isinstance(add_situation, str) and add_situation.strip():
+        situations = [add_situation.strip(), *situations]
+        detail_changed = True
+
+    if detail_changed:
+        ctx = update.get("learning_context") or profile.get("learning_context") or "self_directed"
         update["learning_context_detail"] = {
             "learning_context": ctx,
-            "contexts": existing_detail.get("contexts") or [ctx],
             "label": label,
-            # The new label joins the injected list rather than replacing it —
-            # this write used to drop `situations` entirely.
-            "situations": [label, *situations][:20],
+            "situations": situations[:20],
         }
-
-    if isinstance(data.get("focus_areas"), list) and all(isinstance(x, str) for x in data["focus_areas"]):
-        update["focus_areas"] = data["focus_areas"]
 
     if data.get("explanation_style") in _VALID_EXPLANATION:
         update["explanation_style"] = data["explanation_style"]

@@ -9,7 +9,7 @@ import type { StyleNote } from '@/lib/mentorman-api';
 
 export interface Proposal {
   id: string;
-  /** ProposableField value ("style_note" or "focus_areas") */
+  /** ProposableField value ("style_note" or "situation") */
   field: string;
   proposedValue: Record<string, unknown>;
   reason: string;
@@ -47,7 +47,7 @@ export interface DocumentProposalCardProps {
 function fieldLabel(field: string): string {
   switch (field) {
     case 'style_note': return 'Style Note';
-    case 'focus_areas': return 'Focus Area';
+    case 'situation': return 'Fact';
     default: return field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
@@ -60,8 +60,8 @@ function formatProposedValue(field: string, value: Record<string, unknown>): str
     if (category && note) return `[${category}] ${note}`;
     if (note) return String(note);
   }
-  if (field === 'focus_areas') {
-    return String(value.value ?? value.focus_area ?? JSON.stringify(value));
+  if (field === 'situation') {
+    return String(value.value ?? JSON.stringify(value));
   }
   // Fallback: show stringified value
   const str = JSON.stringify(value);

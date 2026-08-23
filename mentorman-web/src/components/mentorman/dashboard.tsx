@@ -145,10 +145,10 @@ export function Dashboard({ onStartTopic, profile }: {
     ? Math.round(topics.reduce((a, t) => a + t.gap, 0) / topics.length)
     : 0;
 
-  const focusAreas = profile?.focus_areas ?? [];
+  const situations = profile?.learning_context_detail?.situations ?? [];
   const contextLabel = profile?.learning_context_detail?.label;
-  const heroTitle = contextLabel || (focusAreas.length ? focusAreas.join(', ') : '—');
-  const heroSub = contextLabel && focusAreas.length ? focusAreas.join(', ') : null;
+  const heroTitle = contextLabel || (situations.length ? situations.join(', ') : '—');
+  const heroSub = contextLabel && situations.length ? situations.join(', ') : null;
 
   return (
     <div className="dash">

@@ -9,6 +9,7 @@ from pymongo.errors import DuplicateKeyError
 from app.config.database import profiles_col
 from app.auth.dependencies import require_auth
 from app.models.profile import ProfileCreate, ProfileResponse, ProfileUpdate, ProposableField
+from app.services.fact_quality import classify_fact_quality, compute_situations_stamp
 from app.services.memory_editor import apply_memory_edit
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,39 @@ async def delete_profile(user_id: str = Depends(require_auth)):
     return {"ok": True}
 
 
+@router.get("/situations/quality")
+async def get_situations_quality(user_id: str = Depends(require_auth)):
+    """Judge each "Facts About You" entry: does it actually state a fact
+    about the user, or just name a topic/skill (see fact_quality.py)?
+
+    Cached on the profile doc, keyed by a stamp of the situations list
+    (same pattern as TopicService._ensure_l1_scope) — the LLM is only
+    called again when a fact was added, edited, or removed since the last
+    judgment, not on every Settings open.
+    """
+    doc = await profiles_col().find_one(
+        {"user_id": user_id},
+        {"learning_context_detail": 1, "situation_quality": 1, "situationQualityStamp": 1},
+    )
+    situations = ((doc or {}).get("learning_context_detail") or {}).get("situations") or []
+    current_stamp = compute_situations_stamp(situations)
+
+    if doc and doc.get("situationQualityStamp") == current_stamp and "situation_quality" in doc:
+        return {"judgments": doc["situation_quality"]}
+
+    try:
+        judgments = await classify_fact_quality(situations)
+    except Exception:
+        logger.exception("classify_fact_quality failed for user_id=%s", user_id)
+        return {"judgments": []}
+
+    await profiles_col().update_one(
+        {"user_id": user_id},
+        {"$set": {"situation_quality": judgments, "situationQualityStamp": current_stamp}},
+    )
+    return {"judgments": judgments}
+
+
 def _find_pending(doc: dict, field: str) -> dict | None:
     return next((p for p in doc.get("pending_changes", []) if p.get("field") == field), None)
 
@@ -133,15 +167,17 @@ async def accept_pending_change(field: str, user_id: str = Depends(require_auth)
         # note turns out to matter more than a newer one.
         notes = (doc.get("style_notes") or []) + [new_note]
         update["style_notes"] = notes[-5:]
-    elif field == ProposableField.FOCUS_AREA.value:
-        focus_areas = list(doc.get("focus_areas") or [])
-        new_area = proposed.get("value", "")
+    elif field == ProposableField.SITUATION.value:
+        detail = dict(doc.get("learning_context_detail") or {})
+        ctx = detail.get("learning_context") or doc.get("learning_context") or "self_directed"
+        situations = list(detail.get("situations") or [])
+        new_situation = proposed.get("value", "")
         # Append only if not a case-insensitive duplicate of an existing entry.
-        if new_area and not any(
-            existing.lower() == new_area.lower() for existing in focus_areas
+        if new_situation and not any(
+            existing.lower() == new_situation.lower() for existing in situations
         ):
-            focus_areas.append(new_area)
-        update["focus_areas"] = focus_areas
+            situations.append(new_situation)
+        update["learning_context_detail"] = {**detail, "learning_context": ctx, "situations": situations[:20]}
 
     update["pending_changes"] = [
         p for p in doc.get("pending_changes", []) if p.get("field") != field

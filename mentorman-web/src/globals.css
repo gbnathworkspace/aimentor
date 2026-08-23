@@ -371,12 +371,35 @@ body {
 .btn-ghost { background: transparent; border-color: var(--border); }
 .btn-danger { background: var(--danger); color: #0a0a0c; border-color: var(--danger); }
 .btn-danger:hover { filter: brightness(1.05); background: var(--danger); }
+.btn-disagree:hover { background: var(--danger); border-color: var(--danger); color: #0a0a0c; }
 .btn-sm { height: 28px; padding: 0 11px; font-size: 12px; }
+
+/* ===========================================================
+   Settings modal (claude.ai-style overlay dialog)
+   =========================================================== */
+.settings-modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
+  padding: 24px;
+}
+.settings-modal {
+  width: 100%; max-width: 860px; height: 100%; max-height: 620px;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+}
+.settings-modal-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 999px; color: var(--muted);
+  background: transparent; border: none; cursor: pointer;
+}
+.settings-modal-close:hover { background: var(--card-2); color: var(--fg); }
 
 /* ===========================================================
    Chat panel
    =========================================================== */
-.panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+.panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
 .panel-head {
   min-height: 60px; flex-shrink: 0;
   padding: 12px 22px; border-bottom: 1px solid var(--border-soft);
@@ -1017,8 +1040,18 @@ body {
 .set-body { flex: 1; overflow-y: auto; padding: 44px 34px 60px; }
 .set-inner { max-width: 580px; margin: 0 auto; display: flex; flex-direction: column; gap: 38px; }
 .set-section { display: flex; flex-direction: column; gap: 12px; }
-.set-label { font-family: var(--mono); font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.16em; }
+.set-label {
+  font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--fg-dim);
+  text-transform: uppercase; letter-spacing: 0.16em;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.set-label::before { content: ''; width: 6px; height: 6px; border-radius: 1px; background: var(--accent); flex: none; }
 .set-label.danger { color: var(--danger); }
+.set-label.danger::before { background: var(--danger); }
+.set-header { display: flex; align-items: center; gap: 11px; }
+.set-header .set-label { flex: none; white-space: nowrap; }
+.set-header-line { flex: 1; height: 1px; background: var(--hair); }
+.set-header-count { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; flex: none; }
 .set-row { display: flex; align-items: center; gap: 13px; padding: 15px 17px; border: 1px solid var(--border); border-radius: var(--r); background: linear-gradient(180deg, var(--card), var(--bg-2)); }
 .set-row .k { font-family: var(--mono); font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; flex: 0 0 116px; }
 .set-row .v { flex: 1; font-size: 14px; color: var(--fg-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1127,6 +1160,78 @@ body {
 }
 .settings-memory-composer-box .icon-btn:disabled { opacity: 0.4; background: var(--card-2); color: var(--muted); }
 .danger-note { font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+/* ---- Settings → Memory tab (About you / Preferences / Import memory) ---- */
+.settings-memory-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border-soft); margin-bottom: 26px; }
+.settings-memory-tab {
+  display: flex; align-items: baseline; gap: 8px; padding: 9px 14px 12px; margin-bottom: -1px;
+  background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted);
+  font-family: inherit; font-size: 13.5px; cursor: pointer;
+}
+.settings-memory-tab:hover { color: var(--fg-dim); }
+.settings-memory-tab.active { color: var(--fg); font-weight: 550; border-bottom-color: var(--accent); }
+.settings-memory-tab-count { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.settings-memory-tab.active .settings-memory-tab-count { color: var(--accent); }
+
+.memory-fact-row { display: flex; align-items: center; gap: 14px; padding: 12px 4px; border-bottom: 1px solid var(--hair); cursor: text; border-radius: var(--r-sm); }
+.memory-fact-row:hover { background: var(--card); }
+.memory-fact-text { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.5; color: var(--fg-dim); }
+.memory-fact-vague { margin-top: 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--warn); }
+.memory-fact-vague-badge {
+  width: 15px; height: 15px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--warn-weak); border: 1px solid var(--warn-line);
+  color: var(--warn); font-family: var(--mono); font-size: 9.5px; line-height: 1;
+}
+.memory-fact-rewrite-btn {
+  margin-left: auto; flex-shrink: 0; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--warn-line); background: var(--warn-weak); color: var(--warn);
+  font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.memory-fact-rewrite-btn:hover { background: var(--warn); color: #0a0a0c; }
+.memory-fact-remove {
+  width: 22px; height: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; background: none; color: var(--muted); cursor: pointer;
+}
+.memory-fact-remove:hover { background: var(--danger-weak); color: var(--danger); }
+.memory-fact-edit {
+  padding: 13px 15px; border: 1px solid var(--accent-line); border-radius: var(--r);
+  background: var(--card-2); display: flex; flex-direction: column; gap: 11px;
+}
+.memory-fact-edit textarea {
+  width: 100%; box-sizing: border-box; resize: vertical; background: var(--bg-2); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px;
+  font-size: 13.5px; line-height: 1.5; outline: none; font-family: inherit;
+}
+.memory-add-btn { align-self: flex-start; margin-top: 4px; padding: 6px 4px; background: none; border: none; color: var(--muted-2); font-size: 13px; cursor: pointer; }
+.memory-add-btn:hover { color: var(--accent); }
+
+.memory-stub { padding: 13px 15px; border: 1px solid var(--border-soft); border-radius: var(--r); background: var(--card); font-size: 13px; color: var(--muted-2); }
+
+.memory-topic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.memory-topic-chip { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--card); }
+.memory-topic-chip:hover { background: var(--card-2); }
+.memory-topic-name { flex: 1; min-width: 0; font-size: 12.5px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-topic-remove {
+  width: 20px; height: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; background: none; color: var(--muted); cursor: pointer;
+}
+.memory-topic-remove:hover { background: var(--danger-weak); color: var(--danger); }
+
+.memory-pref-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.memory-pref-card {
+  flex: 1; min-width: 150px; text-align: left; padding: 12px 14px; border-radius: var(--r);
+  font-family: inherit; cursor: pointer; border: 1px solid var(--border-soft); background: var(--card); color: var(--muted-2);
+}
+.memory-pref-card:hover { border-color: var(--border); background: var(--card-2); }
+.memory-pref-card.active { border-color: var(--accent-line); background: var(--accent-weak); }
+.memory-pref-card .name { font-size: 13.5px; font-weight: 550; color: var(--fg-dim); }
+.memory-pref-card.active .name { color: var(--fg); }
+.memory-pref-card .desc { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.memory-pref-card.active .desc { color: var(--muted-2); }
+
+.memory-preview { padding: 16px 18px; border: 1px solid var(--border-soft); border-radius: var(--r); background: var(--bg-2); }
+.memory-preview-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+.memory-preview-body { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--card); font-size: 13.5px; line-height: 1.6; color: var(--fg-dim); }
 
 /* ===========================================================
    Mobile chat view (phone frame overlay)
@@ -1922,34 +2027,55 @@ body {
 /* classify_relevance-scoped L1 memory badge — marks a card as derived from
    the user's profile (focus areas / learning context), not a generic option
    like "Just revising" or "Something else". */
-.goal-card-l1-badge { display: inline-flex; color: var(--accent); flex-shrink: 0; }
+.goal-card-l1-badge {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--accent); background: var(--accent-weak);
+  padding: 1px 6px 1px 5px; border-radius: 4px;
+}
 
-/* L1MemoryModal — read-only listing of a topic's full l1_scope, grouped by
-   verdict. Reuses .skip-dialog/.sw-head/.sw-title/.sw-sub/.sw-goal-note. */
+/* L1MemoryModal — same section structure as Settings' Memory tab (Facts
+   About You / Session Moments / Insights), scoped to one topic. Reuses
+   .skip-dialog/.sw-head/.sw-title/.sw-sub/.sw-goal-note/.set-header/
+   .set-label/.memory-fact-row. */
 .l1-memory-dialog { width: 460px; max-height: 80vh; overflow-y: auto; }
+.l1-memory-section + .l1-memory-section { margin-top: 24px; }
+.l1-memory-section .set-header { margin-bottom: 12px; }
 .l1-memory-groups { display: flex; flex-direction: column; gap: 18px; }
 .l1-memory-group { border-radius: var(--r-sm); transition: background-color .12s ease, outline-color .12s ease; }
 /* Only Relevant/Not relevant accept drops (see DROP_TARGETS) — the dashed
    outline only appears on those while something is dragged over them. */
 .l1-memory-group--dragover { background: var(--accent-weak); outline: 1.5px dashed var(--accent-line); outline-offset: 2px; }
-.l1-memory-group-title {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 8px; padding: 2px 0;
-  background: none; border: none; width: 100%; text-align: left; cursor: pointer;
-  font-family: var(--mono); font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase;
+/* Same header treatment as Settings' Facts About You (.set-label/.set-header)
+   — bold accent-marker label, a line filling the gap, count on the right —
+   just wrapped in a clickable button so the group still collapses. */
+.l1-memory-group-header {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; padding: 2px 0; margin-bottom: 8px; cursor: pointer; text-align: left;
 }
-.l1-memory-group-title svg { flex-shrink: 0; transition: transform .12s ease; }
-.l1-memory-group-title--relevant { color: var(--accent); }
-.l1-memory-group-title--uncertain { color: var(--warn); }
-.l1-memory-group-title--irrelevant { color: var(--danger); }
-.l1-memory-group-count {
-  font-family: var(--sans); font-size: 10.5px; font-weight: 600; letter-spacing: 0;
-  color: var(--muted); text-transform: none;
-}
-.l1-memory-row { padding: 8px 4px; border-top: 1px solid var(--border); cursor: grab; }
+.l1-memory-group-header svg { flex-shrink: 0; transition: transform .12s ease; }
+.l1-memory-group-header .set-label { flex: none; white-space: nowrap; }
+.l1-memory-group-label--relevant { color: var(--accent); }
+.l1-memory-group-label--relevant::before { background: var(--accent); }
+.l1-memory-group-label--uncertain { color: var(--warn); }
+.l1-memory-group-label--uncertain::before { background: var(--warn); }
+.l1-memory-group-label--irrelevant { color: var(--danger); }
+.l1-memory-group-label--irrelevant::before { background: var(--danger); }
+/* Rows reuse .memory-fact-row/.memory-fact-text (same as Settings' Facts
+   About You list) — this just adds the drag affordance on top. */
+.l1-memory-row { cursor: grab; }
 .l1-memory-row:active { cursor: grabbing; }
-.l1-memory-group > .l1-memory-row:first-of-type { border-top: none; }
-.l1-memory-row-text { font-size: 13px; color: var(--fg); line-height: 1.4; }
-.l1-memory-row-reason { margin-top: 3px; font-size: 11.5px; color: var(--muted-2); line-height: 1.4; }
+.l1-memory-row-reason { margin-top: 5px; font-family: var(--mono); font-size: 10px; color: var(--muted); line-height: 1.4; }
+.l1-memory-row-move {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; margin-top: 1px; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--card-2);
+  color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .12s ease, color .12s ease, border-color .12s ease, background .12s ease;
+}
+.l1-memory-row:hover .l1-memory-row-move,
+.l1-memory-row-move:focus-visible { opacity: 1; }
+.l1-memory-row-move--irrelevant:hover { color: var(--danger); border-color: var(--danger); background: color-mix(in oklch, var(--danger) 12%, var(--card-2)); }
+.l1-memory-row-move--relevant:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
 .goal-card-desc { font-size: 12px; color: var(--muted-2); line-height: 1.45; }
 
 .sw-goal-footer { display: flex; align-items: center; gap: 12px; margin-top: 16px; }

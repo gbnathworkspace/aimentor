@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from app.models.profile import ProposableField, StyleNoteCategory
 from app.services.l1_fact_synthesizer import (
     accumulate_proposals,
-    deduplicate_focus_areas,
+    deduplicate_situations,
 )
 
 # ---------------------------------------------------------------------------
@@ -34,12 +34,12 @@ _focus_area_strategy = st.text(
 @st.composite
 def random_existing_profile(draw):
     """Generate a random existing profile state with focus_areas and style_notes."""
-    num_focus_areas = draw(st.integers(min_value=0, max_value=10))
-    focus_areas = draw(
+    num_situations = draw(st.integers(min_value=0, max_value=10))
+    situations = draw(
         st.lists(
             _focus_area_strategy,
-            min_size=num_focus_areas,
-            max_size=num_focus_areas,
+            min_size=num_situations,
+            max_size=num_situations,
         )
     )
 
@@ -49,7 +49,7 @@ def random_existing_profile(draw):
         for i in range(num_style_notes)
     ]
 
-    return {"focus_areas": focus_areas, "style_notes": style_notes}
+    return {"situations": situations, "style_notes": style_notes}
 
 
 _valid_categories = [c.value for c in StyleNoteCategory]
@@ -63,11 +63,11 @@ def random_proposals(draw):
 
     for _ in range(num_proposals):
         field_type = draw(st.sampled_from([
-            ProposableField.FOCUS_AREA,
+            ProposableField.SITUATION,
             ProposableField.STYLE_NOTE,
         ]))
 
-        if field_type == ProposableField.FOCUS_AREA:
+        if field_type == ProposableField.SITUATION:
             value = draw(_focus_area_strategy)
             proposals.append({
                 "field": field_type.value,
@@ -137,14 +137,14 @@ async def test_accumulation_never_loses_existing_values(existing_profile, propos
     non_focus_non_style = [
         p for p in proposals
         if p["field"] not in (
-            ProposableField.FOCUS_AREA.value,
+            ProposableField.SITUATION.value,
             ProposableField.STYLE_NOTE.value,
         )
     ]
     result_non_focus_non_style = [
         p for p in result
         if p["field"] not in (
-            ProposableField.FOCUS_AREA.value,
+            ProposableField.SITUATION.value,
             ProposableField.STYLE_NOTE.value,
         )
     ]
@@ -154,14 +154,14 @@ async def test_accumulation_never_loses_existing_values(existing_profile, propos
     )
 
     # Focus area proposals that are NOT duplicates of existing must be kept
-    existing_focus_lower = {a.lower() for a in existing_profile["focus_areas"]}
+    existing_focus_lower = {a.lower() for a in existing_profile["situations"]}
     for proposal in proposals:
-        if proposal["field"] == ProposableField.FOCUS_AREA.value:
+        if proposal["field"] == ProposableField.SITUATION.value:
             area = proposal["proposed_value"]["value"]
             if area.lower() not in existing_focus_lower:
                 # This non-duplicate should be in the result
                 assert any(
-                    p["field"] == ProposableField.FOCUS_AREA.value
+                    p["field"] == ProposableField.SITUATION.value
                     and p["proposed_value"]["value"] == area
                     for p in result
                 ), (
@@ -260,7 +260,7 @@ def test_focus_area_deduplication_no_case_insensitive_duplicates(data):
     """
     proposed, existing = data
 
-    result = deduplicate_focus_areas(proposed, existing)
+    result = deduplicate_situations(proposed, existing)
 
     existing_lower = {area.lower() for area in existing}
 
@@ -299,7 +299,7 @@ def test_focus_area_self_dedup_against_lowered_set(areas):
     existing = list({a.lower() for a in areas})
     proposed = areas
 
-    result = deduplicate_focus_areas(proposed, existing)
+    result = deduplicate_situations(proposed, existing)
 
     # Every area in the result should NOT be a case-insensitive match of existing
     existing_lower = {e.lower() for e in existing}

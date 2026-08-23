@@ -26,7 +26,7 @@ class TestCreatePendingChanges:
 
         proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "System Design"},
                 "reason": "Extracted from resume.pdf",
             },
@@ -59,7 +59,7 @@ class TestCreatePendingChanges:
 
         proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "ML Engineering"},
                 "reason": "From uploaded document",
             },
@@ -78,7 +78,7 @@ class TestCreatePendingChanges:
 
             assert entry["source_type"] == "document_upload"
             assert entry["session_id"] == "job-xyz-789"
-            assert entry["field"] == "focus_area"
+            assert entry["field"] == "situation"
             assert entry["proposed_value"] == {"value": "ML Engineering"}
 
     @pytest.mark.asyncio
@@ -125,19 +125,19 @@ class TestApplyProposalsDirectly:
     """_apply_proposals_directly writes to L1 memory when skip_review=true."""
 
     @pytest.mark.asyncio
-    async def test_appends_focus_area(self):
+    async def test_appends_situation(self):
         from app.services.document_pipeline import _apply_proposals_directly
 
         proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "System Design"},
                 "reason": "From document",
             },
         ]
         profile = {
             "user_id": "user-1",
-            "focus_areas": ["Python", "AWS"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["Python", "AWS"]},
             "style_notes": [],
         }
 
@@ -151,24 +151,25 @@ class TestApplyProposalsDirectly:
 
             call_args = mock_collection.update_one.call_args
             update_set = call_args.args[1]["$set"]
-            assert "System Design" in update_set["focus_areas"]
-            assert "Python" in update_set["focus_areas"]
-            assert "AWS" in update_set["focus_areas"]
+            situations = update_set["learning_context_detail"]["situations"]
+            assert "System Design" in situations
+            assert "Python" in situations
+            assert "AWS" in situations
 
     @pytest.mark.asyncio
-    async def test_focus_area_deduplicates_case_insensitive(self):
+    async def test_situation_deduplicates_case_insensitive(self):
         from app.services.document_pipeline import _apply_proposals_directly
 
         proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "Python"},  # already exists as "python"
                 "reason": "From document",
             },
         ]
         profile = {
             "user_id": "user-1",
-            "focus_areas": ["python", "AWS"],
+            "learning_context_detail": {"learning_context": "self_directed", "situations": ["python", "AWS"]},
             "style_notes": [],
         }
 
@@ -183,7 +184,7 @@ class TestApplyProposalsDirectly:
             call_args = mock_collection.update_one.call_args
             update_set = call_args.args[1]["$set"]
             # Should NOT have added "Python" since "python" exists
-            assert update_set["focus_areas"] == ["python", "AWS"]
+            assert update_set["learning_context_detail"]["situations"] == ["python", "AWS"]
 
     @pytest.mark.asyncio
     async def test_appends_style_note_with_cap(self):
@@ -232,7 +233,7 @@ class TestApplyProposalsDirectly:
 
         proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "Kubernetes"},
                 "reason": "From document",
             },
@@ -279,7 +280,7 @@ class TestProcessDocumentUploadProposalModes:
         mock_synthesis_result.success = True
         mock_synthesis_result.proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "Backend Dev"},
                 "reason": "From document",
             }
@@ -333,7 +334,7 @@ class TestProcessDocumentUploadProposalModes:
         mock_synthesis_result.success = True
         mock_synthesis_result.proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "Backend Dev"},
                 "reason": "From document",
             }
@@ -379,7 +380,7 @@ class TestProcessDocumentUploadProposalModes:
 
         expected_proposals = [
             {
-                "field": "focus_area",
+                "field": "situation",
                 "proposed_value": {"value": "DevOps"},
                 "reason": "From doc",
             }

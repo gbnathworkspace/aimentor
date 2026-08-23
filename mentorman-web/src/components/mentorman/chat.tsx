@@ -20,8 +20,8 @@ import type { CoreProfile } from '@/lib/mentorman-api';
 // Must match _META_MARKER in unified-backend/app/services/topic_chat_service.py
 const META_MARKER = '\x00META\x00';
 
-// One entry from a topic's l1_scope (situations + contexts + focus_areas
-// judged against the topic — see .kiro/specs/topic-scoping).
+// One entry from a topic's l1_scope (facts about you, judged against the
+// topic — see .kiro/specs/topic-scoping).
 export interface L1ScopeEntry {
   situation: string;
   verdict: 'relevant' | 'irrelevant' | 'uncertain';
@@ -247,8 +247,8 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<QuickReplyOption[]>([]);
   const [topicTitle, setTopicTitle] = useState<string>('New Topic');
-  // Full l1_scope for the current topic (situations + contexts + focus_areas,
-  // see .kiro/specs/topic-scoping) — source of truth for both the topic-open
+  // Full l1_scope for the current topic (facts about you, see
+  // .kiro/specs/topic-scoping) — source of truth for both the topic-open
   // uncertain-items modal and SubtopicWeightsModal's goal-card filtering.
   const [l1Scope, setL1Scope] = useState<L1ScopeEntry[]>([]);
   // l1_scope entries the classifier judged "uncertain" and the user hasn't
@@ -256,7 +256,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   const [uncertainItems, setUncertainItems] = useState<UncertainL1ScopeItem[]>([]);
   const [showUncertainModal, setShowUncertainModal] = useState(false);
   // Same modal, reused to gate opening the weights picker specifically on
-  // uncertain focus_areas/context that its goal cards would otherwise use.
+  // uncertain situations/context that its goal cards would otherwise use.
   const [weightsGateItems, setWeightsGateItems] = useState<UncertainL1ScopeItem[]>([]);
   const [showWeightsGate, setShowWeightsGate] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -486,13 +486,13 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   const [showWeights, setShowWeights] = useState(false);
   const [showL1Memory, setShowL1Memory] = useState(false);
 
-  // Opening the weights picker: if any focus_area/context text its goal
+  // Opening the weights picker: if any situation/context text its goal
   // cards would use is still "uncertain" and unresolved, resolve those
   // right here first — same modal as topic-open, scoped to just this
   // subset — instead of silently proceeding with a stale/unfiltered card.
   const openWeights = useCallback(() => {
     const cardTexts = new Set(
-      [...(profile?.focus_areas ?? []), profile?.learning_context_detail?.label].filter(Boolean) as string[]
+      [...(profile?.learning_context_detail?.situations ?? []), profile?.learning_context_detail?.label].filter(Boolean) as string[]
     );
     const pending = l1Scope.filter(e => e.verdict === 'uncertain' && !e.userResolved && cardTexts.has(e.situation));
     if (pending.length > 0) {
@@ -632,6 +632,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         open={showL1Memory}
         topicTitle={topicTitle}
         entries={l1Scope}
+        profile={profile}
         onResolve={resolveUncertain}
         onClose={() => setShowL1Memory(false)}
       />

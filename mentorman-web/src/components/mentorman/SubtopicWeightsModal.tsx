@@ -102,7 +102,7 @@ function keyTokens(s: string): Set<string> {
   );
 }
 
-// L1 focus areas are free text appended over time, so near-restatements pile up
+// L1 facts (situations) are free text appended over time, so near-restatements pile up
 // ("REST API development and system design" vs "REST API design and scalability").
 // Showing both as separate goals is just noise — keep the first, drop the echo.
 export function isNearDuplicate(a: string, b: string): boolean {
@@ -114,15 +114,15 @@ export function isNearDuplicate(a: string, b: string): boolean {
   return shared / Math.min(ta.size, tb.size) >= 0.6;
 }
 
-// Suggests quick-pick goals from the user's existing L1 profile (focus areas,
+// Suggests quick-pick goals from the user's existing L1 profile (facts,
 // learning context) instead of making them type evidence from scratch every
 // time — "Something else" (rendered separately, not a GoalCard) is the escape
 // hatch back to pasting specific work evidence.
 //
-// Focus areas are profile-wide, not topic-scoped, so they may only partly
+// Facts are profile-wide, not topic-scoped, so they may only partly
 // overlap the topic being weighted — classify_relevance judges the actual
 // overlap (see .kiro/specs/topic-scoping), and `l1Scope` here is that
-// judgment's cached output: any focus area / context label it marked
+// judgment's cached output: any fact / context label it marked
 // "irrelevant" to this topic is dropped from the picker entirely rather
 // than offered as a goal that doesn't apply. Entries with no verdict yet
 // (l1Scope empty/absent) or judged "uncertain"/"relevant" are kept —
@@ -142,8 +142,8 @@ export function buildGoalCards(
   // classify_relevance's verdict ranks the survivors — a confirmed "relevant"
   // judgment goes first so the top card (the one auto-selected below) is the
   // one the classifier actually vouched for, not just whichever happened to
-  // be first in the user's raw focus_areas list.
-  const candidates = (profile?.focus_areas ?? []).filter((a) => !irrelevant.has(a));
+  // be first in the user's raw situations list.
+  const candidates = (profile?.learning_context_detail?.situations ?? []).filter((a) => !irrelevant.has(a));
   const ranked = [...candidates].sort((a, b) => {
     const score = (v?: string) => (v === 'relevant' ? 0 : v === undefined ? 1 : 2); // relevant, unjudged, uncertain
     return score(verdictBySituation.get(a)) - score(verdictBySituation.get(b));
@@ -414,7 +414,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
                       <span className="goal-card-title-row">
                         {card.fromL1Scope && (
                           <span className="goal-card-l1-badge" title="From your scoped L1 memory — ranked relevant to this topic by classify_relevance">
-                            <Icon name="target" size={11} />
+                            <Icon name="target" size={10} /> L1
                           </span>
                         )}
                         <span className="goal-card-title">{card.title}</span>

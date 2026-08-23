@@ -12,9 +12,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.config.database import compaction_events_col, immediate_contexts_col, profiles_col, topics_col
-from app.services.l1_scope import (
-    classify_relevance, compute_profile_stamp, extract_focus_areas, extract_situations_and_contexts,
-)
+from app.services.l1_scope import classify_relevance, compute_profile_stamp, extract_situations
 from app.services.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
@@ -128,15 +126,14 @@ class TopicService:
         if not profile:
             return topic
 
-        situations, contexts = extract_situations_and_contexts(profile)
-        focus_areas = extract_focus_areas(profile)
-        current_stamp = compute_profile_stamp(situations, contexts, focus_areas)
+        situations = extract_situations(profile)
+        current_stamp = compute_profile_stamp(situations)
 
         if topic.get("profileStamp") == current_stamp and "l1_scope" in topic:
             return topic
 
         try:
-            fresh = await classify_relevance(topic["title"], situations, contexts, focus_areas)
+            fresh = await classify_relevance(topic["title"], situations)
         except Exception:
             logger.exception(
                 "classify_relevance failed for topic=%s user=%s",

@@ -125,17 +125,20 @@ async def onboarding_complete(
     2. Call bootstrap_skills to generate initial skill graph nodes.
     3. Return the list of skill topics created.
     """
+    # Topics named during onboarding become Facts About You (situations) —
+    # focus_areas is no longer a persisted L1 field, see l1_scope.py.
+    learning_context_detail = None
+    if body.learning_context_label or body.focus_areas:
+        learning_context_detail = LearningContextDetail(
+            learning_context=body.learning_context,
+            label=body.learning_context_label,
+            situations=body.focus_areas[:20],
+        )
+
     # Build via ProfileCreate so the write always matches the L1 schema.
     profile_model = ProfileCreate(
         learning_context=body.learning_context,
-        learning_context_detail=(
-            LearningContextDetail(
-                learning_context=body.learning_context, label=body.learning_context_label
-            )
-            if body.learning_context_label
-            else None
-        ),
-        focus_areas=body.focus_areas,
+        learning_context_detail=learning_context_detail,
         explanation_style=body.explanation_style,
         challenge_tolerance=body.challenge_tolerance,
         feedback_tone=body.feedback_tone,
@@ -160,7 +163,6 @@ async def onboarding_complete(
 
 _SKIP_DEFAULTS = {
     "learning_context": LearningContext.SELF_DIRECTED.value,
-    "focus_areas": [],
 }
 
 
@@ -171,14 +173,20 @@ async def onboarding_skip(
 ) -> OnboardingSkipResponse:
     """Skip onboarding: create a minimal profile and a new chat session."""
     partial = body.partial_profile or {}
+    learning_context = partial.get("learning_context") or _SKIP_DEFAULTS["learning_context"]
+    situations = partial.get("focus_areas") or []
 
     profile_data = {
         "user_id": user_id,
-        "learning_context": partial.get("learning_context") or _SKIP_DEFAULTS["learning_context"],
-        "focus_areas": partial.get("focus_areas") or _SKIP_DEFAULTS["focus_areas"],
+        "learning_context": learning_context,
         "email": "",
         "profile_status": "skipped",
     }
+    if situations:
+        profile_data["learning_context_detail"] = {
+            "learning_context": learning_context,
+            "situations": situations[:20],
+        }
 
     await profiles_col().update_one(
         {"user_id": user_id},
@@ -230,8 +238,13 @@ async def onboarding_complete_deferred(
             "label": body.learning_context_label,
             "structured": {},
         }
-    if body.focus_areas is not None:
-        updates["focus_areas"] = body.focus_areas
+    if body.focus_areas:
+        existing_detail = existing.get("learning_context_detail") or {}
+        ctx = resolved_context or existing_detail.get("learning_context") or "self_directed"
+        existing_situations = list(existing_detail.get("situations") or [])
+        merged = existing_situations + [s for s in body.focus_areas if s not in existing_situations]
+        detail = updates.get("learning_context_detail") or {**existing_detail, "learning_context": ctx}
+        updates["learning_context_detail"] = {**detail, "situations": merged[:20]}
     if body.explanation_style is not None:
         updates["explanation_style"] = body.explanation_style
     if body.challenge_tolerance is not None:

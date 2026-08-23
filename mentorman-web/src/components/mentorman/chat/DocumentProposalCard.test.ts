@@ -14,7 +14,7 @@ import type { Proposal, FailedFile } from './DocumentProposalCard';
 function fieldLabel(field: string): string {
   switch (field) {
     case 'style_note': return 'Style Note';
-    case 'focus_areas': return 'Focus Area';
+    case 'situation': return 'Fact';
     default: return field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
@@ -26,8 +26,8 @@ function formatProposedValue(field: string, value: Record<string, unknown>): str
     if (category && note) return `[${category}] ${note}`;
     if (note) return String(note);
   }
-  if (field === 'focus_areas') {
-    return String(value.value ?? value.focus_area ?? JSON.stringify(value));
+  if (field === 'situation') {
+    return String(value.value ?? JSON.stringify(value));
   }
   const str = JSON.stringify(value);
   return str.length > 80 ? str.slice(0, 77) + '...' : str;
@@ -50,8 +50,8 @@ describe('DocumentProposalCard — fieldLabel', () => {
     expect(fieldLabel('style_note')).toBe('Style Note');
   });
 
-  it('maps focus_areas to "Focus Area"', () => {
-    expect(fieldLabel('focus_areas')).toBe('Focus Area');
+  it('maps situation to "Fact"', () => {
+    expect(fieldLabel('situation')).toBe('Fact');
   });
 
   it('falls back to title-cased underscore-to-space for unknown fields', () => {
@@ -75,8 +75,8 @@ describe('DocumentProposalCard — formatProposedValue', () => {
     expect(result).toBe('Prefers visual diagrams');
   });
 
-  it('formats focus_areas using value key', () => {
-    const result = formatProposedValue('focus_areas', { value: 'System Design' });
+  it('formats situation using value key', () => {
+    const result = formatProposedValue('situation', { value: 'System Design' });
     expect(result).toBe('System Design');
   });
 
@@ -151,7 +151,7 @@ describe('DocumentProposalCard — rendering mode selection', () => {
     const proposals: Proposal[] = [
       {
         id: '1',
-        field: 'focus_areas',
+        field: 'situation',
         proposedValue: { value: 'Machine Learning' },
         reason: 'Found in course syllabus',
         sourceFilename: 'syllabus.pdf',
@@ -185,7 +185,7 @@ describe('DocumentProposalCard — rendering mode selection', () => {
     const proposals: Proposal[] = [
       {
         id: '1',
-        field: 'focus_areas',
+        field: 'situation',
         proposedValue: { value: 'Data Structures' },
         reason: 'test',
         sourceFilename: 'resume.pdf',
@@ -213,11 +213,11 @@ describe('DocumentProposalCard — Apply All visibility', () => {
   it('Apply All button shown only when multiple proposals are pending', () => {
     const proposals: Proposal[] = [
       {
-        id: '1', field: 'focus_areas',
+        id: '1', field: 'situation',
         proposedValue: { value: 'React' }, reason: '', sourceFilename: 'a.pdf', status: 'pending',
       },
       {
-        id: '2', field: 'focus_areas',
+        id: '2', field: 'situation',
         proposedValue: { value: 'Node.js' }, reason: '', sourceFilename: 'b.pdf', status: 'pending',
       },
     ];
@@ -229,11 +229,11 @@ describe('DocumentProposalCard — Apply All visibility', () => {
   it('Apply All button not shown when only one proposal is pending', () => {
     const proposals: Proposal[] = [
       {
-        id: '1', field: 'focus_areas',
+        id: '1', field: 'situation',
         proposedValue: { value: 'React' }, reason: '', sourceFilename: 'a.pdf', status: 'pending',
       },
       {
-        id: '2', field: 'focus_areas',
+        id: '2', field: 'situation',
         proposedValue: { value: 'Node.js' }, reason: '', sourceFilename: 'b.pdf', status: 'accepted',
       },
     ];

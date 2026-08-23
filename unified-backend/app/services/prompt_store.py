@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models.chat import DEFAULT_TONE, ToneId
+from app.services.l1_scope import extract_situations_and_contexts
 from app.services.skill_graph_repo import next_best_topics
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -180,30 +181,44 @@ def _format_documents(documents: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)
 
 
-def _format_learning_context(profile: dict[str, Any]) -> str:
-    """Format every context + every situation the user has recorded.
+def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | None = None) -> str:
+    """Format the user's contexts + situations, filtered to what's relevant
+    to the current topic when a scope is available.
 
-    Nothing here is "active" — the user curates the lists, and whatever is in
-    them is true of them right now, so all of it is injected.
+    `l1_scope` is the topic's cached classify_relevance output (see
+    TopicService._ensure_l1_scope) — each entry carries a `verdict` of
+    "relevant", "irrelevant", or "uncertain". `l1_scope is None` means it
+    was never computed or the last attempt failed — inject everything
+    unfiltered, same as before this filtering existed, rather than dropping
+    L1 context on a transient failure. A real (possibly empty) `l1_scope`
+    list is used as-is, even if every entry is irrelevant — that's the
+    filter doing its job, not a failure to fall back from.
+
+    "uncertain" entries are included (not dropped) — an interim policy,
+    pending a real "ask the user" resolution flow (not built yet): missing
+    a genuinely relevant item silently is worse than including a borderline
+    one until that item gets a real answer.
     """
-    detail = profile.get("learning_context_detail") or {}
-    contexts = list(detail.get("contexts") or [])
-    if not contexts and profile.get("learning_context"):
-        contexts = [str(profile["learning_context"])]
+    situations, contexts = extract_situations_and_contexts(profile)
 
-    situations = list(detail.get("situations") or [])
-    # `label` predates `situations` (onboarding/memory_editor still write it).
-    label = detail.get("label")
-    if label and label not in situations:
-        situations.insert(0, label)
+    if l1_scope is not None:
+        included = {j["situation"] for j in l1_scope if j.get("verdict") != "irrelevant"}
+        contexts = [c for c in contexts if c in included]
+        situations = [s for s in situations if s in included]
 
     parts = [p for p in (", ".join(contexts), "; ".join(situations)) if p]
     return " — ".join(parts) if parts else "Not specified"
 
 
-def _format_focus_areas(profile: dict[str, Any]) -> str:
-    """Format the L1 focus_areas list for the prompt."""
+def _format_focus_areas(profile: dict[str, Any], l1_scope: list[dict] | None = None) -> str:
+    """Format the L1 focus_areas list for the prompt, filtered to what's
+    relevant to the current topic when a scope is available — same rule as
+    _format_learning_context (keep verdict != "irrelevant"; l1_scope is None
+    means unfiltered)."""
     areas = profile.get("focus_areas") or []
+    if l1_scope is not None:
+        included = {j["situation"] for j in l1_scope if j.get("verdict") != "irrelevant"}
+        areas = [a for a in areas if a in included]
     return ", ".join(areas) if areas else "Not specified"
 
 
@@ -269,8 +284,8 @@ def _build_context_variables(
 
     return {
         # L1 Profile fields
-        "learning_context": _format_learning_context(profile),
-        "focus_areas": _format_focus_areas(profile),
+        "learning_context": _format_learning_context(profile, context.get("l1_scope")),
+        "focus_areas": _format_focus_areas(profile, context.get("l1_scope")),
         "explanation_style": profile.get("explanation_style", "hint-first"),
         "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
         "feedback_tone": profile.get("feedback_tone", "encouraging"),

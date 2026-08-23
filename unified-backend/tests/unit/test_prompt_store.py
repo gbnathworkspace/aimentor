@@ -7,6 +7,8 @@ from app.services.prompt_store import (
     get_onboarding_prompt,
     get_system_prompt,
     _format_episodes,
+    _format_focus_areas,
+    _format_learning_context,
     _interpolate,
 )
 
@@ -187,6 +189,111 @@ class TestGetSystemPrompt:
         result = get_system_prompt("socratic", context={"profile": {}, "skill": {}, "episodes": []})
         assert "BALANCED" in result
         assert "{{tone_instructions}}" not in result
+
+
+class TestFormatLearningContext:
+    """Topic Scoping: l1_scope filters _format_learning_context's output."""
+
+    @pytest.fixture
+    def profile(self):
+        return {
+            "learning_context_detail": {
+                "situations": ["preparing for interview backend engineer", "casually looking for frontend"],
+                "contexts": ["senior backend, Mumbai"],
+            }
+        }
+
+    def _judgment(self, text: str, verdict: str) -> dict:
+        return {"situation": text, "verdict": verdict, "reason": "because"}
+
+    def test_l1_scope_none_is_unfiltered(self, profile):
+        result = _format_learning_context(profile, l1_scope=None)
+        assert "preparing for interview backend engineer" in result
+        assert "casually looking for frontend" in result
+        assert "senior backend, Mumbai" in result
+
+    def test_l1_scope_empty_list_is_not_specified(self, profile):
+        assert _format_learning_context(profile, l1_scope=[]) == "Not specified"
+
+    def test_l1_scope_filters_to_relevant_only(self, profile):
+        l1_scope = [
+            self._judgment("preparing for interview backend engineer", "relevant"),
+            self._judgment("casually looking for frontend", "irrelevant"),
+            self._judgment("senior backend, Mumbai", "relevant"),
+        ]
+        result = _format_learning_context(profile, l1_scope=l1_scope)
+        assert "preparing for interview backend engineer" in result
+        assert "senior backend, Mumbai" in result
+        assert "casually looking for frontend" not in result
+
+    def test_all_irrelevant_is_not_specified_not_unfiltered(self, profile):
+        l1_scope = [
+            self._judgment("preparing for interview backend engineer", "irrelevant"),
+            self._judgment("casually looking for frontend", "irrelevant"),
+            self._judgment("senior backend, Mumbai", "irrelevant"),
+        ]
+        assert _format_learning_context(profile, l1_scope=l1_scope) == "Not specified"
+
+    def test_uncertain_is_included_pending_ask_user_flow(self, profile):
+        """Interim policy: "uncertain" is included, not dropped — there's no
+        ask-the-user resolution mechanism built yet (see l1_scope.py), so
+        silently excluding an uncertain item would be indistinguishable
+        from confidently judging it irrelevant, which it explicitly isn't.
+        """
+        l1_scope = [
+            self._judgment("preparing for interview backend engineer", "uncertain"),
+            self._judgment("casually looking for frontend", "irrelevant"),
+            self._judgment("senior backend, Mumbai", "irrelevant"),
+        ]
+        result = _format_learning_context(profile, l1_scope=l1_scope)
+        assert "preparing for interview backend engineer" in result
+
+
+class TestFormatFocusAreas:
+    """Topic Scoping: l1_scope also filters _format_focus_areas's output,
+    same rule as _format_learning_context (see topics-scoping follow-up:
+    focus_areas is classified by classify_relevance but wasn't being
+    filtered into the mentor prompt)."""
+
+    @pytest.fixture
+    def profile(self):
+        return {"focus_areas": ["Kubernetes", "AWS networking", "System design interviews"]}
+
+    def _judgment(self, text: str, verdict: str) -> dict:
+        return {"situation": text, "verdict": verdict, "reason": "because"}
+
+    def test_l1_scope_none_is_unfiltered(self, profile):
+        result = _format_focus_areas(profile, l1_scope=None)
+        assert "Kubernetes, AWS networking, System design interviews" == result
+
+    def test_l1_scope_empty_list_is_not_specified(self, profile):
+        assert _format_focus_areas(profile, l1_scope=[]) == "Not specified"
+
+    def test_l1_scope_filters_to_relevant_only(self, profile):
+        l1_scope = [
+            self._judgment("Kubernetes", "relevant"),
+            self._judgment("AWS networking", "irrelevant"),
+            self._judgment("System design interviews", "irrelevant"),
+        ]
+        result = _format_focus_areas(profile, l1_scope=l1_scope)
+        assert result == "Kubernetes"
+
+    def test_all_irrelevant_is_not_specified_not_unfiltered(self, profile):
+        l1_scope = [
+            self._judgment("Kubernetes", "irrelevant"),
+            self._judgment("AWS networking", "irrelevant"),
+            self._judgment("System design interviews", "irrelevant"),
+        ]
+        assert _format_focus_areas(profile, l1_scope=l1_scope) == "Not specified"
+
+    def test_uncertain_is_included(self, profile):
+        l1_scope = [
+            self._judgment("Kubernetes", "uncertain"),
+            self._judgment("AWS networking", "irrelevant"),
+            self._judgment("System design interviews", "irrelevant"),
+        ]
+        result = _format_focus_areas(profile, l1_scope=l1_scope)
+        assert "Kubernetes" in result
 
 
 class TestStyleNotes:

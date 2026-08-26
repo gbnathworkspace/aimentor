@@ -13,6 +13,7 @@ from app.services.subtopic_weights import (
     _count_mentions_llm,
     _normalize,
     _parse_json_object,
+    _score_proficiency_llm,
 )
 
 
@@ -191,6 +192,8 @@ async def test_goal_intent_never_falls_into_sparse_equal_split():
     scores = {"joins": 9.0, "indexes": 2.0, "transactions": 0.0}
     with patch(
         "app.services.subtopic_weights._score_relevance_llm", AsyncMock(return_value=scores)
+    ), patch(
+        "app.services.subtopic_weights._score_proficiency_llm", AsyncMock(return_value={}),
     ):
         result = await derive_subtopic_weights(
             topic="SQL",
@@ -215,6 +218,8 @@ async def test_goal_intent_skips_the_evidence_path_entirely():
     with patch("app.services.subtopic_weights._count_mentions_llm", counter), patch(
         "app.services.subtopic_weights._score_relevance_llm",
         AsyncMock(return_value={"a": 5.0, "b": 1.0}),
+    ), patch(
+        "app.services.subtopic_weights._score_proficiency_llm", AsyncMock(return_value={}),
     ):
         result = await derive_subtopic_weights(
             topic="SQL", goal="job_performance", subtopics=subtopics, goal_intent="some goal"
@@ -222,6 +227,52 @@ async def test_goal_intent_skips_the_evidence_path_entirely():
 
     counter.assert_not_awaited()
     assert result.weights["a"] > result.weights["b"]
+
+
+@pytest.mark.asyncio
+async def test_proficiency_only_computed_on_goal_intent_path():
+    # Evidence and pairwise paths have no level-anchored intent to estimate
+    # mastery from — proficiency stays None rather than a fabricated guess.
+    counts = {"a": 4, "b": 3, "c": 2}
+    with patch("app.services.subtopic_weights._count_mentions_llm", AsyncMock(return_value=counts)):
+        result = await derive_subtopic_weights(
+            topic="Test", goal="job_performance", subtopics=["a", "b", "c"], work_evidence="evidence"
+        )
+    assert result.proficiency is None
+
+
+@pytest.mark.asyncio
+async def test_proficiency_populated_and_clamped_on_goal_intent_path():
+    subtopics = ["a", "b"]
+    with patch(
+        "app.services.subtopic_weights._score_relevance_llm",
+        AsyncMock(return_value={"a": 5.0, "b": 1.0}),
+    ), patch(
+        "app.services.subtopic_weights._score_proficiency_llm",
+        AsyncMock(return_value={"a": 70.0, "b": 15.0}),
+    ):
+        result = await derive_subtopic_weights(
+            topic="SQL", goal="job_performance", subtopics=subtopics,
+            goal_intent="some goal", current_level="intermediate", skill_gap="low",
+        )
+
+    assert result.proficiency == {"a": 70.0, "b": 15.0}
+
+
+@pytest.mark.asyncio
+async def test_score_proficiency_llm_defaults_missing_subtopic_to_zero_and_clamps():
+    mock_client = AsyncMock()
+    mock_client.messages.create = AsyncMock(
+        return_value=_mock_text_response('{"a": 130, "b": -5}')
+    )
+    with patch("app.services.subtopic_weights.anthropic.AsyncAnthropic", return_value=mock_client):
+        with patch("app.services.subtopic_weights.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
+            scores = await _score_proficiency_llm(
+                "some intent", "SQL", ["a", "b", "c"], "beginner", "high"
+            )
+
+    assert scores == {"a": 100.0, "b": 0.0, "c": 0.0}
 
 
 if __name__ == "__main__":

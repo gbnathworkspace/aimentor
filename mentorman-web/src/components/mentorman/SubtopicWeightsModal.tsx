@@ -14,9 +14,12 @@ interface WeightsResponse {
   weights: Record<string, number> | null;
   flags: WeightFlag[];
   needsPairwise: boolean;
+  // 0-100 estimated "caught up" mastery per subtopic — only populated on the
+  // goalIntent path (see subtopic_weights.py); null after a manual reorder.
+  proficiency: Record<string, number> | null;
 }
 
-type Phase = 'setup' | 'loading' | 'result' | 'error';
+type Phase = 'loading' | 'result' | 'error';
 
 const TEMP_MIN = 0.25;
 const TEMP_MAX = 3;
@@ -64,6 +67,114 @@ function rankingToComparisons(order: string[]): [string, string][] {
     for (let j = i + 1; j < order.length; j++) pairs.push([order[i], order[j]]);
   }
   return pairs;
+}
+
+const RADAR_SIZE = 600;
+const RADAR_CENTER = RADAR_SIZE / 2;
+const RADAR_MAX_R = RADAR_CENTER - 100; // leaves room for perimeter labels
+const RADAR_LABEL_R = RADAR_MAX_R + 22;
+const RADAR_RINGS = [25, 50, 75, 100];
+const RADAR_LABEL_FONT_SIZE = 12;
+const RADAR_LABEL_LINE_HEIGHT = 15;
+const RADAR_LABEL_MAX_CHARS = 18;
+const RADAR_LABEL_MAX_LINES = 3;
+
+// Wraps a subtopic name onto up to RADAR_LABEL_MAX_LINES short lines instead of
+// truncating to one line — these are "2-6 word compact noun-phrase" tags (see
+// subtopic_weights.py's decompose prompt), so wrapping keeps them legible
+// around the perimeter without the aggressive single-line ellipsis this used
+// to need. Falls back to a hard-truncated ellipsis only past the line budget.
+function wrapLabel(s: string, maxChars = RADAR_LABEL_MAX_CHARS, maxLines = RADAR_LABEL_MAX_LINES): string[] {
+  const words = s.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    const candidate = current ? `${current} ${w}` : w;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+    } else if (current === '') {
+      // Single word longer than the line budget — hard-truncate just that word.
+      lines.push(`${w.slice(0, Math.max(1, maxChars - 1))}…`);
+    } else {
+      lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  if (lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    let last = kept[maxLines - 1];
+    while (last.length > maxChars - 1) last = last.slice(0, -1);
+    kept[maxLines - 1] = `${last}…`;
+    return kept;
+  }
+  return lines;
+}
+
+// Hand-rolled N-axis radar (no chart lib in this repo — see package.json).
+// One polygon of "caught up" proficiency per subtopic, evenly spaced by angle,
+// with 25/50/75/100 gridlines. Axis order matches the bar list next to it so
+// the two stay easy to cross-reference.
+function RadarChart({ subtopics, proficiency }: { subtopics: string[]; proficiency: Record<string, number> }) {
+  const n = subtopics.length;
+  const angleFor = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
+  const pointAt = (i: number, value: number): [number, number] => {
+    const r = (Math.max(0, Math.min(100, value)) / 100) * RADAR_MAX_R;
+    const a = angleFor(i);
+    return [RADAR_CENTER + r * Math.cos(a), RADAR_CENTER + r * Math.sin(a)];
+  };
+
+  const dataPoints = subtopics.map((s, i) => pointAt(i, proficiency[s] ?? 0));
+  const summary = subtopics.map((s) => `${s}: ${Math.round(proficiency[s] ?? 0)}%`).join(', ');
+
+  return (
+    <svg
+      viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`}
+      width={RADAR_SIZE}
+      height={RADAR_SIZE}
+      role="img"
+      aria-label={`How caught up you are on each subtopic: ${summary}`}
+      className="sw-radar-svg"
+    >
+      {RADAR_RINGS.map((ring) => (
+        <polygon
+          key={ring}
+          points={subtopics.map((_, i) => pointAt(i, ring).join(',')).join(' ')}
+          fill="none"
+          stroke="var(--border)"
+          strokeWidth={1}
+        />
+      ))}
+      {subtopics.map((s, i) => {
+        const [x, y] = pointAt(i, 100);
+        return <line key={s} x1={RADAR_CENTER} y1={RADAR_CENTER} x2={x} y2={y} stroke="var(--border)" strokeWidth={1} />;
+      })}
+      <polygon
+        points={dataPoints.map((p) => p.join(',')).join(' ')}
+        fill="var(--accent-weak)"
+        stroke="var(--accent)"
+        strokeWidth={1.5}
+      />
+      {dataPoints.map(([x, y], i) => (
+        <circle key={subtopics[i]} cx={x} cy={y} r={2.5} fill="var(--accent)" />
+      ))}
+      {subtopics.map((s, i) => {
+        const [x, y] = pointAt(i, (RADAR_LABEL_R / RADAR_MAX_R) * 100);
+        const lines = wrapLabel(s);
+        const startDy = -((lines.length - 1) / 2) * RADAR_LABEL_LINE_HEIGHT;
+        return (
+          <text key={s} x={x} y={y} fontSize={RADAR_LABEL_FONT_SIZE} fontWeight={550} fill="var(--fg-dim)" textAnchor="middle">
+            <title>{s}</title>
+            {lines.map((line, li) => (
+              <tspan key={li} x={x} dy={li === 0 ? startDy : RADAR_LABEL_LINE_HEIGHT}>
+                {line}
+              </tspan>
+            ))}
+          </text>
+        );
+      })}
+    </svg>
+  );
 }
 
 interface GoalCard {
@@ -201,54 +312,24 @@ export interface SubtopicWeightsModalProps {
   /** The topic's l1_scope — filters out focus areas/context judged
    *  irrelevant to this topic. Omit or pass [] to show every card unfiltered. */
   l1Scope?: { situation: string; verdict: string }[] | null;
+  /** Opens the topic's Scoped User Memory modal (chat.tsx's L1MemoryModal).
+   *  Omitted → the button isn't shown. */
+  onOpenL1Memory?: () => void;
 }
 
-export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profile, l1Scope }: SubtopicWeightsModalProps) {
+export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profile, l1Scope, onOpenL1Memory }: SubtopicWeightsModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const [phase, setPhase] = useState<Phase>('setup');
-  const [workEvidence, setWorkEvidence] = useState('');
+  const [phase, setPhase] = useState<Phase>('loading');
   const [errorMsg, setErrorMsg] = useState('');
-  // 'custom' selects the free-text fallback; any other value is a GoalCard key.
-  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
 
   const goalCards = useMemo(
     () => buildGoalCards(profile, topicTitle || 'this topic', l1Scope),
     [profile, topicTitle, l1Scope]
   );
 
-  // 'custom' is just another option in the same radiogroup — keeping it in the
-  // list (rather than rendered separately) is what makes arrow-key nav uniform.
-  const options: GoalCard[] = useMemo(
-    () => [
-      ...goalCards,
-      {
-        key: 'custom',
-        title: 'Something else',
-        tag: 'CUSTOM',
-        description: "Paste recent commits, tickets, or PR comments and we'll go from there.",
-        intent: '',
-      },
-    ],
-    [goalCards]
-  );
-
-  const hasFocusCards = goalCards.some((c) => c.key.startsWith('focus:'));
-  const goalRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-
-  const onGoalKeyDown = (e: React.KeyboardEvent, key: string) => {
-    const idx = options.findIndex((o) => o.key === key);
-    let next: number;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % options.length;
-    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (idx - 1 + options.length) % options.length;
-    else return;
-    e.preventDefault();
-    const nextKey = options[next].key;
-    setSelectedGoal(nextKey);
-    goalRefs.current[nextKey]?.focus();
-  };
-
   const [baseline, setBaseline] = useState<Record<string, number>>({});
+  const [proficiency, setProficiency] = useState<Record<string, number> | null>(null);
   const [temperature, setTemperature] = useState(TEMP_DEFAULT);
   const [editing, setEditing] = useState(false);
   // Manual reorder-to-rank, offered inside Edit as an alternative to the
@@ -260,41 +341,24 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
 
   const display = useMemo(() => applyTemperature(baseline, temperature), [baseline, temperature]);
 
-  const reset = useCallback(() => {
-    setPhase('setup');
-    setErrorMsg('');
-    setTemperature(TEMP_DEFAULT);
-    setEditing(false);
-    setRankMode(false);
-    setSelectedGoal(null);
-    setWorkEvidence('');
-  }, []);
+  // Radar needs >=3 axes to read as a shape rather than a line/triangle
+  // degenerate case — below that, the per-row "caught up" badges (rendered
+  // regardless of this count) are the only proficiency UI shown.
+  const radarSubtopics = useMemo(
+    () => (proficiency ? order.filter((s) => proficiency[s] != null) : []),
+    [order, proficiency]
+  );
+  const showRadar = !rankMode && radarSubtopics.length >= 3;
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); }
   }, [onClose]);
 
-  useEffect(() => {
-    if (open) dialogRef.current?.focus();
-    else reset();
-  }, [open, reset]);
-
-  // Auto-select the top classify_relevance-ranked card so opening the modal
-  // is a confirm-or-change decision, not a blank pick — goalCards[0] is
-  // always defined (falls back to "Just revising" when nothing else
-  // qualifies), so this never lands on "custom".
-  useEffect(() => {
-    if (open && selectedGoal === null && goalCards[0]) {
-      setSelectedGoal(goalCards[0].key);
-    }
-  }, [open, goalCards, selectedGoal]);
-
   const runQuery = useCallback(async (
     pairwiseComparisons?: [string, string][],
-    source?: { evidence?: string; intent?: string },
+    intent?: string,
   ) => {
     if (!topicId) return;
-    const evidence = source?.intent ? undefined : (source?.evidence ?? workEvidence);
     setPhase('loading');
     setErrorMsg('');
     try {
@@ -303,8 +367,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           goal: 'job_performance',
-          workEvidence: evidence?.trim() || undefined,
-          goalIntent: source?.intent,
+          goalIntent: intent,
           pairwiseComparisons,
         }),
       });
@@ -318,6 +381,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
       // user through a ranking step before they can see anything.
       const w = data.needsPairwise ? equalSplit(data.subtopics) : data.weights || {};
       setBaseline(w);
+      setProficiency(data.proficiency ?? null);
       setTemperature(TEMP_DEFAULT);
       setEditing(false);
       setRankMode(false);
@@ -327,19 +391,29 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
       setErrorMsg('Request failed — try again.');
       setPhase('error');
     }
-  }, [topicId, workEvidence]);
+  }, [topicId]);
 
-  const startPreparing = () => {
-    if (selectedGoal === 'custom') {
-      runQuery(undefined, { evidence: workEvidence });
-      return;
+  // Runs weight generation straight from scoped L1 memory — goalCards[0] is
+  // classify_relevance's top-ranked focus area (or "Just revising" when
+  // nothing qualifies) — no confirm-your-goal step in between.
+  const runFromScope = useCallback(() => {
+    runQuery(undefined, goalCards[0]?.intent);
+  }, [runQuery, goalCards]);
+
+  // Cache the result per topic — reopening the same topic's modal shows what
+  // was already computed instead of re-hitting the LLM every time. Only a
+  // topic switch or an explicit "Start over"/retry re-runs it.
+  const fetchedForTopic = useRef<string | null>(null);
+  useEffect(() => {
+    if (open) dialogRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (open && topicId && fetchedForTopic.current !== topicId) {
+      fetchedForTopic.current = topicId;
+      runFromScope();
     }
-    const card = goalCards.find((c) => c.key === selectedGoal);
-    if (!card) return;
-    runQuery(undefined, { intent: card.intent });
-  };
-
-  const canStart = selectedGoal === 'custom' ? !!workEvidence.trim() : !!selectedGoal;
+  }, [open, topicId, runFromScope]);
 
   const openRankMode = () => {
     setRankOrder(order);
@@ -366,7 +440,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
     <div className="sw-overlay" onClick={onClose}>
       <div
         ref={dialogRef}
-        className="sw-dialog"
+        className={`sw-dialog${showRadar ? ' sw-dialog--chart' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="sw-title"
@@ -379,93 +453,31 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
             <h2 id="sw-title" className="sw-title">Where should you focus?</h2>
             <div className="sw-sub">{topicTitle ? `for ${topicTitle}` : 'Adjust your study focus'}</div>
           </div>
-          <button className="icon-btn" title="Close" aria-label="Close" onClick={onClose}>
-            <Icon name="x" />
-          </button>
+          <div className="sw-head-actions">
+            {onOpenL1Memory && (
+              <button
+                className="icon-btn"
+                title="Scoped User Memory for this topic"
+                aria-label="Scoped User Memory for this topic"
+                onClick={onOpenL1Memory}
+              >
+                <Icon name="brain" />
+              </button>
+            )}
+            <button className="icon-btn" title="Close" aria-label="Close" onClick={onClose}>
+              <Icon name="x" />
+            </button>
+          </div>
         </div>
 
-        {phase === 'setup' && (
-          <div className="sw-setup">
-            <div className="sw-label" id="sw-goal-label">
-              Confirm your goal <span className="sw-required">(required)</span>
-            </div>
-            {hasFocusCards && (
-              <p className="sw-goal-note">
-                We've pre-selected the focus area classify_relevance ranked highest for {topicTitle || 'this topic'} — change it below if that's not what you meant.
-              </p>
-            )}
-            <div className="goal-card-list" role="radiogroup" aria-labelledby="sw-goal-label">
-              {options.map((card, i) => {
-                const checked = selectedGoal === card.key;
-                return (
-                  <button
-                    key={card.key}
-                    ref={(el) => { goalRefs.current[card.key] = el; }}
-                    type="button"
-                    role="radio"
-                    aria-checked={checked}
-                    tabIndex={checked || (!selectedGoal && i === 0) ? 0 : -1}
-                    className={`goal-card${checked ? ' goal-card--active' : ''}`}
-                    onClick={() => setSelectedGoal(card.key)}
-                    onKeyDown={(e) => onGoalKeyDown(e, card.key)}
-                  >
-                    <span className={`goal-card-radio${checked ? ' goal-card-radio--active' : ''}`} />
-                    <span className="goal-card-body">
-                      <span className="goal-card-title-row">
-                        {card.fromL1Scope && (
-                          <span className="goal-card-l1-badge" title="From your scoped L1 memory — ranked relevant to this topic by classify_relevance">
-                            <Icon name="target" size={10} /> L1
-                          </span>
-                        )}
-                        <span className="goal-card-title">{card.title}</span>
-                        <span className="goal-card-tag">{card.tag}</span>
-                      </span>
-                      {card.description && <span className="goal-card-desc">{card.description}</span>}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {selectedGoal === 'custom' && (
-              <textarea
-                id="sw-evidence"
-                className="sw-textarea"
-                style={{ marginTop: 10 }}
-                placeholder="e.g. “Set up a CloudFront distribution in front of our API, debugged a cache invalidation issue, reviewed a PR adding signed cookies…”"
-                value={workEvidence}
-                onChange={(e) => setWorkEvidence(e.target.value)}
-                rows={4}
-                maxLength={20000}
-                autoFocus
-              />
-            )}
-
-            <div className="sw-goal-footer">
-              <button
-                className="btn btn-accent"
-                disabled={!topicId || !canStart}
-                onClick={startPreparing}
-              >
-                Start preparing →
-              </button>
-              {!canStart && (
-                <span className="sw-goal-hint-text">
-                  {selectedGoal === 'custom' ? 'Paste some evidence to continue' : 'Pick one to continue'}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
         {phase === 'loading' && (
-          <div className="sw-status">Figuring out where to focus…</div>
+          <div className="sw-status">Figuring out where to focus, from your scoped memory…</div>
         )}
 
         {phase === 'error' && (
           <div className="sw-status sw-status-error">
             {errorMsg}
-            <button className="btn btn-ghost sw-back" onClick={reset}>Back</button>
+            <button className="btn btn-ghost sw-back" onClick={runFromScope}>Retry</button>
           </div>
         )}
 
@@ -476,7 +488,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
                 ? 'Drag from most to least important — we\'ll work out the rest from your order.'
                 : editing
                   ? 'Slide toward "Focused" to concentrate on your top areas, or "Balanced" to spread more evenly.'
-                  : 'Here\'s where your study time should go, based on what you told us.'}
+                  : `Here's where your study time should go, based on your scoped focus: ${goalCards[0]?.title ?? topicTitle ?? 'this topic'}.`}
             </div>
 
             {editing && !rankMode && (
@@ -522,19 +534,38 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
                 ))}
               </div>
             ) : (
-              order.map((s) => (
-                <div key={s} className="sw-row">
-                  <span className="sw-name" title={s}>{s}</span>
-                  <span className="sw-bar-track">
-                    <span className="sw-bar-fill" style={{ width: `${display[s] ?? 0}%` }} />
-                  </span>
-                  <span className="sw-value">{(display[s] ?? 0).toFixed(1)}%</span>
+              <div className="sw-cols">
+                <div className="sw-bars">
+                  {proficiency && (
+                    <div className="sw-legend">
+                      <span className="sw-legend-item"><span className="sw-legend-swatch sw-legend-swatch--bar" />Study time</span>
+                      <span className="sw-legend-item"><span className="sw-legend-swatch sw-legend-swatch--radar" />Caught up</span>
+                    </div>
+                  )}
+                  {order.map((s) => (
+                    <div key={s} className="sw-row">
+                      <span className="sw-name" title={s}>{s}</span>
+                      <span className="sw-bar-track">
+                        <span className="sw-bar-fill" style={{ width: `${display[s] ?? 0}%` }} />
+                      </span>
+                      <span className="sw-value">{(display[s] ?? 0).toFixed(1)}%</span>
+                      {proficiency && proficiency[s] != null && (
+                        <span className="sw-proficiency">{Math.round(proficiency[s])}% caught up</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))
+                {showRadar && (
+                  <div className="sw-radar-col">
+                    <div className="sw-radar-title">Caught up, by subtopic</div>
+                    <RadarChart subtopics={radarSubtopics} proficiency={proficiency!} />
+                  </div>
+                )}
+              </div>
             )}
 
             <div className="sw-actions">
-              <button className="btn btn-ghost" onClick={reset}>Start over</button>
+              <button className="btn btn-ghost" onClick={runFromScope}>Start over</button>
               {rankMode ? (
                 <button className="btn btn-accent" onClick={applyRanking}>Apply order</button>
               ) : (

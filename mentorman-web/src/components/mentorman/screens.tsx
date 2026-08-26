@@ -729,7 +729,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
             <Icon name="user" size={15} /> Profile
           </div>
           <div className={`settings-nav-item ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>
-            <Icon name="target" size={15} /> Memory
+            <Icon name="brain" size={15} /> Memory
             {memoryBadgeCount > 0 && <span className="nav-badge" />}
           </div>
         </div>

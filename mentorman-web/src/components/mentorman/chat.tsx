@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
 import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
@@ -8,7 +8,7 @@ import { OnboardingBanner } from './OnboardingBanner';
 import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
-import { SubtopicWeightsModal } from './SubtopicWeightsModal';
+import { SubtopicWeightsModal, buildGoalCards } from './SubtopicWeightsModal';
 import { UncertainRelevanceModal, type UncertainL1ScopeItem } from './UncertainRelevanceModal';
 import { L1MemoryModal } from './L1MemoryModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
@@ -490,6 +490,14 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   // cards would use is still "uncertain" and unresolved, resolve those
   // right here first — same modal as topic-open, scoped to just this
   // subset — instead of silently proceeding with a stale/unfiltered card.
+  // Whether opening the weights modal will auto-run from real scoped L1
+  // memory (vs. falling back to the generic "Just revising" option) — drives
+  // the small indicator dot on the chart icon below.
+  const weightsUseL1Scope = useMemo(
+    () => !!buildGoalCards(profile, topicTitle, l1Scope)[0]?.fromL1Scope,
+    [profile, topicTitle, l1Scope]
+  );
+
   const openWeights = useCallback(() => {
     const cardTexts = new Set(
       [...(profile?.learning_context_detail?.situations ?? []), profile?.learning_context_detail?.label].filter(Boolean) as string[]
@@ -592,19 +600,18 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           {false && <ToneBar tone={tone} onTone={setTone} />}
           <button
             className="icon-btn"
-            title="Scoped User Memory for this topic"
-            aria-label="Scoped User Memory for this topic"
-            onClick={() => setShowL1Memory(true)}
-          >
-            <Icon name="target" />
-          </button>
-          <button
-            className="icon-btn"
-            title="Where should you focus?"
+            title={weightsUseL1Scope ? 'Where should you focus? — uses your scoped L1 memory' : 'Where should you focus?'}
             aria-label="Where should you focus?"
             onClick={openWeights}
+            style={{ position: 'relative' }}
           >
             <Icon name="chart" />
+            {weightsUseL1Scope && (
+              <span style={{
+                position: 'absolute', top: 4, right: 4, width: 7, height: 7,
+                borderRadius: '50%', background: 'var(--accent)',
+              }} />
+            )}
           </button>
           <button
             className="icon-btn"
@@ -626,6 +633,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         topicTitle={topicTitle}
         profile={profile}
         l1Scope={l1Scope}
+        onOpenL1Memory={() => setShowL1Memory(true)}
       />
 
       <L1MemoryModal

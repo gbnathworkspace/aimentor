@@ -53,7 +53,9 @@ function groupTopics(topics: TopicListItem[]): TopicGroup[] {
   const groups: TopicGroup[] = [...map.entries()]
     .map(([subject, items]) => ({ key: subject, label: subject, subject, items }))
     .sort((a, b) => latest(b.items) - latest(a.items));
-  if (ungrouped.length) {
+  // Always render the Ungrouped bucket once any subject exists, even empty —
+  // it's the drop target that lets a topic be dragged back out of a group.
+  if (ungrouped.length || groups.length) {
     groups.push({ key: UNGROUPED, label: 'Ungrouped', subject: null, items: ungrouped });
   }
   return groups;
@@ -291,6 +293,13 @@ export function TopicSidebar({
           if (!draggedId || draggedId === topic.topicId) return;
           const subject = (topic.subject || '').trim();
           if (subject) { saveSubject(draggedId, subject); return; }
+          const draggedTopic = topics.find((t) => t.topicId === draggedId);
+          if ((draggedTopic?.subject || '').trim()) {
+            // Dragged topic already belongs to a group — dropping it onto an
+            // ungrouped row clears its subject instead of forming a new pair.
+            saveSubject(draggedId, '');
+            return;
+          }
           // Neither is grouped yet — name the subject the pair will form.
           setPairedId(draggedId);
           setEditingId(topic.topicId);
@@ -301,22 +310,6 @@ export function TopicSidebar({
           <span className="s-title">{truncate(topic.title, 60)}</span>
           <span className="s-date">{relativeTime(topic.lastActiveAt)}</span>
         </div>
-        {topic.messagePreview && (
-          <div className="s-row2">
-            <span
-              style={{
-                fontSize: 11,
-                color: 'var(--muted)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                maxWidth: '100%',
-              }}
-            >
-              {truncate(topic.messagePreview, 80)}
-            </span>
-          </div>
-        )}
         {isEditing && !pairedId ? (
           subjectInput(topic, 'subject-input')
         ) : inPendingGroup ? null : (
@@ -400,14 +393,18 @@ export function TopicSidebar({
         )}
       </div>
 
-      {/* Section label */}
-      <div className="sb-section">
+      {/* Section label — also doubles as the "drop here to ungroup" target,
+          since the trailing Ungrouped bucket can be scrolled out of view. */}
+      <div
+        className={`sb-section ${dragOverKey === 'header-home' ? 'drop-over' : ''}`}
+        {...dropTarget('header-home', null)}
+      >
         <span>Topics</span>
         <span className="count">{loading ? '…' : topics.length}</span>
       </div>
 
       {subjectError && (
-        <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--danger, #e5534b)' }}>
+        <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--danger)' }}>
           {subjectError}
         </div>
       )}
@@ -487,7 +484,13 @@ export function TopicSidebar({
               >
                 <div
                   className="sb-group-head"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={!isCollapsed}
                   onClick={() => toggleCollapse(g.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapse(g.key); }
+                  }}
                 >
                   <Icon
                     name="chevronDown"

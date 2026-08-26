@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.auth.dependencies import require_auth
-from app.config.database import weight_nudges_col
+from app.config.database import weight_nudges_col, skill_graph_col
 from app.services.topic_service import TopicService
 from app.services.topic_chat_service import TopicChatService
 from app.services.topic_router import route_topic
@@ -97,6 +97,9 @@ class SubtopicWeightsResponse(BaseModel):
     weights: Optional[dict[str, float]]
     flags: list[WeightFlagResponse]
     needs_pairwise: bool
+    # 0-100 estimated mastery per subtopic — only set on the goal_intent path
+    # (see derive_subtopic_weights); None elsewhere.
+    proficiency: Optional[dict[str, float]] = None
 
 
 class NudgeFlagLogRequest(BaseModel):
@@ -272,6 +275,17 @@ async def get_subtopic_weights(
     topic = await _topic_service.get_topic(topic_id, user_id)
     subtopics = await get_subtopics(topic["title"])
 
+    # L2 skill graph node for this topic (if any) anchors the proficiency
+    # estimate — a "beginner" overall level keeps per-subtopic mastery
+    # scores from drifting high just because the stated intent sounds
+    # confident. Defaults match SkillNode's own onboarding defaults.
+    skill_node = await skill_graph_col().find_one(
+        {"user_id": user_id, "topic": topic["title"]},
+        {"current_level": 1, "gap": 1, "_id": 0},
+    )
+    current_level = (skill_node or {}).get("current_level", "beginner")
+    skill_gap = (skill_node or {}).get("gap", "medium")
+
     try:
         result = await derive_subtopic_weights(
             topic=topic["title"],
@@ -281,6 +295,8 @@ async def get_subtopic_weights(
             goal_intent=body.goal_intent,
             pairwise_comparisons=body.pairwise_comparisons,
             user_nudges=body.user_nudges,
+            current_level=current_level,
+            skill_gap=skill_gap,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -293,6 +309,7 @@ async def get_subtopic_weights(
             for f in result.flags
         ],
         needs_pairwise=result.needs_pairwise,
+        proficiency=result.proficiency,
     )
 
 

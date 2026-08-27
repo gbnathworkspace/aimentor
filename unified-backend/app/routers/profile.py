@@ -6,16 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from pymongo.errors import DuplicateKeyError
 
-from app.config.database import profiles_col
+from app.config.database import profiles_col, users_col
 from app.auth.dependencies import require_auth
 from app.models.profile import ProfileCreate, ProfileResponse, ProfileUpdate, ProposableField
+from app.services.avatar_storage import delete_avatar, resolve_avatar_url, store_avatar
 from app.services.fact_quality import classify_fact_quality, compute_situations_stamp
 from app.services.memory_editor import apply_memory_edit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/profile", tags=["Profile"])
 
-# Avatar is stored inline as a data URI; cap the encoded string to keep documents small.
+# Cap on the incoming upload (a data URI the client always sends); the value
+# actually persisted may be much smaller (an S3 key) — see avatar_storage.py.
 MAX_AVATAR_CHARS = 2_800_000  # ~2MB image, base64-inflated
 
 
@@ -28,12 +30,36 @@ def _validate_avatar(avatar: str | None) -> None:
         raise HTTPException(status_code=400, detail="Avatar image is too large (max ~2MB)")
 
 
+async def _get_avatar(user_id: str) -> str | None:
+    user = await users_col().find_one({"user_id": user_id}, {"avatar": 1})
+    return resolve_avatar_url((user or {}).get("avatar"))
+
+
+async def _set_avatar(user_id: str, data_uri: str | None) -> str | None:
+    """Store an incoming avatar upload (or clear it) and return the URL to
+    hand back to the client immediately. Deletes the previous S3 object,
+    if any, when replacing or clearing."""
+    previous = (await users_col().find_one({"user_id": user_id}, {"avatar": 1}) or {}).get("avatar")
+    if not data_uri:
+        if previous:
+            delete_avatar(previous)
+        await users_col().update_one({"user_id": user_id}, {"$set": {"avatar": None}})
+        return None
+
+    stored = store_avatar(user_id, data_uri)
+    if previous and previous != stored:
+        delete_avatar(previous)
+    await users_col().update_one({"user_id": user_id}, {"$set": {"avatar": stored}})
+    return resolve_avatar_url(stored)
+
+
 @router.get("", response_model=ProfileResponse)
 async def get_profile(user_id: str = Depends(require_auth)):
     """Return the L1 profile for the authenticated user."""
     doc = await profiles_col().find_one({"user_id": user_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Profile not found")
+    doc["avatar"] = await _get_avatar(user_id)
     return doc
 
 
@@ -44,6 +70,7 @@ async def create_profile(
     """Create a new profile for the authenticated user."""
     _validate_avatar(data.avatar)
     doc = data.model_dump()
+    avatar = doc.pop("avatar", None)
     doc["user_id"] = user_id
     try:
         await profiles_col().insert_one(doc)
@@ -57,6 +84,7 @@ async def create_profile(
         logger.exception("Failed to create profile for user=%s", user_id)
         raise
     doc.pop("_id", None)
+    doc["avatar"] = await _set_avatar(user_id, avatar) if avatar is not None else None
     return doc
 
 
@@ -67,11 +95,16 @@ async def update_profile(
     """Update the profile for the authenticated user."""
     _validate_avatar(data.avatar)
     update_data = data.model_dump(exclude_none=True)
+    avatar_set = "avatar" in update_data
+    avatar = update_data.pop("avatar", None)
+    resolved_avatar = await _set_avatar(user_id, avatar) if avatar_set else None
+
     if not update_data:
-        # Nothing to update — just return existing profile
+        # Nothing left for the profile doc itself — just return current state
         doc = await profiles_col().find_one({"user_id": user_id}, {"_id": 0})
         if not doc:
             raise HTTPException(status_code=404, detail="Profile not found")
+        doc["avatar"] = resolved_avatar if avatar_set else await _get_avatar(user_id)
         return doc
 
     result = await profiles_col().find_one_and_update(
@@ -82,6 +115,7 @@ async def update_profile(
     if not result:
         raise HTTPException(status_code=404, detail="Profile not found")
     result.pop("_id", None)
+    result["avatar"] = resolved_avatar if avatar_set else await _get_avatar(user_id)
     return result
 
 

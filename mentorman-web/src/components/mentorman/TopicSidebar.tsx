@@ -544,10 +544,10 @@ export function TopicSidebar({
             {profile?.avatar ? (
               <img src={profile.avatar} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
             ) : (
-              <div className="avatar">{(profile?.name || userName || profile?.email || 'Y')[0].toUpperCase()}</div>
+              <div className="avatar">{(profile?.name || userName || 'Y')[0].toUpperCase()}</div>
             )}
             <div style={{ minWidth: 0 }}>
-              <div className="who">{profile?.name || userName || profile?.email?.split('@')[0] || 'You'}</div>
+              <div className="who">{profile?.name || userName || 'You'}</div>
             </div>
           </button>
           <button className="icon-btn" title="Sign out" onClick={() => logout()} style={{ flexShrink: 0 }}>

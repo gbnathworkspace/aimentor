@@ -29,15 +29,6 @@ function factWarning(text: string, topicReason?: string): string | null {
   return null;
 }
 
-// Illustrative copy for the teaching-preferences live preview — purely
-// static example text, not generated from a real answer.
-const MEMORY_PREVIEW: Record<string, string> = {
-  'hint-first|encouraging': 'Good instinct to look at the query itself. Before I answer — which column is the filter on, and can you check whether an index covers it? You are one step away.',
-  'hint-first|direct': 'Look at the filter first. Which column is it on, and is that column indexed?',
-  'answer-first|encouraging': 'The filter is not served by an index, so the planner scans the whole table. Nice catch that it slowed down as the table grew — that is exactly the signal.',
-  'answer-first|direct': 'No index on the filtered column. It is a full table scan. Add the index.',
-};
-
 import { MentorQuestionCard, QuickReplyOptions, type QuickReplyOption } from './QuestionCard';
 import { AttachButton } from './chat/AttachButton';
 import { AttachmentPreview } from './chat/AttachmentPreview';
@@ -52,9 +43,6 @@ type CompletedProfile = {
   learning_context: string;
   learning_context_label: string | null;
   focus_areas: string[];
-  explanation_style: string;
-  challenge_tolerance: string;
-  feedback_tone: string;
 };
 
 export interface OnboardingProps {
@@ -102,9 +90,6 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
         if (p.learning_context) parts.push(`learning context: ${p.learning_context}`);
         if (p.learning_context_detail?.label) parts.push(`situation: ${p.learning_context_detail.label}`);
         if (p.learning_context_detail?.situations?.length) parts.push(`facts: ${p.learning_context_detail.situations.join(', ')}`);
-        if (p.explanation_style) parts.push(`explanation style: ${p.explanation_style}`);
-        if (p.challenge_tolerance) parts.push(`challenge tolerance: ${p.challenge_tolerance}`);
-        if (p.feedback_tone) parts.push(`feedback tone: ${p.feedback_tone}`);
         setDeferredState({ loaded: true, knownParts: parts });
       } catch {
         if (!cancelled) setDeferredState({ loaded: true, knownParts: [] });
@@ -333,7 +318,6 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
               <div className="setup-lines">
                 <div className="setup-line"><span className="k">context</span><span className="v">{profile.learning_context_label || profile.learning_context}</span></div>
                 <div className="setup-line"><span className="k">facts</span><span className="v">{profile.focus_areas.join(', ') || '—'}</span></div>
-                <div className="setup-line"><span className="k">style</span><span className="v">{profile.explanation_style} · {profile.challenge_tolerance} · {profile.feedback_tone}</span></div>
               </div>
               <button
                 className="btn btn-accent" style={{ width: '100%', height: 42 }}
@@ -439,7 +423,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
   onClose?: () => void;
 }) {
   const [tab, setTab] = useState<'profile' | 'memory'>('profile');
-  const [memorySubTab, setMemorySubTab] = useState<'knows' | 'teach' | 'data'>('knows');
+  const [memorySubTab, setMemorySubTab] = useState<'knows' | 'data'>('knows');
   const [editName, setEditName] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [wipeText, setWipeText] = useState('');
@@ -447,9 +431,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
   // Inline "what you've told it" editor — null id means nothing is being edited.
   const [editingSituation, setEditingSituation] = useState<{ index: number; draft: string } | null>(null);
 
-  const [explanationVal, setExplanationVal] = useState(profile?.explanation_style ?? 'hint-first');
-  const [challengeVal, setChallengeVal] = useState(profile?.challenge_tolerance ?? 'medium');
-  const [toneVal, setToneVal] = useState(profile?.feedback_tone ?? 'encouraging');
   const [nameVal, setNameVal] = useState(profile?.name ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -478,9 +459,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
 
   // Sync form values when profile loads / changes
   useEffect(() => {
-    setExplanationVal(profile?.explanation_style ?? 'hint-first');
-    setChallengeVal(profile?.challenge_tolerance ?? 'medium');
-    setToneVal(profile?.feedback_tone ?? 'encouraging');
     setNameVal(profile?.name ?? '');
   }, [profile]);
 
@@ -760,7 +738,7 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
                     <img src={profile.avatar} alt="Profile" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
                   ) : (
                     <div className="avatar" style={{ width: 32, height: 32, fontSize: 14 }}>
-                      {(profile?.name || profile?.email || 'Y')[0]?.toUpperCase()}
+                      {(profile?.name || 'Y')[0]?.toUpperCase()}
                     </div>
                   )}
                 </div>
@@ -788,12 +766,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
                 </div>
               </div>
 
-              {profile?.email && (
-                <div className="settings-row">
-                  <div className="k">Email</div>
-                  <div className="v-wrap"><span className="v">{profile.email}</span></div>
-                </div>
-              )}
             </div>
           )}
 
@@ -805,13 +777,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
                 onClick={() => setMemorySubTab('knows')}
               >
                 About You<span className="settings-memory-tab-count">{situations.length + (profile?.style_notes?.length ?? 0)}</span>
-              </button>
-              <button
-                type="button"
-                className={`settings-memory-tab ${memorySubTab === 'teach' ? 'active' : ''}`}
-                onClick={() => setMemorySubTab('teach')}
-              >
-                Preferences<span className="settings-memory-tab-count">3</span>
               </button>
               <button
                 type="button"
@@ -982,94 +947,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
               </div>
 
             </>)}
-
-            {memorySubTab === 'teach' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
-                <div style={{ fontSize: '13.5px', color: 'var(--muted-2)', maxWidth: 560 }}>
-                  These apply to every reply, across all topics. Pick one in each row.
-                </div>
-
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 10 }}>
-                    <div style={{ fontSize: 14, fontWeight: 550, color: 'var(--fg)' }}>Explanation style</div>
-                    <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>how a new answer opens</div>
-                  </div>
-                  <div className="memory-pref-options">
-                    {[
-                      { v: 'hint-first', name: 'Hints first', desc: 'Nudges you toward the answer before giving it.' },
-                      { v: 'answer-first', name: 'Answer first', desc: 'Answers, then explains the reasoning.' },
-                    ].map(o => (
-                      <button
-                        key={o.v}
-                        className={`memory-pref-card ${explanationVal === o.v ? 'active' : ''}`}
-                        onClick={() => { setExplanationVal(o.v); save({ explanation_style: o.v }); }}
-                      >
-                        <div className="name">{o.name}</div>
-                        <div className="desc">{o.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 10 }}>
-                    <div style={{ fontSize: 14, fontWeight: 550, color: 'var(--fg)' }}>Challenge tolerance</div>
-                    <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>how hard follow-up questions get</div>
-                  </div>
-                  <div className="memory-pref-options">
-                    {[
-                      { v: 'low', name: 'Gentle', desc: 'Stays close to what you already know.' },
-                      { v: 'medium', name: 'Medium', desc: 'One step beyond your current level.' },
-                      { v: 'high', name: 'Push me', desc: 'Edge cases and exam-grade traps.' },
-                    ].map(o => (
-                      <button
-                        key={o.v}
-                        className={`memory-pref-card ${challengeVal === o.v ? 'active' : ''}`}
-                        onClick={() => { setChallengeVal(o.v); save({ challenge_tolerance: o.v }); }}
-                      >
-                        <div className="name">{o.name}</div>
-                        <div className="desc">{o.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 10 }}>
-                    <div style={{ fontSize: 14, fontWeight: 550, color: 'var(--fg)' }}>Feedback tone</div>
-                    <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>how a wrong answer is handled</div>
-                  </div>
-                  <div className="memory-pref-options">
-                    {[
-                      { v: 'encouraging', name: 'Encouraging', desc: 'Credits what was right before correcting.' },
-                      { v: 'direct', name: 'Direct', desc: 'States what was wrong, no framing.' },
-                    ].map(o => (
-                      <button
-                        key={o.v}
-                        className={`memory-pref-card ${toneVal === o.v ? 'active' : ''}`}
-                        onClick={() => { setToneVal(o.v); save({ feedback_tone: o.v }); }}
-                      >
-                        <div className="name">{o.name}</div>
-                        <div className="desc">{o.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="set-header" style={{ marginBottom: 12 }}>
-                    <div className="set-label">Preview</div>
-                    <div className="set-header-line" />
-                  </div>
-                  <div className="memory-preview">
-                    <div className="memory-preview-label">You asked · why is this query slow?</div>
-                    <div className="memory-preview-body">
-                      {MEMORY_PREVIEW[`${explanationVal}|${toneVal}`] ?? MEMORY_PREVIEW['hint-first|encouraging']}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {memorySubTab === 'data' && (<>
               <div className="settings-group">

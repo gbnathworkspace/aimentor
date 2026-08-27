@@ -167,9 +167,6 @@ class TestFullUploadFlow:
                 }
             ],
             "learning_context": None,
-            "explanation_style": "hint-first",
-            "challenge_tolerance": "medium",
-            "feedback_tone": "encouraging",
         }
 
         # After accepting, the updated profile
@@ -594,9 +591,6 @@ class TestDocumentSourcedProposals:
             ],
             "learning_context": None,
             "learning_context_detail": None,
-            "explanation_style": "hint-first",
-            "challenge_tolerance": "medium",
-            "feedback_tone": "encouraging",
         }
 
         updated_profile = {**profile_doc}
@@ -653,9 +647,6 @@ class TestDocumentSourcedProposals:
             "style_notes": [],
             "pending_changes": [pending_change],
             "learning_context": None,
-            "explanation_style": "hint-first",
-            "challenge_tolerance": "medium",
-            "feedback_tone": "encouraging",
         }
 
         mock_col = MagicMock()

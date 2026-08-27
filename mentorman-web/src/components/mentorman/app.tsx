@@ -189,7 +189,7 @@ export function MentorManApp() {
               onTopicCreated={(topicId) => { setActiveTopic(topicId); setTopicsVersion(v => v + 1); }}
               topics={topics}
               profile={profile}
-              userName={userName || profile?.email?.split('@')[0]}
+              userName={userName}
               onStartDeferredOnboarding={() => setView('deferred-onboarding')}
             />
           )}

@@ -241,7 +241,6 @@ class TopicChatService:
                 query=content,
                 skill=context.get("skill") or {},
                 recent_messages=existing_messages,
-                profile=context.get("profile"),
             )
             effective_mode = decision.selected_mode.value.lower()
             instruction_override = decision.instruction_override

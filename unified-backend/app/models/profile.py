@@ -88,15 +88,14 @@ class ProfileCreate(BaseModel):
     learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
-    explanation_style: Literal["hint-first", "answer-first"] = "hint-first"
-    challenge_tolerance: Literal["low", "medium", "high"] = "medium"
-    feedback_tone: Literal["direct", "encouraging"] = "encouraging"
     style_notes: list[StyleNote] = Field(default_factory=list, max_length=5)
 
-    email: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"
     name: Optional[str] = None
-    # Profile picture as a data URI (data:image/...;base64,...); see MAX_AVATAR_BYTES.
+    # Profile picture as a data URI (data:image/...;base64,...); see MAX_AVATAR_CHARS.
+    # Identity data, not L1 memory — persisted on the `users` doc, not `profiles`;
+    # kept in this request/response shape so the frontend contract stays flat.
+    # See app/routers/profile.py for the split.
     avatar: Optional[str] = None
 
 
@@ -109,12 +108,8 @@ class ProfileUpdate(BaseModel):
     learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
-    explanation_style: Optional[Literal["hint-first", "answer-first"]] = None
-    challenge_tolerance: Optional[Literal["low", "medium", "high"]] = None
-    feedback_tone: Optional[Literal["direct", "encouraging"]] = None
     style_notes: Optional[list[StyleNote]] = Field(default=None, max_length=5)
 
-    email: Optional[str] = None
     profile_status: Optional[Literal["complete", "skipped"]] = None
     name: Optional[str] = None
     avatar: Optional[str] = None
@@ -131,16 +126,12 @@ class ProfileResponse(BaseModel):
     learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
-    explanation_style: Literal["hint-first", "answer-first"] = "hint-first"
-    challenge_tolerance: Literal["low", "medium", "high"] = "medium"
-    feedback_tone: Literal["direct", "encouraging"] = "encouraging"
     style_notes: list[StyleNote] = []
     # Proposed by the post-session profiling agent, awaiting accept/dismiss via
     # POST /api/profile/pending-changes/{field}/(accept|dismiss). Never written
     # by ProfileCreate/ProfileUpdate — system-managed only.
     pending_changes: list[PendingProfileChange] = []
 
-    email: Optional[str] = None
     profile_status: Literal["complete", "skipped"] = "complete"
     name: Optional[str] = None
     avatar: Optional[str] = None

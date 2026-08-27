@@ -36,12 +36,8 @@ export interface PendingProfileChange {
 export interface CoreProfile {
   learning_context?: string | null;
   learning_context_detail?: LearningContextDetail | null;
-  explanation_style: string;
-  challenge_tolerance: string;
-  feedback_tone: string;
   style_notes: StyleNote[];
   pending_changes: PendingProfileChange[];
-  email?: string;
   profile_status?: 'complete' | 'skipped';
   name?: string;
   avatar?: string | null;

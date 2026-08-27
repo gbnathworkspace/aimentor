@@ -69,15 +69,6 @@ class OnboardingCompleteRequest(BaseModel):
     learning_context: str = Field(alias="learningContext", max_length=60)
     learning_context_label: Optional[str] = Field(None, alias="learningContextLabel")
     focus_areas: list[str] = Field(default_factory=list, alias="focusAreas")
-    explanation_style: Literal["hint-first", "answer-first"] = Field(
-        "hint-first", alias="explanationStyle"
-    )
-    challenge_tolerance: Literal["low", "medium", "high"] = Field(
-        "medium", alias="challengeTolerance"
-    )
-    feedback_tone: Literal["direct", "encouraging"] = Field(
-        "encouraging", alias="feedbackTone"
-    )
 
 
 class OnboardingCompleteResponse(BaseModel):
@@ -111,15 +102,6 @@ class OnboardingCompleteDeferredRequest(BaseModel):
     learning_context: Optional[str] = Field(None, alias="learningContext", max_length=60)
     learning_context_label: Optional[str] = Field(None, alias="learningContextLabel")
     focus_areas: Optional[list[str]] = Field(None, alias="focusAreas")
-    explanation_style: Optional[Literal["hint-first", "answer-first"]] = Field(
-        None, alias="explanationStyle"
-    )
-    challenge_tolerance: Optional[Literal["low", "medium", "high"]] = Field(
-        None, alias="challengeTolerance"
-    )
-    feedback_tone: Optional[Literal["direct", "encouraging"]] = Field(
-        None, alias="feedbackTone"
-    )
 
     model_config = ConfigDict(populate_by_name=True)
 

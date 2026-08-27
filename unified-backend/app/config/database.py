@@ -49,6 +49,10 @@ def profiles_col():
     return get_db()["profiles"]
 
 
+def users_col():
+    return get_db()["users"]
+
+
 def skill_graph_col():
     return get_db()["skill_graph"]
 

@@ -22,9 +22,6 @@ logger = logging.getLogger(__name__)
 
 _VALID_CONTEXTS = {c.value for c in LearningContext}
 _VALID_CATEGORIES = {c.value for c in StyleNoteCategory}
-_VALID_EXPLANATION = {"hint-first", "answer-first"}
-_VALID_CHALLENGE = {"low", "medium", "high"}
-_VALID_TONE = {"direct", "encouraging"}
 
 _FALLBACK_SUMMARY = "Couldn't match that to anything in your profile — try being more specific."
 
@@ -35,9 +32,6 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
         "learning_context": profile.get("learning_context"),
         "learning_context_label": (profile.get("learning_context_detail") or {}).get("label"),
         "situations": [{"index": i, "text": s} for i, s in enumerate(situations)],
-        "explanation_style": profile.get("explanation_style", "hint-first"),
-        "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
-        "feedback_tone": profile.get("feedback_tone", "encouraging"),
         "style_notes": [
             {"index": i, "category": n.get("category"), "note": n.get("note")}
             for i, n in enumerate(profile.get("style_notes") or [])
@@ -54,9 +48,6 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
         '  "learning_context_label": string\n'
         '  "add_situation": string — a new fact to add to "Facts About You"\n'
         '  "remove_situation_indices": array of integers — indices from situations above to delete\n'
-        '  "explanation_style": hint-first|answer-first\n'
-        '  "challenge_tolerance": low|medium|high\n'
-        '  "feedback_tone": direct|encouraging\n'
         '  "remove_style_note_indices": array of integers — indices from style_notes above to delete\n'
         '  "add_style_note": {"category": pacing|communication|motivation|misconception|context, "note": "short claim"}\n'
         '  "summary": one short sentence describing what you changed, shown to the user\n\n'
@@ -151,13 +142,6 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
             "label": label,
             "situations": situations[:20],
         }
-
-    if data.get("explanation_style") in _VALID_EXPLANATION:
-        update["explanation_style"] = data["explanation_style"]
-    if data.get("challenge_tolerance") in _VALID_CHALLENGE:
-        update["challenge_tolerance"] = data["challenge_tolerance"]
-    if data.get("feedback_tone") in _VALID_TONE:
-        update["feedback_tone"] = data["feedback_tone"]
 
     style_notes = list(profile.get("style_notes") or [])
     style_notes_changed = False

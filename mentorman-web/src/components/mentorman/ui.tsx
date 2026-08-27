@@ -466,7 +466,7 @@ export function Sidebar({ view, activeSession, onPickSession, onNav, onNew, prof
     || (profile?.learning_context_detail?.situations?.length
       ? profile.learning_context_detail.situations.join(', ')
       : null);
-  const displayName = userName || profile?.email?.split('@')[0] || 'You';
+  const displayName = userName || 'You';
   const initial = displayName[0]?.toUpperCase() ?? 'Y';
 
   return (

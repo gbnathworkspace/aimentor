@@ -283,9 +283,6 @@ def _build_context_variables(
     return {
         # L1 Profile fields
         "learning_context": _format_learning_context(profile, context.get("l1_scope")),
-        "explanation_style": profile.get("explanation_style", "hint-first"),
-        "challenge_tolerance": profile.get("challenge_tolerance", "medium"),
-        "feedback_tone": profile.get("feedback_tone", "encouraging"),
         # Observed teaching-style notes, grounded per-session (issue #14 evolution)
         "style_notes": _format_style_notes(profile.get("style_notes") or []),
         # L2 Skill fields

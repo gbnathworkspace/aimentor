@@ -39,9 +39,6 @@ class TestGetSystemPrompt:
             "profile": {
                 "learning_context": "job_interview",
                 "learning_context_detail": {"label": "Crack FAANG", "situations": ["System Design", "DSA"]},
-                "explanation_style": "answer-first",
-                "challenge_tolerance": "high",
-                "feedback_tone": "direct",
             },
             "skill": {},
             "episodes": [],
@@ -51,9 +48,6 @@ class TestGetSystemPrompt:
         assert "Crack FAANG" in result
         assert "System Design" in result
         assert "DSA" in result
-        assert "answer-first" in result
-        assert "high" in result
-        assert "direct" in result
 
     def test_injects_every_situation(self):
         """No entry is "active" — all of them reach the prompt."""

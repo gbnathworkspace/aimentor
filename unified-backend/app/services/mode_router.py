@@ -138,7 +138,6 @@ async def route_user_turn(
     query: str,
     skill: dict[str, Any],
     recent_messages: list[dict],
-    profile: dict[str, Any] | None = None,
 ) -> RouterDecision:
     """Decide the mentor mode for this turn.
 
@@ -160,9 +159,7 @@ async def route_user_turn(
         f"User query: {query!r}\n\n"
         f"Skill state: current_level={skill.get('current_level')}, "
         f"required_level={skill.get('required_level')}, gap={skill.get('gap')}\n\n"
-        f"Recent turns in this topic:\n{_format_recent_messages(recent_messages, _RECENT_MESSAGE_WINDOW)}\n\n"
-        f"Teaching preferences: {(profile or {}).get('challenge_tolerance', 'unknown')} challenge tolerance, "
-        f"{(profile or {}).get('feedback_tone', 'unknown')} feedback tone."
+        f"Recent turns in this topic:\n{_format_recent_messages(recent_messages, _RECENT_MESSAGE_WINDOW)}"
     )
 
     settings = get_settings()

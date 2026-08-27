@@ -139,9 +139,6 @@ async def onboarding_complete(
     profile_model = ProfileCreate(
         learning_context=body.learning_context,
         learning_context_detail=learning_context_detail,
-        explanation_style=body.explanation_style,
-        challenge_tolerance=body.challenge_tolerance,
-        feedback_tone=body.feedback_tone,
         profile_status="complete",
     )
     profile_data = profile_model.model_dump(mode="json", exclude_none=True)
@@ -179,7 +176,6 @@ async def onboarding_skip(
     profile_data = {
         "user_id": user_id,
         "learning_context": learning_context,
-        "email": "",
         "profile_status": "skipped",
     }
     if situations:
@@ -245,13 +241,6 @@ async def onboarding_complete_deferred(
         merged = existing_situations + [s for s in body.focus_areas if s not in existing_situations]
         detail = updates.get("learning_context_detail") or {**existing_detail, "learning_context": ctx}
         updates["learning_context_detail"] = {**detail, "situations": merged[:20]}
-    if body.explanation_style is not None:
-        updates["explanation_style"] = body.explanation_style
-    if body.challenge_tolerance is not None:
-        updates["challenge_tolerance"] = body.challenge_tolerance
-    if body.feedback_tone is not None:
-        updates["feedback_tone"] = body.feedback_tone
-
     await profiles_col().update_one({"user_id": user_id}, {"$set": updates})
 
     return OnboardingCompleteDeferredResponse(ok=True)

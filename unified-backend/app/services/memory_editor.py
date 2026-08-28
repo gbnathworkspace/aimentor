@@ -16,21 +16,20 @@ import anthropic
 
 from app.config.database import profiles_col
 from app.config.settings import get_settings
-from app.models.profile import LearningContext, StyleNoteCategory
+from app.models.profile import StyleNoteCategory
 
 logger = logging.getLogger(__name__)
 
-_VALID_CONTEXTS = {c.value for c in LearningContext}
 _VALID_CATEGORIES = {c.value for c in StyleNoteCategory}
 
 _FALLBACK_SUMMARY = "Couldn't match that to anything in your profile — try being more specific."
 
 
 def _build_prompt(profile: dict[str, Any], message: str) -> str:
-    situations = (profile.get("learning_context_detail") or {}).get("situations") or []
+    existing_detail = profile.get("learning_context_detail") or {}
+    situations = existing_detail.get("situations") or []
     current = {
-        "learning_context": profile.get("learning_context"),
-        "learning_context_label": (profile.get("learning_context_detail") or {}).get("label"),
+        "learning_context_label": existing_detail.get("label"),
         "situations": [{"index": i, "text": s} for i, s in enumerate(situations)],
         "style_notes": [
             {"index": i, "category": n.get("category"), "note": n.get("note")}
@@ -44,7 +43,6 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
         f'User\'s instruction: "{message}"\n\n'
         "Respond with ONLY a JSON object (no markdown, no explanation). Every key is "
         "optional — include a key ONLY if the instruction changes it:\n"
-        '  "learning_context": one of job_interview|high_stakes_exam|competitive_test|self_directed|other\n'
         '  "learning_context_label": string\n'
         '  "add_situation": string — a new fact to add to "Facts About You"\n'
         '  "remove_situation_indices": array of integers — indices from situations above to delete\n'
@@ -108,9 +106,6 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
 
     update: dict[str, Any] = {}
 
-    if data.get("learning_context") in _VALID_CONTEXTS:
-        update["learning_context"] = data["learning_context"]
-
     existing_detail = profile.get("learning_context_detail") or {}
     situations = list(existing_detail.get("situations") or [])
     label = existing_detail.get("label")
@@ -136,9 +131,7 @@ async def apply_memory_edit(user_id: str, message: str) -> dict[str, Any]:
         detail_changed = True
 
     if detail_changed:
-        ctx = update.get("learning_context") or profile.get("learning_context") or "self_directed"
         update["learning_context_detail"] = {
-            "learning_context": ctx,
             "label": label,
             "situations": situations[:20],
         }

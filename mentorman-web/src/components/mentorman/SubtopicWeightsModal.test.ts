@@ -61,30 +61,16 @@ describe('buildGoalCards', () => {
     expect(cards.map((c) => c.key)).toEqual(['revise']);
   });
 
-  it('flags focus/context cards as fromL1Scope, but not revise', () => {
+  it('flags focus cards as fromL1Scope, but not revise', () => {
     const cards = buildGoalCards(
       profileWith({
-        learning_context: 'job_interview',
         learning_context_detail: { label: 'FAANG interviews', situations: ['System design'] } as any,
       }),
       'AWS CI/CD'
     );
     const byKey = Object.fromEntries(cards.map((c) => [c.key, c.fromL1Scope]));
     expect(byKey['focus:System design']).toBe(true);
-    expect(byKey['context']).toBe(true);
     expect(byKey['revise']).toBeUndefined();
-  });
-
-  it('adds a context card only for a non-default learning context', () => {
-    expect(
-      buildGoalCards(profileWith({ learning_context: 'self_directed' }), 'AWS CI/CD')
-        .some((c) => c.key === 'context')
-    ).toBe(false);
-
-    const cards = buildGoalCards(profileWith({ learning_context: 'job_interview' }), 'AWS CI/CD');
-    const ctx = cards.find((c) => c.key === 'context');
-    expect(ctx?.tag).toBe('INTERVIEW');
-    expect(ctx?.title).toBe('Job Interview');
   });
 
   it('drops a focus area l1_scope judged irrelevant to this topic', () => {

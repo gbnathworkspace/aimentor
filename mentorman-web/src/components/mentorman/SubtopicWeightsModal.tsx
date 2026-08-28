@@ -194,16 +194,6 @@ interface GoalCard {
   fromL1Scope?: boolean;
 }
 
-const CONTEXT_TAGS: Record<string, string> = {
-  job_interview: 'INTERVIEW',
-  high_stakes_exam: 'EXAM',
-  competitive_test: 'TEST',
-};
-
-function humanize(value: string): string {
-  return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 const STOPWORDS = new Set(['and', 'or', 'the', 'for', 'with', 'into', 'from', 'its']);
 
 function keyTokens(s: string): Set<string> {
@@ -275,21 +265,6 @@ export function buildGoalCards(
       intent: `My current focus is: ${area}. Prioritize the parts of ${topicTitle} that genuinely support that work.`,
       fromL1Scope: true,
     });
-  }
-
-  const ctx = profile?.learning_context;
-  if (ctx && ctx !== 'self_directed') {
-    const label = profile?.learning_context_detail?.label || humanize(ctx);
-    if (!irrelevant.has(label)) {
-      cards.push({
-        key: 'context',
-        title: label,
-        tag: CONTEXT_TAGS[ctx] ?? 'GOAL',
-        description: 'Lean toward what usually comes up when preparing for this.',
-        intent: `I'm preparing for: ${label}. Prioritize the parts of ${topicTitle} that typically matter most for that.`,
-        fromL1Scope: true,
-      });
-    }
   }
 
   cards.push({

@@ -18,6 +18,7 @@ export interface TopicSidebarProps {
   view?: string;
   onNav?: (v: string) => void;
   profile?: CoreProfile | null;
+  avatarUrl?: string | null;
   userName?: string;
   isAdmin?: boolean;
   collapsed?: boolean;
@@ -106,6 +107,7 @@ export function TopicSidebar({
   view,
   onNav,
   profile,
+  avatarUrl,
   userName,
   isAdmin,
   collapsed,
@@ -353,7 +355,7 @@ export function TopicSidebar({
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {onNav && !collapsed && isAdmin && (
-            <button className={`icon-btn ${view === 'admin' ? 'on' : ''}`} title="Manage users" onClick={() => onNav('admin')}>
+            <button className={`icon-btn ${view === 'admin' ? 'on' : ''}`} title="Manage users" aria-label="Manage users" onClick={() => onNav('admin')}>
               <Icon name="users" />
             </button>
           )}
@@ -361,6 +363,7 @@ export function TopicSidebar({
             <button
               className={`icon-btn ${view === 'settings' ? 'on' : ''}`}
               title={(profile?.pending_changes?.length ?? 0) > 0 ? 'Settings — updates suggested' : 'Settings'}
+              aria-label={(profile?.pending_changes?.length ?? 0) > 0 ? 'Settings — updates suggested' : 'Settings'}
               onClick={() => onNav('settings')}
               style={{ position: 'relative' }}
             >
@@ -374,7 +377,7 @@ export function TopicSidebar({
             </button>
           )}
           {onToggleCollapse && (
-            <button className="icon-btn" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={onToggleCollapse}>
+            <button className="icon-btn" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={onToggleCollapse}>
               <Icon name={collapsed ? 'arrowR' : 'back'} size={14} />
             </button>
           )}
@@ -383,8 +386,11 @@ export function TopicSidebar({
 
       {/* New Topic button */}
       <div className="sb-actions">
-        <button className="new-session" title="New Topic" onClick={onNewTopic}>
+        <button className="new-session" title="New Topic" aria-label="New Topic" onClick={onNewTopic} style={{ position: 'relative' }}>
           <Icon name="plus" size={15} /> <span className="label">New Topic</span>
+          {collapsed && topics.length > 0 && (
+            <span className="new-session-count" title={`${topics.length} topics`}>{topics.length}</span>
+          )}
         </button>
         {onNav && !collapsed && (
           <button className={`sb-nav-icon ${view === 'dashboard' ? 'on' : ''}`} title="Skill graph" onClick={() => onNav('dashboard')}>
@@ -541,16 +547,16 @@ export function TopicSidebar({
             title="View profile & settings"
             style={{ cursor: 'pointer', background: 'none', border: 'none', flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: 0, minWidth: 0 }}
           >
-            {profile?.avatar ? (
-              <img src={profile.avatar} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
             ) : (
               <div className="avatar">{(profile?.name || userName || 'Y')[0].toUpperCase()}</div>
             )}
-            <div style={{ minWidth: 0 }}>
+            <div className="who-wrap" style={{ minWidth: 0 }}>
               <div className="who">{profile?.name || userName || 'You'}</div>
             </div>
           </button>
-          <button className="icon-btn" title="Sign out" onClick={() => logout()} style={{ flexShrink: 0 }}>
+          <button className="icon-btn" title="Sign out" aria-label="Sign out" onClick={() => logout()} style={{ flexShrink: 0 }}>
             <Icon name="logout" />
           </button>
         </div>

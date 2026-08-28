@@ -51,21 +51,17 @@ class _RelevanceJudgments(BaseModel):
 
 def extract_situations(profile: dict) -> list[str]:
     """Pull the full "Facts About You" list out of a profile doc — folding
-    in `label` and the onboarding `learning_context` enum value so every
-    reader (classify_relevance's input, prompt_store's fallback) uses one
-    definition instead of several that can drift apart. There is no
-    separate `contexts` field any more — a stray, UI-less duplicate of this
-    same list that used to confuse per-topic memory views."""
+    in `label` so every reader (classify_relevance's input, prompt_store's
+    fallback) uses one definition instead of several that can drift apart.
+    There is no separate `contexts` field any more — a stray, UI-less
+    duplicate of this same list that used to confuse per-topic memory
+    views."""
     detail = profile.get("learning_context_detail") or {}
     situations = list(detail.get("situations") or [])
 
     label = detail.get("label")
     if label and label not in situations:
         situations.insert(0, label)
-
-    learning_context = profile.get("learning_context")
-    if learning_context and str(learning_context) not in situations:
-        situations.append(str(learning_context))
 
     return situations
 

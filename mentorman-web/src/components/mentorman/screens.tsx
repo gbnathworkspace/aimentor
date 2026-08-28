@@ -8,7 +8,6 @@ import { type MessageItem } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 import { SkipButton } from './SkipButton';
 import { SkipConfirmationDialog } from './SkipConfirmationDialog';
-import { CompleteSetupSection } from './CompleteSetupSection';
 
 // ponytail: no backend classifier for fact quality — this is a keyword/length
 // heuristic, not a real vagueness judgment. Swap for a real signal (LLM
@@ -40,7 +39,6 @@ import type { UseDocumentUploadFlowReturn } from '@/lib/chat-upload/useDocumentU
 
 type ApiMsg = { role: 'user' | 'assistant'; content: string };
 type CompletedProfile = {
-  learning_context: string;
   learning_context_label: string | null;
   focus_areas: string[];
 };
@@ -48,11 +46,9 @@ type CompletedProfile = {
 export interface OnboardingProps {
   onFinish: (goal: string) => void;
   userName?: string;
-  deferred?: boolean;
-  onAbandon?: () => void;
 }
 
-export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: OnboardingProps) {
+export function Onboarding({ onFinish, userName }: OnboardingProps) {
   const { logout } = useAuth();
   const [apiMsgs,    setApiMsgs]    = useState<ApiMsg[]>([]);
   const [thread,     setThread]     = useState<MessageItem[]>([]);
@@ -68,37 +64,6 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
   const [skipLoading,    setSkipLoading]    = useState(false);
   const [skipError,      setSkipError]      = useState<string | null>(null);
 
-  // Deferred mode: load existing profile so the agent skips what's already known
-  const [deferredState, setDeferredState] = useState<{
-    loaded: boolean;
-    knownParts: string[];
-  }>({ loaded: !deferred, knownParts: [] });
-
-  useEffect(() => {
-    if (!deferred) return;
-    let cancelled = false;
-    async function loadProfile() {
-      try {
-        const res = await fetch('/api/profile');
-        if (!res.ok) {
-          if (!cancelled) setDeferredState({ loaded: true, knownParts: [] });
-          return;
-        }
-        const p = await res.json();
-        if (cancelled) return;
-        const parts: string[] = [];
-        if (p.learning_context) parts.push(`learning context: ${p.learning_context}`);
-        if (p.learning_context_detail?.label) parts.push(`situation: ${p.learning_context_detail.label}`);
-        if (p.learning_context_detail?.situations?.length) parts.push(`facts: ${p.learning_context_detail.situations.join(', ')}`);
-        setDeferredState({ loaded: true, knownParts: parts });
-      } catch {
-        if (!cancelled) setDeferredState({ loaded: true, knownParts: [] });
-      }
-    }
-    loadProfile();
-    return () => { cancelled = true; };
-  }, [deferred]);
-
   const step = done ? 4 : Math.min(3, Math.max(0, apiMsgs.filter(m => m.role === 'user').length - 1));
   const bodyRef  = useRef<HTMLDivElement>(null);
   const textaRef = useRef<HTMLTextAreaElement>(null);
@@ -112,24 +77,17 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread, busy, done, suggestions]);
 
-  // Kick off conversation — wait for deferred profile load if needed
+  // Kick off conversation
   useEffect(() => {
-    if (!deferredState.loaded) return;
     if (started.current) return;
     started.current = true;
-
-    if (deferred && deferredState.knownParts.length > 0) {
-      const contextMsg = `hi, I'm completing my profile. I already have: ${deferredState.knownParts.join(', ')}. Please only ask about what's missing.`;
-      callAgent([{ role: 'user', content: contextMsg }], []);
-    } else {
-      callAgent([{ role: 'user', content: 'hi' }], []);
-    }
-  }, [deferredState.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+    callAgent([{ role: 'user', content: 'hi' }], []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ponytail: no per-field partial-profile guess on skip — with the new prompt
-  // asking things in whatever order the model chooses, and learning_context now
-  // a strict enum, guessing a field from raw message text risks writing an
-  // invalid value that 500s on the next profile read. Backend defaults cover it.
+  // asking things in whatever order the model chooses, guessing a field from
+  // raw message text risks writing something malformed. Backend defaults cover it.
   const handleSkipConfirm = useCallback(async () => {
     setSkipLoading(true);
     setSkipError(null);
@@ -160,8 +118,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
 
   const attemptSave = async (p: CompletedProfile) => {
     setSaveFailed(false);
-    const endpoint = deferred ? '/api/onboarding/complete-deferred' : '/api/onboarding/complete';
-    const res = await fetch(endpoint, {
+    const res = await fetch('/api/onboarding/complete', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(p),
@@ -171,11 +128,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
       return;
     }
     setSaveFailed(false);
-    if (deferred) {
-      setTimeout(() => onFinish(p.focus_areas?.[0] || p.learning_context_label || 'exploring'), 600);
-    } else {
-      setTimeout(() => setDone(true), 400);
-    }
+    setTimeout(() => setDone(true), 400);
   };
 
   const callAgent = async (msgs: ApiMsg[], currentThread: MessageItem[]) => {
@@ -225,18 +178,6 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
     sendText(text);
   };
 
-  // Show loading spinner while deferred profile loads
-  if (deferred && !deferredState.loaded) {
-    return (
-      <div className="onb">
-        <div className="onb-top"><Brand /></div>
-        <div className="onb-stage" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Typing />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="onb">
       <div className="onb-top">
@@ -247,36 +188,26 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
           </span>
         )}
         <div className="onb-progress">
-          <span>{deferred ? 'complete setup' : 'setup'}</span>
+          <span>setup</span>
           <div className="onb-steps">
             {[0,1,2,3].map(i => (
               <div key={i} className={`s ${i < step || done ? 'done' : i === step ? 'curr' : ''}`} />
             ))}
           </div>
         </div>
-        {deferred && onAbandon ? (
-          <button className="btn btn-ghost btn-sm" title="Back to Settings" onClick={onAbandon}>
-            ← Settings
-          </button>
-        ) : (
-          <>
-            <SkipButton onSkip={() => setShowSkipDialog(true)} disabled={busy && thread.length === 0} />
-            <button className="icon-btn" title="Sign out" onClick={() => logout()}>
-              <Icon name="logout" />
-            </button>
-          </>
-        )}
+        <SkipButton onSkip={() => setShowSkipDialog(true)} disabled={busy && thread.length === 0} />
+        <button className="icon-btn" title="Sign out" onClick={() => logout()}>
+          <Icon name="logout" />
+        </button>
       </div>
 
-      {!deferred && (
-        <SkipConfirmationDialog
-          open={showSkipDialog}
-          onConfirm={handleSkipConfirm}
-          onCancel={handleSkipCancel}
-          loading={skipLoading}
-          error={skipError}
-        />
-      )}
+      <SkipConfirmationDialog
+        open={showSkipDialog}
+        onConfirm={handleSkipConfirm}
+        onCancel={handleSkipCancel}
+        loading={skipLoading}
+        error={skipError}
+      />
 
       <div className="onb-stage" ref={bodyRef}>
         <div className="onb-thread">
@@ -316,7 +247,7 @@ export function Onboarding({ onFinish, userName, deferred = false, onAbandon }: 
               <div className="badge"><span className="dot" /> Setup complete</div>
               <h3>You&apos;re all set.</h3>
               <div className="setup-lines">
-                <div className="setup-line"><span className="k">context</span><span className="v">{profile.learning_context_label || profile.learning_context}</span></div>
+                <div className="setup-line"><span className="k">context</span><span className="v">{profile.learning_context_label || '—'}</span></div>
                 <div className="setup-line"><span className="k">facts</span><span className="v">{profile.focus_areas.join(', ') || '—'}</span></div>
               </div>
               <button
@@ -415,11 +346,12 @@ export function SessionEnd({ onFollow, onBack, title, summary, levelFrom, levelT
 }
 
 // ---------- Settings ----------------------------------------
-export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding, onClose }: {
+export function Settings({ profile, avatarUrl, onAvatarChanged, onReset, onSaved, onClose }: {
   profile: CoreProfile | null;
+  avatarUrl?: string | null;
+  onAvatarChanged?: () => void;
   onReset: () => void;
   onSaved: () => void;
-  onStartDeferredOnboarding?: () => void;
   onClose?: () => void;
 }) {
   const [tab, setTab] = useState<'profile' | 'memory'>('profile');
@@ -436,26 +368,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
   const [saveError, setSaveError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
-
-  // Session-scoped dismiss for the "Complete Your Profile" prompt — closing it
-  // shouldn't need a backend flag, but it should stay closed while browsing
-  // Settings rather than reappearing on every tab switch.
-  const [setupPromptDismissed, setSetupPromptDismissed] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return sessionStorage.getItem('settings:setup-prompt-dismissed') === 'true';
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    if (!setupPromptDismissed) return;
-    try {
-      sessionStorage.setItem('settings:setup-prompt-dismissed', 'true');
-    } catch {
-      // sessionStorage unavailable (e.g. private mode) — ignore
-    }
-  }, [setupPromptDismissed]);
 
   // Sync form values when profile loads / changes
   useEffect(() => {
@@ -500,13 +412,12 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
     URL.revokeObjectURL(url);
   };
 
-  // learning_context / label mirror the first entry of the list — plenty of
-  // backend readers still take those single-value fields. There's no
-  // separate `contexts` field any more — it duplicated this same list with
-  // no UI of its own (see l1_scope.extract_situations).
+  // `label` mirrors the first entry of the list — plenty of backend readers
+  // still take that single-value field. There's no separate `contexts`
+  // field any more — it duplicated this same list with no UI of its own
+  // (see l1_scope.extract_situations).
   const saveSituations = (situations: string[]) => save({
     learning_context_detail: {
-      learning_context: profile?.learning_context ?? 'self_directed',
       label: situations[0] ?? null,
       situations,
     },
@@ -563,6 +474,21 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
 
   const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
+  const saveAvatar = async (avatar: string | null): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/profile/avatar', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avatar }),
+      });
+      if (!res.ok) return false;
+      onAvatarChanged?.();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const onAvatarPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file
@@ -579,13 +505,13 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
     const reader = new FileReader();
     reader.onload = () => {
       const dataUri = reader.result as string;
-      save({ avatar: dataUri }).then(ok => { if (!ok) setAvatarError('Upload failed — please try again.'); });
+      saveAvatar(dataUri).then(ok => { if (!ok) setAvatarError('Upload failed — please try again.'); });
     };
     reader.onerror = () => setAvatarError('Could not read that file — please try again.');
     reader.readAsDataURL(file);
   };
 
-  const removeAvatar = () => { save({ avatar: '' }); };
+  const removeAvatar = () => { saveAvatar(null); };
 
   const [resolvingField, setResolvingField] = useState<string | null>(null);
   const resolvePendingChange = async (field: string, action: 'accept' | 'dismiss') => {
@@ -727,15 +653,15 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
                 <div className="k">Avatar</div>
                 <div className="v-wrap">
                   {avatarError && <span style={{ fontSize: 11, color: 'var(--danger)' }}>{avatarError}</span>}
-                  {profile?.avatar && (
+                  {avatarUrl && (
                     <button className="btn btn-sm btn-ghost" disabled={saving} onClick={removeAvatar}>Remove</button>
                   )}
                   <button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => avatarInputRef.current?.click()}>
-                    {profile?.avatar ? 'Change' : 'Upload'}
+                    {avatarUrl ? 'Change' : 'Upload'}
                   </button>
                   <input ref={avatarInputRef} type="file" accept="image/*" onChange={onAvatarPick} style={{ display: 'none' }} />
-                  {profile?.avatar ? (
-                    <img src={profile.avatar} alt="Profile" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="Profile" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
                   ) : (
                     <div className="avatar" style={{ width: 32, height: 32, fontSize: 14 }}>
                       {(profile?.name || 'Y')[0]?.toUpperCase()}
@@ -828,12 +754,6 @@ export function Settings({ profile, onReset, onSaved, onStartDeferredOnboarding,
                       </div>
                     ))}
                   </>)}
-                </div>
-              )}
-
-              {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && !setupPromptDismissed && (
-                <div className="settings-group">
-                  <CompleteSetupSection onStartSetup={onStartDeferredOnboarding} onClose={() => setSetupPromptDismissed(true)} />
                 </div>
               )}
 

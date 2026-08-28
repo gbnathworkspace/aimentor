@@ -1,6 +1,7 @@
 """Profile router — /api/profile CRUD."""
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -59,7 +60,6 @@ async def get_profile(user_id: str = Depends(require_auth)):
     doc = await profiles_col().find_one({"user_id": user_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Profile not found")
-    doc["avatar"] = await _get_avatar(user_id)
     return doc
 
 
@@ -68,9 +68,7 @@ async def create_profile(
     data: ProfileCreate, user_id: str = Depends(require_auth)
 ):
     """Create a new profile for the authenticated user."""
-    _validate_avatar(data.avatar)
     doc = data.model_dump()
-    avatar = doc.pop("avatar", None)
     doc["user_id"] = user_id
     try:
         await profiles_col().insert_one(doc)
@@ -84,7 +82,6 @@ async def create_profile(
         logger.exception("Failed to create profile for user=%s", user_id)
         raise
     doc.pop("_id", None)
-    doc["avatar"] = await _set_avatar(user_id, avatar) if avatar is not None else None
     return doc
 
 
@@ -93,18 +90,13 @@ async def update_profile(
     data: ProfileUpdate, user_id: str = Depends(require_auth)
 ):
     """Update the profile for the authenticated user."""
-    _validate_avatar(data.avatar)
     update_data = data.model_dump(exclude_none=True)
-    avatar_set = "avatar" in update_data
-    avatar = update_data.pop("avatar", None)
-    resolved_avatar = await _set_avatar(user_id, avatar) if avatar_set else None
 
     if not update_data:
-        # Nothing left for the profile doc itself — just return current state
+        # Nothing to update — just return current state
         doc = await profiles_col().find_one({"user_id": user_id}, {"_id": 0})
         if not doc:
             raise HTTPException(status_code=404, detail="Profile not found")
-        doc["avatar"] = resolved_avatar if avatar_set else await _get_avatar(user_id)
         return doc
 
     result = await profiles_col().find_one_and_update(
@@ -115,8 +107,28 @@ async def update_profile(
     if not result:
         raise HTTPException(status_code=404, detail="Profile not found")
     result.pop("_id", None)
-    result["avatar"] = resolved_avatar if avatar_set else await _get_avatar(user_id)
     return result
+
+
+class AvatarUpdateRequest(BaseModel):
+    """Request body for PUT /api/profile/avatar. `avatar` is a data URI
+    (data:image/...;base64,...) to set, or None/empty to clear."""
+
+    avatar: Optional[str] = None
+
+
+@router.get("/avatar")
+async def get_avatar(user_id: str = Depends(require_auth)):
+    """Return the resolved avatar URL, if any. Stored on the `users` doc,
+    not `profiles` — see _get_avatar/_set_avatar above."""
+    return {"avatar": await _get_avatar(user_id)}
+
+
+@router.put("/avatar")
+async def set_avatar(body: AvatarUpdateRequest, user_id: str = Depends(require_auth)):
+    """Set or clear (empty/None) the authenticated user's avatar."""
+    _validate_avatar(body.avatar)
+    return {"avatar": await _set_avatar(user_id, body.avatar)}
 
 
 @router.delete("")
@@ -203,7 +215,6 @@ async def accept_pending_change(field: str, user_id: str = Depends(require_auth)
         update["style_notes"] = notes[-5:]
     elif field == ProposableField.SITUATION.value:
         detail = dict(doc.get("learning_context_detail") or {})
-        ctx = detail.get("learning_context") or doc.get("learning_context") or "self_directed"
         situations = list(detail.get("situations") or [])
         new_situation = proposed.get("value", "")
         # Append only if not a case-insensitive duplicate of an existing entry.
@@ -211,7 +222,7 @@ async def accept_pending_change(field: str, user_id: str = Depends(require_auth)
             existing.lower() == new_situation.lower() for existing in situations
         ):
             situations.append(new_situation)
-        update["learning_context_detail"] = {**detail, "learning_context": ctx, "situations": situations[:20]}
+        update["learning_context_detail"] = {**detail, "situations": situations[:20]}
 
     update["pending_changes"] = [
         p for p in doc.get("pending_changes", []) if p.get("field") != field

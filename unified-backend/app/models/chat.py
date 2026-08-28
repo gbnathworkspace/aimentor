@@ -66,7 +66,6 @@ class OnboardingCompleteRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    learning_context: str = Field(alias="learningContext", max_length=60)
     learning_context_label: Optional[str] = Field(None, alias="learningContextLabel")
     focus_areas: list[str] = Field(default_factory=list, alias="focusAreas")
 
@@ -94,19 +93,3 @@ class OnboardingSkipResponse(BaseModel):
     session_id: str = Field("", alias="sessionId")
 
     model_config = ConfigDict(populate_by_name=True)
-
-
-class OnboardingCompleteDeferredRequest(BaseModel):
-    """Request body for POST /api/onboarding/complete-deferred."""
-
-    learning_context: Optional[str] = Field(None, alias="learningContext", max_length=60)
-    learning_context_label: Optional[str] = Field(None, alias="learningContextLabel")
-    focus_areas: Optional[list[str]] = Field(None, alias="focusAreas")
-
-    model_config = ConfigDict(populate_by_name=True)
-
-
-class OnboardingCompleteDeferredResponse(BaseModel):
-    """Response body for POST /api/onboarding/complete-deferred."""
-
-    ok: bool

@@ -8,19 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 
-class LearningContext(str, Enum):
-    HIGH_STAKES_EXAM = "high_stakes_exam"      # school/board exams, externally mandated
-    COMPETITIVE_TEST = "competitive_test"       # entrance/standardized tests, ranked outcome
-    JOB_INTERVIEW = "job_interview"
-    SELF_DIRECTED = "self_directed"             # casual study, no external deadline
-    OTHER = "other"
-
-
 class LearningContextDetail(BaseModel):
-    # Free text like `situations` below — LearningContext's members remain as
-    # well-known defaults, but the field itself no longer restricts users to
-    # those 5 values.
-    learning_context: str = Field(max_length=60)
     label: Optional[str] = Field(default=None, max_length=120)
     # e.g. "senior backend, Mumbai, 20 LPA" / "CBSE 9th standard, science stream"
     # Free-text facts about the user (e.g. "leading the backend rewrite",
@@ -28,8 +16,7 @@ class LearningContextDetail(BaseModel):
     # FIFO-capped, newest first; `label` mirrors the first entry for readers
     # that predate this list. There is no separate `contexts` field any
     # more — it duplicated this same list with no UI of its own (see
-    # l1_scope.extract_situations, which folds `learning_context` in here
-    # too instead of keeping a second parallel list).
+    # l1_scope.extract_situations).
     situations: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -85,18 +72,11 @@ class ProfileCreate(BaseModel):
         populate_by_name=True,
     )
 
-    learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
     style_notes: list[StyleNote] = Field(default_factory=list, max_length=5)
 
-    profile_status: Literal["complete", "skipped"] = "complete"
     name: Optional[str] = None
-    # Profile picture as a data URI (data:image/...;base64,...); see MAX_AVATAR_CHARS.
-    # Identity data, not L1 memory — persisted on the `users` doc, not `profiles`;
-    # kept in this request/response shape so the frontend contract stays flat.
-    # See app/routers/profile.py for the split.
-    avatar: Optional[str] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -105,14 +85,11 @@ class ProfileUpdate(BaseModel):
         populate_by_name=True,
     )
 
-    learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
     style_notes: Optional[list[StyleNote]] = Field(default=None, max_length=5)
 
-    profile_status: Optional[Literal["complete", "skipped"]] = None
     name: Optional[str] = None
-    avatar: Optional[str] = None
 
 
 class ProfileResponse(BaseModel):
@@ -123,7 +100,6 @@ class ProfileResponse(BaseModel):
 
     user_id: str
 
-    learning_context: Optional[str] = Field(default=None, max_length=60)
     learning_context_detail: Optional[LearningContextDetail] = None
 
     style_notes: list[StyleNote] = []
@@ -132,6 +108,4 @@ class ProfileResponse(BaseModel):
     # by ProfileCreate/ProfileUpdate — system-managed only.
     pending_changes: list[PendingProfileChange] = []
 
-    profile_status: Literal["complete", "skipped"] = "complete"
     name: Optional[str] = None
-    avatar: Optional[str] = None

@@ -107,16 +107,6 @@ class TestExtractSituations:
         situations = extract_situations(profile)
         assert situations == ["a", "b"]
 
-    def test_folds_in_learning_context_when_not_already_present(self):
-        profile = {"learning_context": "job_interview", "learning_context_detail": {"situations": ["a"]}}
-        situations = extract_situations(profile)
-        assert situations == ["a", "job_interview"]
-
-    def test_does_not_duplicate_learning_context_already_present(self):
-        profile = {"learning_context": "job_interview", "learning_context_detail": {"situations": ["job_interview"]}}
-        situations = extract_situations(profile)
-        assert situations == ["job_interview"]
-
     def test_empty_profile_returns_empty_list(self):
         assert extract_situations({}) == []
 

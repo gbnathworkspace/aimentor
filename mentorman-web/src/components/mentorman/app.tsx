@@ -10,7 +10,7 @@ import { Onboarding, Settings, AdminUsers } from './screens';
 import { DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'onboarding' | 'deferred-onboarding';
+type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
@@ -21,6 +21,7 @@ export function MentorManApp() {
   const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
   const [profile, setProfile] = useState<CoreProfile | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [userName, setUserName] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -61,6 +62,15 @@ export function MentorManApp() {
       .catch(() => { setProfileLoaded(true); });
   }, []);
 
+  // Avatar lives on the users doc, not the profile — fetched separately.
+  const refreshAvatar = () => {
+    fetch('/api/profile/avatar')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setAvatarUrl(data?.avatar ?? null))
+      .catch(() => {});
+  };
+  useEffect(() => { refreshAvatar(); }, []);
+
   // Fetch skills for alert derivation in ChatPanel
   useEffect(() => {
     fetch('/api/skills')
@@ -95,7 +105,7 @@ export function MentorManApp() {
     setChatKey(k => k + 1);
   };
 
-  const fullScreen = view === 'onboarding' || view === 'deferred-onboarding';
+  const fullScreen = view === 'onboarding';
 
   const sidebarContent = sidebarView === 'archived' ? (
     <ArchivedTopics
@@ -115,6 +125,7 @@ export function MentorManApp() {
       view={view}
       onNav={(v) => setView(v as View)}
       profile={profile}
+      avatarUrl={avatarUrl}
       userName={userName}
       isAdmin={isAdmin}
       collapsed={sidebarCollapsed}
@@ -124,31 +135,7 @@ export function MentorManApp() {
 
   return (
     <div className={`app ${fullScreen ? 'full' : ''} density-${t.density}`}>
-      {view === 'deferred-onboarding' ? (
-        <Onboarding
-          userName={userName}
-          deferred
-          onFinish={(goal) => {
-            refreshProfile();
-            if (goal) {
-              fetch('/api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: goal.slice(0, 100) }) })
-                .then(r => r.json())
-                .then(data => {
-                  const topicId = data.topicId || data.topic_id || data.id;
-                  setActiveTopic(topicId);
-                  setView('chat');
-                  setTopicsVersion(v => v + 1);
-                })
-                .catch(() => { setActiveTopic(null); setView('chat'); });
-            } else {
-              setActiveTopic(null);
-              setView('chat');
-            }
-            setChatKey(k => k + 1);
-          }}
-          onAbandon={() => setView('settings')}
-        />
-      ) : fullScreen ? (
+      {fullScreen ? (
         <Onboarding userName={userName} onFinish={(goal) => {
           refreshProfile();
           if (goal) {
@@ -190,7 +177,6 @@ export function MentorManApp() {
               topics={topics}
               profile={profile}
               userName={userName}
-              onStartDeferredOnboarding={() => setView('deferred-onboarding')}
             />
           )}
           {lastMainView === 'dashboard' && (
@@ -202,8 +188,9 @@ export function MentorManApp() {
               <div className="settings-modal" onClick={e => e.stopPropagation()}>
                 <Settings
                   profile={profile}
+                  avatarUrl={avatarUrl}
+                  onAvatarChanged={refreshAvatar}
                   onReset={() => { setProfile(null); setView('onboarding'); }}
-                  onStartDeferredOnboarding={() => setView('deferred-onboarding')}
                   onSaved={refreshProfile}
                   onClose={() => setView(lastMainView)}
                 />

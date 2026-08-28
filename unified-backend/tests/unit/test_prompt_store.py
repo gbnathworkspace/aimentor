@@ -37,14 +37,15 @@ class TestGetSystemPrompt:
     def test_interpolates_profile_fields(self):
         context = {
             "profile": {
-                "learning_context": "job_interview",
-                "learning_context_detail": {"label": "Crack FAANG", "situations": ["System Design", "DSA"]},
+                "learning_context_detail": {
+                    "label": "Crack FAANG",
+                    "situations": ["System Design", "DSA"],
+                },
             },
             "skill": {},
             "episodes": [],
         }
         result = get_system_prompt("planning", context)
-        assert "job_interview" in result
         assert "Crack FAANG" in result
         assert "System Design" in result
         assert "DSA" in result
@@ -53,7 +54,6 @@ class TestGetSystemPrompt:
         """No entry is "active" — all of them reach the prompt."""
         context = {
             "profile": {
-                "learning_context": "job_interview",
                 "learning_context_detail": {
                     "label": "interviewing for staff roles",
                     "situations": [
@@ -67,7 +67,6 @@ class TestGetSystemPrompt:
         }
         result = get_system_prompt("planning", context)
         assert "leading the backend rewrite" in result
-        assert "job_interview" in result
         # `label` duplicates situations[0] — injected once, not twice
         assert result.count("interviewing for staff roles") == 1
 
@@ -372,7 +371,7 @@ class TestGetOnboardingPrompt:
     def test_contains_onboarding_instructions(self):
         result = get_onboarding_prompt()
         assert "onboarding" in result.lower()
-        assert "learning context" in result.lower()
+        assert "situation summary" in result.lower()
         assert "focus areas" in result.lower()
 
     def test_contains_suggestion_chips_instruction(self):

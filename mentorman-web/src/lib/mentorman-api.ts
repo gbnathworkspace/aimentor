@@ -10,7 +10,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export interface LearningContextDetail {
-  learning_context: string;
   label?: string | null;
   situations?: string[];
 }
@@ -34,13 +33,10 @@ export interface PendingProfileChange {
 }
 
 export interface CoreProfile {
-  learning_context?: string | null;
   learning_context_detail?: LearningContextDetail | null;
   style_notes: StyleNote[];
   pending_changes: PendingProfileChange[];
-  profile_status?: 'complete' | 'skipped';
   name?: string;
-  avatar?: string | null;
   [key: string]: any;
 }
 

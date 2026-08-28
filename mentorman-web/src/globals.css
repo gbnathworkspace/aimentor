@@ -123,7 +123,7 @@ body {
 .sidebar.collapsed .session-list,
 .sidebar.collapsed .sb-archived-link,
 .sidebar.collapsed .new-session .label,
-.sidebar.collapsed .sb-foot .who,
+.sidebar.collapsed .sb-foot .who-wrap,
 .sidebar.collapsed .sb-foot .sub {
   display: none;
 }
@@ -166,6 +166,12 @@ body {
 .new-session:hover { filter: brightness(1.05); box-shadow: var(--sh-2); }
 .new-session:active { transform: translateY(1px); }
 .new-session svg { width: 15px; height: 15px; }
+.new-session-count {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-ink-2, #111);
+  font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
+}
 .sb-nav-icon {
   width: 40px; height: 40px; flex-shrink: 0; border-radius: var(--r);
   border: 1px solid var(--border); background: var(--card);
@@ -287,7 +293,7 @@ body {
   flex: 1; min-width: 0; padding: 2px 0; border: none; background: transparent;
   color: var(--fg); font-size: 12px; font-weight: 650; letter-spacing: -0.005em;
 }
-.group-name-input:focus { outline: none; }
+.group-name-input:focus { outline: none; box-shadow: 0 0 0 2px var(--accent-weak); border-radius: var(--r-sm); }
 .group-name-input::placeholder { color: var(--muted); font-weight: 500; }
 .pending-group .session { opacity: .8; }
 

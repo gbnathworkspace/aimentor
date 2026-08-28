@@ -1,4 +1,4 @@
-"""Onboarding router — /api/onboarding/chat + /complete + /skip + /complete-deferred."""
+"""Onboarding router — /api/onboarding/chat + /complete + /skip."""
 
 import json
 import logging
@@ -15,14 +15,12 @@ from app.auth.dependencies import require_auth
 from app.models.chat import (
     OnboardingCompleteRequest,
     OnboardingCompleteResponse,
-    OnboardingCompleteDeferredRequest,
-    OnboardingCompleteDeferredResponse,
     OnboardingRequest,
     OnboardingResponse,
     OnboardingSkipRequest,
     OnboardingSkipResponse,
 )
-from app.models.profile import LearningContext, LearningContextDetail, ProfileCreate
+from app.models.profile import LearningContextDetail, ProfileCreate
 from app.services.onboarding_bootstrap import bootstrap_skills
 from app.services.prompt_store import get_onboarding_prompt
 from app.services.response_parsing import extract_suggestions
@@ -127,20 +125,13 @@ async def onboarding_complete(
     """
     # Topics named during onboarding become Facts About You (situations) —
     # focus_areas is no longer a persisted L1 field, see l1_scope.py.
-    learning_context_detail = None
-    if body.learning_context_label or body.focus_areas:
-        learning_context_detail = LearningContextDetail(
-            learning_context=body.learning_context,
-            label=body.learning_context_label,
-            situations=body.focus_areas[:20],
-        )
+    learning_context_detail = LearningContextDetail(
+        label=body.learning_context_label,
+        situations=body.focus_areas[:20],
+    )
 
     # Build via ProfileCreate so the write always matches the L1 schema.
-    profile_model = ProfileCreate(
-        learning_context=body.learning_context,
-        learning_context_detail=learning_context_detail,
-        profile_status="complete",
-    )
+    profile_model = ProfileCreate(learning_context_detail=learning_context_detail)
     profile_data = profile_model.model_dump(mode="json", exclude_none=True)
     profile_data["user_id"] = user_id
 
@@ -158,11 +149,6 @@ async def onboarding_complete(
     return OnboardingCompleteResponse(skills=skill_nodes)
 
 
-_SKIP_DEFAULTS = {
-    "learning_context": LearningContext.SELF_DIRECTED.value,
-}
-
-
 @router.post("/skip", response_model=OnboardingSkipResponse)
 async def onboarding_skip(
     body: OnboardingSkipRequest,
@@ -170,19 +156,12 @@ async def onboarding_skip(
 ) -> OnboardingSkipResponse:
     """Skip onboarding: create a minimal profile and a new chat session."""
     partial = body.partial_profile or {}
-    learning_context = partial.get("learning_context") or _SKIP_DEFAULTS["learning_context"]
     situations = partial.get("focus_areas") or []
 
     profile_data = {
         "user_id": user_id,
-        "learning_context": learning_context,
-        "profile_status": "skipped",
+        "learning_context_detail": {"situations": situations[:20]},
     }
-    if situations:
-        profile_data["learning_context_detail"] = {
-            "learning_context": learning_context,
-            "situations": situations[:20],
-        }
 
     await profiles_col().update_one(
         {"user_id": user_id},
@@ -205,42 +184,3 @@ async def onboarding_skip(
     })
 
     return OnboardingSkipResponse(ok=True, session_id=session_id)
-
-
-@router.post("/complete-deferred", response_model=OnboardingCompleteDeferredResponse)
-async def onboarding_complete_deferred(
-    body: OnboardingCompleteDeferredRequest,
-    user_id: str = Depends(require_auth),
-) -> OnboardingCompleteDeferredResponse:
-    """Complete deferred onboarding: merge new answers and set profile_status to complete."""
-    existing = await profiles_col().find_one({"user_id": user_id})
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No profile found. Please complete full onboarding.",
-        )
-
-    updates: dict = {"profile_status": "complete"}
-    resolved_context = body.learning_context or existing.get("learning_context")
-    if body.learning_context is not None:
-        updates["learning_context"] = body.learning_context.value
-    if body.learning_context_label is not None and resolved_context:
-        updates["learning_context_detail"] = {
-            "learning_context": (
-                body.learning_context.value
-                if body.learning_context
-                else resolved_context
-            ),
-            "label": body.learning_context_label,
-            "structured": {},
-        }
-    if body.focus_areas:
-        existing_detail = existing.get("learning_context_detail") or {}
-        ctx = resolved_context or existing_detail.get("learning_context") or "self_directed"
-        existing_situations = list(existing_detail.get("situations") or [])
-        merged = existing_situations + [s for s in body.focus_areas if s not in existing_situations]
-        detail = updates.get("learning_context_detail") or {**existing_detail, "learning_context": ctx}
-        updates["learning_context_detail"] = {**detail, "situations": merged[:20]}
-    await profiles_col().update_one({"user_id": user_id}, {"$set": updates})
-
-    return OnboardingCompleteDeferredResponse(ok=True)

@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
 import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
-import { OnboardingBanner } from './OnboardingBanner';
 import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
@@ -222,7 +221,7 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
   );
 }
 
-export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, userName, onStartDeferredOnboarding }: {
+export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, userName }: {
   topicId: string | null;
   mode: ModeId;
   setMode: (m: ModeId) => void;
@@ -234,7 +233,6 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   topics?: Topic[];
   profile?: CoreProfile | null;
   userName?: string;
-  onStartDeferredOnboarding?: () => void;
 }) {
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -662,10 +660,6 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       />
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />
-
-      {profile?.profile_status === 'skipped' && onStartDeferredOnboarding && (
-        <OnboardingBanner onComplete={onStartDeferredOnboarding} onDismiss={() => {}} />
-      )}
 
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">

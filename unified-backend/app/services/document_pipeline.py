@@ -180,14 +180,13 @@ async def _apply_proposals_directly(
         elif field == ProposableField.SITUATION.value:
             # Append fact/situation (deduplication already done by synthesizer)
             detail = update.get("learning_context_detail") or dict(profile.get("learning_context_detail") or {})
-            ctx = detail.get("learning_context") or profile.get("learning_context") or "self_directed"
             situations = list(detail.get("situations") or [])
             new_situation = proposed_value.get("value", "")
             if new_situation and not any(
                 existing.lower() == new_situation.lower() for existing in situations
             ):
                 situations.append(new_situation)
-            update["learning_context_detail"] = {**detail, "learning_context": ctx, "situations": situations[:20]}
+            update["learning_context_detail"] = {**detail, "situations": situations[:20]}
 
     if update:
         await profiles_col().update_one(

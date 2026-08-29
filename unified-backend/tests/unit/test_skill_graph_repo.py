@@ -46,24 +46,3 @@ def test_apply_update_marks_assessed_true():
     the onboarding placeholder guess."""
     written = _run_apply({"current_level": "beginner", "assessed": False})
     assert written["assessed"] is True
-
-
-class TestNextBestTopics:
-    """Issue #10: prerequisite-ordered next-best-skill sequencing."""
-
-    def test_orders_prerequisites_before_dependents(self):
-        nodes = [
-            {"topic": "Algorithms", "current_level": "beginner", "prerequisites": ["Data Structures"]},
-            {"topic": "Data Structures", "current_level": "beginner", "prerequisites": []},
-        ]
-        ranked = repo.next_best_topics(nodes)
-        assert [n["topic"] for n in ranked] == ["Data Structures", "Algorithms"]
-
-    def test_respects_limit(self):
-        nodes = [{"topic": f"T{i}", "current_level": "beginner", "prerequisites": []} for i in range(5)]
-        assert len(repo.next_best_topics(nodes, limit=2)) == 2
-
-    def test_missing_prerequisite_is_ignored(self):
-        nodes = [{"topic": "Solo", "current_level": "beginner", "prerequisites": ["Nonexistent"]}]
-        ranked = repo.next_best_topics(nodes)
-        assert [n["topic"] for n in ranked] == ["Solo"]

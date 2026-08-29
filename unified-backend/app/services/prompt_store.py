@@ -10,7 +10,6 @@ from typing import Any
 
 from app.models.chat import DEFAULT_TONE, ToneId
 from app.services.l1_scope import extract_situations
-from app.services.skill_graph_repo import next_best_topics
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -239,17 +238,6 @@ def _format_summary_blocks(blocks: list[dict[str, Any]] | None) -> str:
     return "\n\n".join(b.get("text", "") for b in ordered)
 
 
-def _format_next_skills(skill_graph: list[dict[str, Any]]) -> str:
-    """Format the prerequisite-ordered next-best-skill sequence (issue #10)."""
-    ranked = next_best_topics(skill_graph)
-    if not ranked:
-        return "(no pending topics — skill graph empty)"
-    return "\n".join(
-        f"{i}. {item['topic']} (current level: {item['current_level']})"
-        for i, item in enumerate(ranked, 1)
-    )
-
-
 def _build_context_variables(
     context: dict[str, Any], mode: str, tone: ToneId
 ) -> dict[str, str]:
@@ -258,11 +246,6 @@ def _build_context_variables(
     skill = context.get("skill", {})
 
     mode_instructions = _MODE_INSTRUCTIONS.get(mode, "")
-    if mode == "planning":
-        mode_instructions += (
-            "\n- Suggested next-best-skill order (prerequisites-first):\n"
-            + _format_next_skills(context.get("skill_graph") or [])
-        )
 
     return {
         # L1 Profile fields

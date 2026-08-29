@@ -36,6 +36,7 @@ _MAX_DOCUMENT_CHUNKS = 12
 
 async def assemble(
     user_id: str, topic: str, query: str,
+    topic_id: str | None = None,
     l1_scope: list[dict] | None = None, taught_concepts: list[str] | None = None,
     summary_blocks: list[dict] | None = None,
 ) -> dict:
@@ -46,6 +47,9 @@ async def assemble(
         topic: The current mentoring topic.
         query: The user's latest message. Currently unused — reserved for
             future semantic retrieval (issue #5).
+        topic_id: The topic's id, used to fetch documents uploaded as
+            context scoped to this topic (metadata.source="topic_document").
+            None degrades to user-wide documents only, same as before.
         l1_scope: The topic's cached relevance judgments (see
             TopicService._ensure_l1_scope), if the caller has a topic
             document to read one from. Passed straight through to the
@@ -61,7 +65,7 @@ async def assemble(
             treatment as l1_scope/taught_concepts.
 
     Returns:
-        A dict with keys: profile, skill, documents, skill_graph,
+        A dict with keys: profile, skill, documents,
         l1_scope, taught_concepts, summary_blocks.
 
     Raises:
@@ -84,40 +88,44 @@ async def assemble(
         logger.warning("Skill graph fetch failed for user=%s topic=%s: %s", user_id, topic, e)
         skill = None
 
-    # Uploaded documents (résumé / LeetCode etc. ingested at onboarding).
+    # Uploaded documents (résumé / LeetCode etc. ingested at onboarding),
+    # plus this topic's own documents (see /topic/{id}/document), if any.
     # Without this read the ingest pipeline is orphaned — files embedded, never used (issue #4).
-    documents = await _fetch_documents(user_id)
-
-    # Full skill graph (all topics, not just the current one) — lets planning
-    # mode do prerequisite-aware next-best-skill sequencing (issue #10). A
-    # user's graph is a handful of docs, so this is cheap to always fetch.
-    try:
-        skill_graph = await skill_graph_col().find(
-            {"user_id": user_id}, {"_id": 0}
-        ).to_list(length=50)
-    except Exception as e:
-        logger.warning("Skill graph list fetch failed for user=%s: %s", user_id, e)
-        skill_graph = []
+    documents = await _fetch_documents(user_id, topic_id)
 
     return {
         "profile": profile,
         "skill": skill or {},
         "documents": documents,
-        "skill_graph": skill_graph,
         "l1_scope": l1_scope,
         "taught_concepts": taught_concepts,
         "summary_blocks": summary_blocks,
     }
 
 
-async def _fetch_documents(user_id: str, limit: int = _MAX_DOCUMENT_CHUNKS) -> list:
-    """Fetch the user's ingested file chunks. Empty list on any failure."""
+async def _fetch_documents(
+    user_id: str, topic_id: str | None = None, limit: int = _MAX_DOCUMENT_CHUNKS
+) -> list:
+    """Fetch this topic's own documents first, then fill the rest of the
+    budget with the user's user-wide ingested chunks. Empty list on failure."""
     try:
-        cursor = embeddings_col().find(
-            {"user_id": user_id, "metadata.source": "ingestion"},
-            {"_id": 0, "text": 1, "metadata.filename": 1},
-        ).limit(limit)
-        return await cursor.to_list(length=limit)
+        topic_chunks: list = []
+        if topic_id:
+            topic_chunks = await embeddings_col().find(
+                {"user_id": user_id, "metadata.source": "topic_document", "metadata.topic_id": topic_id},
+                {"_id": 0, "text": 1, "metadata.filename": 1},
+            ).to_list(length=limit)
+
+        remaining = limit - len(topic_chunks)
+        general_chunks: list = []
+        if remaining > 0:
+            cursor = embeddings_col().find(
+                {"user_id": user_id, "metadata.source": "ingestion"},
+                {"_id": 0, "text": 1, "metadata.filename": 1},
+            ).limit(remaining)
+            general_chunks = await cursor.to_list(length=remaining)
+
+        return topic_chunks + general_chunks
     except Exception as e:
         logger.warning("Document fetch failed for user=%s: %s. Returning no documents.", user_id, e)
         return []

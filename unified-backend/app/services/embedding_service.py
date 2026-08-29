@@ -211,7 +211,7 @@ async def _generate_embedding(text: str) -> list[float]:
     """
     settings = get_settings()
     client = voyageai.AsyncClient(api_key=settings.VOYAGE_API_KEY)
-    response = await client.embed(texts=[text], model="voyage-3")
+    response = await client.embed(texts=[text], model="voyage-4-lite")
     return response.embeddings[0]
 
 

@@ -76,35 +76,3 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
             skill_update.topic,
             str(e),
         )
-
-
-def next_best_topics(nodes: list[dict], limit: int = 3) -> list[dict]:
-    """Order skill nodes by prerequisite edges, in learn-next order (issue #10).
-
-    Pure/sync, no DB access — takes the raw skill_graph list already fetched
-    by context_assembler. A DFS post-order gives a valid topological order:
-    every prerequisite is visited (and appended) before its dependent.
-
-    # ponytail: no cycle guard beyond the visited set — edges are hand-seeded
-    # linear chains, add real cycle detection if edges become user-editable.
-    """
-    topic_by_name = {n["topic"]: n for n in nodes}
-    order: list[str] = []
-    visited: set[str] = set()
-
-    def visit(topic: str) -> None:
-        if topic in visited or topic not in topic_by_name:
-            return
-        visited.add(topic)
-        for prereq in topic_by_name[topic].get("prerequisites") or []:
-            visit(prereq)
-        order.append(topic)
-
-    for n in nodes:
-        visit(n["topic"])
-
-    ranked = [
-        {"topic": t, "current_level": topic_by_name[t].get("current_level", "beginner")}
-        for t in order
-    ]
-    return ranked[:limit]

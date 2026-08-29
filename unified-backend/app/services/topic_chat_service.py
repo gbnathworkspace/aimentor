@@ -5,8 +5,8 @@ appended to a topic thread, context is assembled including SummaryBlocks,
 and compaction is checked after each assistant response.
 
 The mentor call streams tokens back to the client (issue: 2-10s perceived
-latency) and can loop up to one extra round if the model reaches for
-get_skill_detail before answering (issue: agentic context pull). See
+latency) and can loop up to one extra round if the model reaches for a
+search tool before answering (issue: agentic context pull). See
 design_decisions/15_llm_orchestration.md for why LangChain stays here
 specifically (raw SDK everywhere else).
 
@@ -75,24 +75,8 @@ _DIAGNOSTIC_VERDICT_TOOL = {
 }
 
 # --- Loop tools: the model can call these mid-turn, see the result, and keep
-# reasoning before its final reply. get_skill_detail reuses data the backend
-# already fetches; the two search_* tools run real Atlas $vectorSearch
-# queries (see vector_search.py).
-
-_GET_SKILL_DETAIL_TOOL = {
-    "name": "get_skill_detail",
-    "description": (
-        "Look up the user's current level and weak/strong areas for a "
-        "topic OTHER than the one currently being discussed. Use this when "
-        "the conversation references another topic's skill state that "
-        "isn't already in your context."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {"topic": {"type": "string"}},
-        "required": ["topic"],
-    },
-}
+# reasoning before its final reply. The two search_* tools run real Atlas
+# $vectorSearch queries (see vector_search.py).
 
 # Real semantic search (Atlas $vectorSearch), not the dump-all default
 # injection — for pulling something specific that isn't already in context.
@@ -131,7 +115,6 @@ _SEARCH_OTHER_TOPICS_TOOL = {
 }
 
 _LOOP_TOOL_NAMES = {
-    _GET_SKILL_DETAIL_TOOL["name"],
     _SEARCH_DOCUMENTS_TOOL["name"],
     _SEARCH_OTHER_TOPICS_TOOL["name"],
 }
@@ -169,7 +152,7 @@ class TopicChatService:
     3. Get all messages from topic (including SummaryBlocks)
     4. Assemble context (L1/L2/L3 via existing context_assembler)
     5. Stream the LLM reply (via ChatAnthropic), looping once if the model
-       reaches for get_skill_detail
+       reaches for a search tool
     6. Append assistant response to topic thread
     7. Post-turn hook: check if compaction needed, trigger async if so
     """
@@ -242,7 +225,7 @@ class TopicChatService:
         # if no profile — still surfaces as a normal error response since
         # nothing has streamed yet.
         context = await context_assembler.assemble(
-            user_id, topic_title, content,
+            user_id, topic_title, content, topic_id=topic_id,
             l1_scope=topic.get("l1_scope"), taught_concepts=topic.get("taughtConcepts"),
             summary_blocks=topic.get("summaryBlocks"),
         )
@@ -312,7 +295,7 @@ class TopicChatService:
 
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages)
-            tools = [_WEB_SEARCH_TOOL, _GET_SKILL_DETAIL_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL]
+            tools = [_WEB_SEARCH_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL]
             if include_diagnostic_tool:
                 tools.append(_DIAGNOSTIC_VERDICT_TOOL)
 
@@ -357,7 +340,7 @@ class TopicChatService:
                 lc_messages.append(accumulated)
                 for tc in loop_calls:
                     result_text = await self._execute_loop_tool(
-                        tc["name"], tc.get("args") or {}, user_id, context
+                        tc["name"], tc.get("args") or {}, user_id
                     )
                     lc_messages.append(ToolMessage(content=result_text, tool_call_id=tc["id"]))
 
@@ -416,14 +399,12 @@ class TopicChatService:
         ]
 
     async def _execute_loop_tool(
-        self, name: str, tool_input: dict, user_id: str, context: dict
+        self, name: str, tool_input: dict, user_id: str
     ) -> str:
         """Run a loop tool locally and return its result as plain text for
         the model. Fail-open on any error — matches context_assembler.py's
         pattern, a lookup miss shouldn't break the turn."""
         try:
-            if name == "get_skill_detail":
-                return self._format_skill_detail(tool_input.get("topic", ""), context)
             if name == "search_documents":
                 results = await vector_search(
                     tool_input.get("query", ""), user_id, source="ingestion", limit=5
@@ -444,24 +425,6 @@ class TopicChatService:
         if not results:
             return empty_msg
         return "\n\n".join(r.get("text", "") for r in results)
-
-    @staticmethod
-    def _format_skill_detail(topic: str, context: dict) -> str:
-        node = next(
-            (
-                n for n in context.get("skill_graph") or []
-                if str(n.get("topic", "")).lower() == topic.lower()
-            ),
-            None,
-        )
-        if not node:
-            return f"No skill data found for topic '{topic}'."
-        return (
-            f"Topic: {node.get('topic')}\n"
-            f"Current level: {node.get('current_level', 'not assessed')}\n"
-            f"Weak areas: {', '.join(node.get('weak_areas') or []) or 'none recorded'}\n"
-            f"Strong areas: {', '.join(node.get('strong_areas') or []) or 'none recorded'}"
-        )
 
     def _to_langchain_messages(self, system_prompt: str, messages: list[dict]) -> list:
         """Convert the assembled system prompt + topic messages into LangChain

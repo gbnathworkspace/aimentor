@@ -16,7 +16,9 @@ from app.services.embedder import embed_text
 logger = logging.getLogger(__name__)
 
 VECTOR_INDEX_NAME = "vector_index"
-# voyage-3's embedding dimensionality (embedder.py pins model="voyage-3").
+# voyage-4-lite's default embedding dimensionality (embedder.py pins
+# model="voyage-4-lite") — same 1024 dims as the old voyage-3, so no
+# index/dimension migration needed, just a model-name/free-tier swap.
 EMBEDDING_DIMENSIONS = 1024
 
 
@@ -93,6 +95,32 @@ async def delete_vectors(vector_ids: list[str]) -> None:
     if not vector_ids:
         return
     await embeddings_col().delete_many({"vector_id": {"$in": vector_ids}})
+
+
+async def list_topic_documents(topic_id: str, user_id: str) -> list[dict]:
+    """List documents uploaded as context for one topic, one row per filename
+    (a document is stored as many chunks — this collapses them back)."""
+    pipeline = [
+        {"$match": {"user_id": user_id, "metadata.topic_id": topic_id, "metadata.source": "topic_document"}},
+        {"$group": {
+            "_id": "$metadata.filename",
+            "chunkCount": {"$sum": 1},
+            "uploadedAt": {"$min": "$metadata.uploaded_at"},
+        }},
+        {"$project": {"_id": 0, "filename": "$_id", "chunkCount": 1, "uploadedAt": 1}},
+        {"$sort": {"uploadedAt": -1}},
+    ]
+    return await embeddings_col().aggregate(pipeline).to_list(length=100)
+
+
+async def delete_topic_document(topic_id: str, user_id: str, filename: str) -> int:
+    """Delete every chunk of one topic-scoped document. Returns the number
+    of chunks removed (0 means no such document)."""
+    result = await embeddings_col().delete_many({
+        "user_id": user_id, "metadata.topic_id": topic_id,
+        "metadata.source": "topic_document", "metadata.filename": filename,
+    })
+    return result.deleted_count
 
 
 async def vector_search(

@@ -11,9 +11,7 @@ import { SubtopicWeightsModal, buildGoalCards } from './SubtopicWeightsModal';
 import { UncertainRelevanceModal, type UncertainL1ScopeItem } from './UncertainRelevanceModal';
 import { L1MemoryModal } from './L1MemoryModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
-import { AttachmentPreview } from './chat/AttachmentPreview';
-import { AttachButton } from './chat/AttachButton';
-import { useAttachedFiles } from '@/lib/chat-upload/useAttachedFiles';
+import { TopicContextPanel } from './TopicContextPanel';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 // Must match _META_MARKER in unified-backend/app/services/topic_chat_service.py
@@ -94,46 +92,30 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled, sessionId, onAttachSend }: {
+function Composer({ mode, tone, onSend, busy, disabled }: {
   mode: ModeId;
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
-  /** Session ID for the document uploader. */
-  sessionId?: string;
-  /** Called when Send submits staged file attachments alongside the typed text. */
-  onAttachSend?: (text: string, files: File[]) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const attachment = useAttachedFiles();
-  const canAttach = !!(sessionId && onAttachSend);
 
   const grow = () => {
     const el = ref.current;
     if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; }
   };
 
-  // One Send action for both text and attachments — if valid files are
-  // staged, they're folded straight into this turn's chat message; otherwise
-  // it's a plain text send.
-  const hasDocsToSend = canAttach && attachment.hasValidFiles;
-  const canSubmit = !!val.trim() || hasDocsToSend;
+  const canSubmit = !!val.trim();
 
   const submit = () => {
     if (busy || disabled || !canSubmit) return;
     const text = val.trim();
     setVal('');
     if (ref.current) ref.current.style.height = 'auto';
-    if (hasDocsToSend) {
-      const validFiles = attachment.fileResults.filter(r => r.error === null).map(r => r.file);
-      onAttachSend!(text, validFiles);
-      attachment.clearAll();
-    } else {
-      onSend(text);
-    }
+    onSend(text);
   };
 
   const isEval = mode === 'evaluation';
@@ -144,18 +126,6 @@ function Composer({ mode, tone, onSend, busy, disabled, sessionId, onAttachSend 
       )}
       <div className="composer-inner">
         <div className={`composer-box ${focus ? 'focus' : ''}`}>
-          {canAttach && (
-            <AttachmentPreview
-              fileResults={attachment.fileResults}
-              warning={attachment.warning}
-              skipReview={attachment.skipReview}
-              disabled={disabled}
-              onRemove={attachment.removeFile}
-              onClearAll={attachment.clearAll}
-              onToggleSkipReview={attachment.toggleSkipReview}
-              showSkipReview={false}
-            />
-          )}
           <textarea
             ref={ref} value={val} rows={1}
             id="composer-textarea"
@@ -167,7 +137,6 @@ function Composer({ mode, tone, onSend, busy, disabled, sessionId, onAttachSend 
           />
           <div className="composer-tools">
             <button className="tool-btn" title="Code block">{'</>'}</button>
-            {canAttach && <AttachButton disabled={disabled} onSelect={attachment.selectFiles} />}
             <div className="spacer" />
             <button className="send-btn" onClick={submit} disabled={busy || disabled || !canSubmit} title="Send">
               <Icon name={isEval ? 'arrowUp' : 'send'} />
@@ -465,19 +434,6 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     }).catch(() => {});
   }, [topicId]);
 
-  // Fold attached files straight into this turn's chat message — no upload
-  // job, no profile-extraction/proposal pipeline. The file's text becomes
-  // part of what the mentor reads for this one turn; the chat bubble shows
-  // the typed text (if any) plus a plain file chip, same as any chat app.
-  const handleAttachSend = useCallback((text: string, files: File[]) => {
-    const attachments = files.map(f => ({ name: f.name, size: f.size }));
-    Promise.all(files.map(f => f.text().catch(() => ''))).then(contents => {
-      const fileBlocks = files.map((f, i) => `[Attached file: ${f.name}]\n${contents[i]}`).join('\n\n');
-      const backendContent = [text, fileBlocks].filter(Boolean).join('\n\n');
-      send(text, { attachments, backendContent });
-    });
-  }, [send]);
-
   // Export the full topic transcript (all messages, not just the loaded page)
   // as a local .md file for offline analysis.
   const [exporting, setExporting] = useState(false);
@@ -583,6 +539,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   }
 
   return (
+    <>
     <div className="panel">
       <div className="panel-head">
         <div className="ph-left">
@@ -700,9 +657,9 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
         tone={tone}
         onSend={send}
         busy={busy}
-        sessionId={topicId ?? undefined}
-        onAttachSend={topicId ? handleAttachSend : undefined}
       />
     </div>
+    <TopicContextPanel topicId={topicId} />
+    </>
   );
 }

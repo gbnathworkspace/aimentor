@@ -14,6 +14,7 @@ from app.services.extraction import (
     extract_text_from_csv,
     extract_text_from_pdf,
     process_extraction,
+    process_topic_document,
 )
 
 
@@ -364,3 +365,69 @@ class TestProcessExtraction:
         assert call_kwargs["metadata"]["chunk_index"] == 0
         assert call_kwargs["metadata"]["job_id"] == "job-meta"
         assert len(call_kwargs["text"]) > 0
+
+
+class TestProcessTopicDocument:
+    """Tests for process_topic_document — topic-scoped document embedding."""
+
+    @pytest.mark.asyncio
+    async def test_embeds_csv_with_topic_metadata(self, tmp_path):
+        csv_path = str(tmp_path / "notes.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["topic", "content"])
+            writer.writerow(["Recursion", "Base cases matter."])
+
+        with patch(
+            "app.services.extraction.embed_and_upsert",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_embed:
+            await process_topic_document("topic-abc", "user-1", [(csv_path, "notes.csv")])
+
+        assert mock_embed.called
+        call_kwargs = mock_embed.call_args.kwargs
+        assert call_kwargs["user_id"] == "user-1"
+        assert call_kwargs["source"] == "topic_document"
+        assert call_kwargs["metadata"]["topic_id"] == "topic-abc"
+        assert call_kwargs["metadata"]["filename"] == "notes.csv"
+        assert call_kwargs["vector_id"] == "topic:topic-abc:notes.csv:0"
+        assert call_kwargs["metadata"]["uploaded_at"]
+
+    @pytest.mark.asyncio
+    async def test_unsupported_file_type_is_skipped_not_raised(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+        tmp.write(b"some text")
+        tmp.close()
+
+        try:
+            with patch(
+                "app.services.extraction.embed_and_upsert",
+                new_callable=AsyncMock,
+            ) as mock_embed:
+                await process_topic_document("topic-abc", "user-1", [(tmp.name, "notes.txt")])
+
+            mock_embed.assert_not_called()
+        finally:
+            os.unlink(tmp.name)
+
+    @pytest.mark.asyncio
+    async def test_one_file_failure_does_not_block_others(self, tmp_path):
+        csv_path = str(tmp_path / "notes.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["key", "value"])
+            writer.writerow(["a", "b"])
+
+        with patch(
+            "app.services.extraction.embed_and_upsert",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_embed:
+            await process_topic_document(
+                "topic-abc", "user-1",
+                [("/nonexistent/file.pdf", "missing.pdf"), (csv_path, "notes.csv")],
+            )
+
+        assert mock_embed.called
+        assert mock_embed.call_args.kwargs["metadata"]["filename"] == "notes.csv"

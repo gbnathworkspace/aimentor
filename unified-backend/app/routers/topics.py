@@ -11,12 +11,17 @@ Requirements: 1.1, 1.2, 1.3, 2.4, 3.1, 3.3, 4.1, 14.4, 15.1, 15.2, 15.3, 15.5
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.auth.dependencies import require_auth
 from app.config.database import weight_nudges_col, skill_graph_col
+from app.services.extraction import process_topic_document
+from app.services.file_upload import store_file, validate_files
+from app.services.vector_search import delete_topic_document, list_topic_documents
 from app.services.topic_service import TopicService
 from app.services.topic_chat_service import TopicChatService
 from app.services.topic_router import route_topic
@@ -172,6 +177,60 @@ async def get_topic(topic_id: str, user_id: str = Depends(require_auth)):
     """
     topic = await _topic_service.get_topic(topic_id, user_id)
     return topic
+
+
+@router.post("/topic/{topic_id}/document", status_code=202)
+async def upload_topic_document(
+    topic_id: str,
+    files: list[UploadFile],
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_auth),
+):
+    """Attach a document as context scoped to this topic only.
+
+    Unlike /api/ingest (user-wide onboarding docs), these are embedded with
+    metadata.topic_id and only ever injected/searched for this one topic.
+    Ownership-checked via get_topic (404 for both not-found and unauthorized).
+    """
+    await _topic_service.get_topic(topic_id, user_id)
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    valid_files, errors = await validate_files(files)
+    if not valid_files:
+        raise HTTPException(
+            status_code=400, detail={"message": "All files failed validation", "errors": errors}
+        )
+
+    upload_id = str(uuid4())
+    file_paths: list[tuple[str, str]] = []
+    for file in valid_files:
+        path = await store_file(file, user_id, upload_id)
+        file_paths.append((path, file.filename or "unknown"))
+
+    background_tasks.add_task(process_topic_document, topic_id, user_id, file_paths)
+    return {"accepted": len(file_paths), "errors": errors}
+
+
+@router.get("/topic/{topic_id}/documents")
+async def get_topic_documents(topic_id: str, user_id: str = Depends(require_auth)):
+    """List documents currently held as context for this topic."""
+    await _topic_service.get_topic(topic_id, user_id)
+    documents = await list_topic_documents(topic_id, user_id)
+    return {"documents": documents}
+
+
+@router.delete("/topic/{topic_id}/documents/{filename}")
+async def delete_topic_document_endpoint(
+    topic_id: str, filename: str, user_id: str = Depends(require_auth)
+):
+    """Remove one document (all its chunks) from this topic's context."""
+    await _topic_service.get_topic(topic_id, user_id)
+    deleted = await delete_topic_document(topic_id, user_id, filename)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"ok": True}
 
 
 @router.get("/topic/{topic_id}/messages")

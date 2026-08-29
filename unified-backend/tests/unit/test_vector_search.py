@@ -6,9 +6,11 @@ import pytest
 
 from app.services.vector_search import (
     VECTOR_INDEX_NAME,
+    delete_topic_document,
     delete_vectors,
     embed_and_upsert,
     ensure_vector_index,
+    list_topic_documents,
     vector_search,
 )
 
@@ -101,6 +103,46 @@ class TestDeleteVectors:
         with patch("app.services.vector_search.embeddings_col", return_value=col):
             await delete_vectors(["v1", "v2"])
         col.delete_many.assert_called_once_with({"vector_id": {"$in": ["v1", "v2"]}})
+
+
+class TestListTopicDocuments:
+    @pytest.mark.asyncio
+    async def test_returns_aggregated_rows(self):
+        col = MagicMock()
+        rows = [{"filename": "notes.pdf", "chunkCount": 3, "uploadedAt": "2026-08-30T00:00:00"}]
+        col.aggregate.return_value.to_list = AsyncMock(return_value=rows)
+        with patch("app.services.vector_search.embeddings_col", return_value=col):
+            result = await list_topic_documents("topic-abc", "u1")
+
+        assert result == rows
+        pipeline = col.aggregate.call_args[0][0]
+        assert pipeline[0]["$match"] == {
+            "user_id": "u1", "metadata.topic_id": "topic-abc", "metadata.source": "topic_document",
+        }
+
+
+class TestDeleteTopicDocument:
+    @pytest.mark.asyncio
+    async def test_deletes_by_topic_and_filename(self):
+        col = MagicMock()
+        col.delete_many = AsyncMock(return_value=MagicMock(deleted_count=3))
+        with patch("app.services.vector_search.embeddings_col", return_value=col):
+            deleted = await delete_topic_document("topic-abc", "u1", "notes.pdf")
+
+        assert deleted == 3
+        col.delete_many.assert_called_once_with({
+            "user_id": "u1", "metadata.topic_id": "topic-abc",
+            "metadata.source": "topic_document", "metadata.filename": "notes.pdf",
+        })
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_nothing_matched(self):
+        col = MagicMock()
+        col.delete_many = AsyncMock(return_value=MagicMock(deleted_count=0))
+        with patch("app.services.vector_search.embeddings_col", return_value=col):
+            deleted = await delete_topic_document("topic-abc", "u1", "missing.pdf")
+
+        assert deleted == 0
 
 
 class TestVectorSearch:

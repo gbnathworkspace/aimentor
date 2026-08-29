@@ -202,3 +202,51 @@ async def process_extraction(
                 }
             },
         )
+
+
+async def process_topic_document(
+    topic_id: str, user_id: str, file_paths: list[tuple[str, str]]
+) -> None:
+    """Extract, chunk, and embed a document as context scoped to one topic.
+
+    Unlike process_extraction (onboarding, source="ingestion", user-wide),
+    these chunks carry metadata.topic_id and source="topic_document" — picked
+    up by context_assembler._fetch_documents for that topic only. No job
+    tracking: topic documents are small notes/syllabi, processed inline by
+    a background task, not worth a status-polling endpoint.
+
+    Args:
+        topic_id: The topic this document is scoped to.
+        user_id: The authenticated user's ID.
+        file_paths: List of (file_path, filename) tuples to process.
+    """
+    uploaded_at = datetime.now(timezone.utc).isoformat()
+    for file_path, filename in file_paths:
+        ext = os.path.splitext(file_path)[1].lower()
+        try:
+            if ext == ".pdf":
+                text = extract_text_from_pdf(file_path)
+            elif ext == ".csv":
+                text = extract_text_from_csv(file_path)
+            else:
+                logger.warning("Unsupported file type %s for topic=%s", ext, topic_id)
+                continue
+
+            if not text or not text.strip():
+                logger.warning("No text extracted from %s for topic=%s", filename, topic_id)
+                continue
+
+            chunks = chunk_text(text)
+            for chunk_index, chunk in enumerate(chunks):
+                await embed_and_upsert(
+                    vector_id=f"topic:{topic_id}:{filename}:{chunk_index}",
+                    text=chunk,
+                    user_id=user_id,
+                    source="topic_document",
+                    metadata={
+                        "filename": filename, "chunk_index": chunk_index,
+                        "topic_id": topic_id, "uploaded_at": uploaded_at,
+                    },
+                )
+        except Exception:
+            logger.exception("Topic document processing failed for %s (topic=%s)", filename, topic_id)

@@ -255,31 +255,24 @@ class TestProcessExtraction:
             writer.writerow(["Python", "Python is a great programming language."])
             writer.writerow(["ML", "Machine learning involves training models."])
 
-        mock_embeddings_col = MagicMock()
-        mock_embeddings_col.insert_one = AsyncMock()
-
         mock_jobs_col = MagicMock()
         mock_jobs_col.update_one = AsyncMock()
 
         with (
             patch(
-                "app.services.extraction.embeddings_col",
-                return_value=mock_embeddings_col,
-            ),
-            patch(
                 "app.services.extraction.ingestion_jobs_col",
                 return_value=mock_jobs_col,
             ),
             patch(
-                "app.services.extraction.embed_text",
+                "app.services.extraction.embed_and_upsert",
                 new_callable=AsyncMock,
-                return_value=[0.1, 0.2, 0.3],
-            ),
+                return_value=True,
+            ) as mock_embed_and_upsert,
         ):
             await process_extraction("job-1", "user-1", [csv_path])
 
         # Should have stored embeddings
-        assert mock_embeddings_col.insert_one.called
+        assert mock_embed_and_upsert.called
 
         # Should have marked job as completed
         mock_jobs_col.update_one.assert_called_once()
@@ -346,35 +339,28 @@ class TestProcessExtraction:
             writer.writerow(["key", "value"])
             writer.writerow(["greeting", "hello world"])
 
-        mock_embeddings_col = MagicMock()
-        mock_embeddings_col.insert_one = AsyncMock()
-
         mock_jobs_col = MagicMock()
         mock_jobs_col.update_one = AsyncMock()
 
         with (
             patch(
-                "app.services.extraction.embeddings_col",
-                return_value=mock_embeddings_col,
-            ),
-            patch(
                 "app.services.extraction.ingestion_jobs_col",
                 return_value=mock_jobs_col,
             ),
             patch(
-                "app.services.extraction.embed_text",
+                "app.services.extraction.embed_and_upsert",
                 new_callable=AsyncMock,
-                return_value=[0.5, 0.6],
-            ),
+                return_value=True,
+            ) as mock_embed_and_upsert,
         ):
             await process_extraction("job-meta", "user-meta", [csv_path])
 
-        # Verify the document stored has the right structure
-        stored_doc = mock_embeddings_col.insert_one.call_args[0][0]
-        assert stored_doc["user_id"] == "user-meta"
-        assert stored_doc["job_id"] == "job-meta"
-        assert stored_doc["embedding"] == [0.5, 0.6]
-        assert stored_doc["metadata"]["filename"] == "test.csv"
-        assert stored_doc["metadata"]["chunk_index"] == 0
-        assert stored_doc["metadata"]["source"] == "ingestion"
-        assert len(stored_doc["text"]) > 0
+        # Verify embed_and_upsert was called with the right structure
+        call_kwargs = mock_embed_and_upsert.call_args.kwargs
+        assert call_kwargs["user_id"] == "user-meta"
+        assert call_kwargs["source"] == "ingestion"
+        assert call_kwargs["vector_id"] == "job-meta:0"
+        assert call_kwargs["metadata"]["filename"] == "test.csv"
+        assert call_kwargs["metadata"]["chunk_index"] == 0
+        assert call_kwargs["metadata"]["job_id"] == "job-meta"
+        assert len(call_kwargs["text"]) > 0

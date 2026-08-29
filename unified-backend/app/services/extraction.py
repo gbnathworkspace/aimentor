@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 
 from pypdf import PdfReader
 
-from app.config.database import embeddings_col, ingestion_jobs_col
-from app.services.embedder import embed_text
+from app.config.database import ingestion_jobs_col
+from app.services.vector_search import embed_and_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -170,20 +170,12 @@ async def process_extraction(
 
             # Embed and store each chunk
             for chunk_index, chunk in enumerate(chunks):
-                embedding = await embed_text(chunk)
-
-                await embeddings_col().insert_one(
-                    {
-                        "user_id": user_id,
-                        "job_id": job_id,
-                        "text": chunk,
-                        "embedding": embedding,
-                        "metadata": {
-                            "filename": filename,
-                            "chunk_index": chunk_index,
-                            "source": "ingestion",
-                        },
-                    }
+                await embed_and_upsert(
+                    vector_id=f"{job_id}:{chunk_index}",
+                    text=chunk,
+                    user_id=user_id,
+                    source="ingestion",
+                    metadata={"filename": filename, "chunk_index": chunk_index, "job_id": job_id},
                 )
 
         # Mark job as completed

@@ -75,9 +75,17 @@ Tools bound with `tool_choice="auto"` (the model decides whether to act):
 |---|---|
 | `web_search` | Native Claude web search, capped at 3 uses per turn |
 | `get_skill_detail` | Look up current level for a topic other than the one being discussed |
+| `search_documents` | Real semantic search (Atlas `$vectorSearch`) over the user's uploaded documents, beyond the small default sample already in context |
+| `search_other_topics` | Real semantic search over the user's SummaryBlocks in *other* topics — the deliberate, agentic replacement for the old always-on cross-topic backfill: nothing crosses topics unless the model chooses to look |
 | `record_diagnostic_verdict` | Diagnostic-mode only — records an assessed skill level once there's enough signal, in the same call as the reply text rather than a separate round trip |
 
-On the final round, `get_skill_detail` is stripped from the tool set so the model is forced to answer instead of requesting another lookup — this is the hard stop on the loop. `record_diagnostic_verdict` is never treated as a loop tool: calling it always ends the turn.
+On the final round, `get_skill_detail`/`search_documents`/`search_other_topics` are stripped from the tool set so the model is forced to answer instead of requesting another lookup — this is the hard stop on the loop. `record_diagnostic_verdict` is never treated as a loop tool: calling it always ends the turn.
+
+### Agentic RAG
+
+`search_documents` and `search_other_topics` are real retrieval, not the recency/dump-all fallbacks described earlier — both run through `vector_search.py`, a shared Atlas Vector Search layer used by both corpora (same collection, same `embedding` field name, fixing a historical writer/reader mismatch where two different writers used two different field names in the same collection). Embeddings are generated on write: at document ingestion, and whenever a topic's SummaryBlocks are created or merged.
+
+**Known gap:** the Voyage AI API key currently configured is invalid, so no real embeddings exist yet anywhere — every write silently no-ops (by design: an empty vector is never stored, since it would poison future similarity search) and every search returns empty until a valid key is in place.
 
 ---
 

@@ -32,6 +32,7 @@ from app.routers import (
 from app.services.file_cleanup import file_cleanup_loop
 from app.services.session_boundary import periodic_sweep_loop
 from app.services.session_manager import SessionManager
+from app.services.vector_search import ensure_vector_index
 
 
 def _configure_logging() -> None:
@@ -83,6 +84,7 @@ async def _timeout_sweep_loop() -> None:
 async def lifespan(app: FastAPI):
     """Manage MongoDB connection lifecycle and background tasks."""
     await connect_db()
+    await ensure_vector_index()
     sweep_task = asyncio.create_task(_timeout_sweep_loop())
     cleanup_task = asyncio.create_task(file_cleanup_loop())
     session_sweep_task = asyncio.create_task(periodic_sweep_loop())

@@ -33,6 +33,7 @@ from app.services.response_parsing import extract_suggestions
 from app.services.session_boundary import check_and_close_on_new_message
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
+from app.services.vector_search import vector_search
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,9 @@ _DIAGNOSTIC_VERDICT_TOOL = {
 }
 
 # --- Loop tools: the model can call these mid-turn, see the result, and keep
-# reasoning before its final reply. Reuses data the backend already fetches
-# — no new DB infra.
+# reasoning before its final reply. get_skill_detail reuses data the backend
+# already fetches; the two search_* tools run real Atlas $vectorSearch
+# queries (see vector_search.py).
 
 _GET_SKILL_DETAIL_TOOL = {
     "name": "get_skill_detail",
@@ -92,7 +94,47 @@ _GET_SKILL_DETAIL_TOOL = {
     },
 }
 
-_LOOP_TOOL_NAMES = {_GET_SKILL_DETAIL_TOOL["name"]}
+# Real semantic search (Atlas $vectorSearch), not the dump-all default
+# injection — for pulling something specific that isn't already in context.
+_SEARCH_DOCUMENTS_TOOL = {
+    "name": "search_documents",
+    "description": (
+        "Semantically search the user's uploaded documents (résumé, notes, "
+        "problem lists) for a specific query. Use this when you need a "
+        "detail that isn't already in the Uploaded Documents section — the "
+        "default injection is a small unranked sample, not the full set."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
+}
+
+# Cross-topic only — this topic's own history is already fully injected via
+# SummaryBlocks every turn, so searching it again would be redundant. This
+# is the deliberate, agentic replacement for the old always-on cross-topic
+# backfill: the model must choose to look, nothing crosses topics silently.
+_SEARCH_OTHER_TOPICS_TOOL = {
+    "name": "search_other_topics",
+    "description": (
+        "Semantically search the user's session history in OTHER topics "
+        "for a specific query. Use this only when the user references "
+        "something from a different topic that isn't already in your "
+        "context — not for anything about the current topic."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
+}
+
+_LOOP_TOOL_NAMES = {
+    _GET_SKILL_DETAIL_TOOL["name"],
+    _SEARCH_DOCUMENTS_TOOL["name"],
+    _SEARCH_OTHER_TOPICS_TOOL["name"],
+}
 
 # One tool-decision round, then one forced-final-answer round. Keeps worst
 # case latency to 2 model calls instead of unbounded looping.
@@ -270,7 +312,7 @@ class TopicChatService:
 
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages)
-            tools = [_WEB_SEARCH_TOOL, _GET_SKILL_DETAIL_TOOL]
+            tools = [_WEB_SEARCH_TOOL, _GET_SKILL_DETAIL_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL]
             if include_diagnostic_tool:
                 tools.append(_DIAGNOSTIC_VERDICT_TOOL)
 
@@ -382,10 +424,26 @@ class TopicChatService:
         try:
             if name == "get_skill_detail":
                 return self._format_skill_detail(tool_input.get("topic", ""), context)
+            if name == "search_documents":
+                results = await vector_search(
+                    tool_input.get("query", ""), user_id, source="ingestion", limit=5
+                )
+                return self._format_search_results(results, empty_msg="No matching documents found.")
+            if name == "search_other_topics":
+                results = await vector_search(
+                    tool_input.get("query", ""), user_id, source="summary_block", limit=5
+                )
+                return self._format_search_results(results, empty_msg="No matching past sessions found.")
             return f"Unknown tool: {name}"
         except Exception as e:
             logger.warning("Loop tool %s failed for user=%s: %s", name, user_id, e)
             return f"Lookup failed for {name} — proceed without this information."
+
+    @staticmethod
+    def _format_search_results(results: list[dict], empty_msg: str) -> str:
+        if not results:
+            return empty_msg
+        return "\n\n".join(r.get("text", "") for r in results)
 
     @staticmethod
     def _format_skill_detail(topic: str, context: dict) -> str:

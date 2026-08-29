@@ -248,7 +248,7 @@ The vector search index is an **Atlas Search index**, not a regular MongoDB inde
 {
   "_id": "<ObjectId>",
   "user_id": "gopinath",
-  "goal": "20 LPA",
+  "goal": "System Design mastery",
   "deadline": "Aug 2026",
   "overall_level": "beginner-intermediate",
   "daily_availability": "2hrs weekdays",
@@ -376,7 +376,7 @@ Fetch the profile for a user.
 ```json
 {
   "user_id": "gopinath",
-  "goal": "20 LPA",
+  "goal": "System Design mastery",
   "deadline": "Aug 2026",
   "overall_level": "beginner-intermediate",
   "daily_availability": "2hrs weekdays",
@@ -396,7 +396,7 @@ Create a new profile. Called once at onboarding.
 ```json
 {
   "user_id": "gopinath",
-  "goal": "20 LPA",
+  "goal": "System Design mastery",
   "deadline": "Aug 2026",
   "overall_level": "beginner-intermediate",
   "daily_availability": "2hrs weekdays",
@@ -420,7 +420,7 @@ Partial update. Send only the fields to change.
 **Request body** (all fields optional):
 ```json
 {
-  "goal": "FAANG",
+  "goal": "CBSE board exams",
   "daily_availability": "3hrs weekdays"
 }
 ```

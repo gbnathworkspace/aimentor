@@ -4,8 +4,8 @@
 Proficiency is measured relative to the goal, not in absolute terms.
 
 ## Why
-A user doesn't need to master graph theory — they need to clear the
-interviews that come with their specific goal. The benchmark changes
+A user doesn't need to master graph theory in full — they need what
+their specific goal actually demands. The benchmark changes
 based on what the user is aiming for.
 
 ## Node Structure
@@ -28,7 +28,7 @@ based on what the user is aiming for.
 ## required_level source
 Comes from the Goal Knowledge Base — not guessed by the LLM.
 The KB stores what each goal actually requires per topic,
-sourced from Glassdoor interview experiences, Naukri JDs, prep sites.
+sourced from curated, goal-relevant material (syllabi, role expectations, prep sites).
 
 ## gap calculation
 gap = required_level - current_level

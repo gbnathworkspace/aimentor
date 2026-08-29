@@ -22,7 +22,7 @@ Not all memory has the same recall urgency or update frequency.
 Small, stable, always relevant. Injected into every context window unconditionally.
 ```json
 {
-  "goal": "20 LPA",
+  "goal": "System Design mastery",
   "deadline": "Aug 2026",
   "overall_level": "beginner-intermediate",
   "daily_availability": "2hrs weekdays"

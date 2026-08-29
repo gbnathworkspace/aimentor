@@ -56,7 +56,7 @@ Inactivity        "You haven't studied in 3 days"
 Pace deviation    "You're falling behind this week"
 Gap spike         "Your graphs score dropped — let's fix it"
 Deadline warning  "8 weeks to your goal — here's where you stand"
-Goal KB update    "New topic added to 20 LPA prep"
+Goal KB update    "New topic added to your prep plan"
 Positive nudge    "You closed the arrays gap this week"
 ```
 

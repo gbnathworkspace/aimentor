@@ -38,7 +38,7 @@ It is not exposed to the frontend or the public internet.
 
 ### Schema is caller-defined, not hardcoded
 L2 skill graph schema is generated per user by the calling LLM at onboarding time.
-Different goals (20 LPA vs FAANG) produce different topic sets and fields.
+Different goals (System Design mastery vs CBSE board exams) produce different topic sets and fields.
 MongoDB's flexible document model accommodates this — no rigid relational schema.
 
 ### L3 retrieval is lazy
@@ -87,7 +87,7 @@ DELETE /memory/episodic/{user_id}/{session_id}     → delete a session entry
 ```json
 {
   "user_id": "gopinath",
-  "goal": "20 LPA",
+  "goal": "System Design mastery",
   "deadline": "Aug 2026",
   "overall_level": "beginner-intermediate",
   "daily_availability": "2hrs weekdays",

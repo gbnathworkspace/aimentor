@@ -1,7 +1,7 @@
 <img src="mentorman-web/public/logo-full.svg" alt="MentorMan" height="60" />
 
 
-A goal-aware AI mentor for software engineering interview prep — built around one core insight: **the LLM is a stateless reasoning engine; the databases are its memory.**
+A goal-aware AI mentor — built around one core insight: **the LLM is a stateless reasoning engine; the databases are its memory.**
 
 Live at [mentorman.co.in](https://mentorman.co.in)
 
@@ -65,7 +65,7 @@ At session end, one Sonnet call over the full transcript produces two outputs:
 
 ## Skill Graph Design
 
-Proficiency is measured relative to the user's goal, not in absolute terms. The `required_level` per topic comes from a curated Goal Knowledge Base (sourced from Glassdoor interviews and Naukri JDs) — never guessed by the LLM.
+Proficiency is measured relative to the user's goal, not in absolute terms. The `required_level` per topic comes from a curated Goal Knowledge Base of proficiency benchmarks — never guessed by the LLM.
 
 ```json
 {

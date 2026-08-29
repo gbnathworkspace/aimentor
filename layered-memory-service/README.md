@@ -149,7 +149,7 @@ curl -X POST http://localhost:8000/memory/profile \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "gopinath",
-    "goal": "20 LPA",
+    "goal": "System Design mastery",
     "deadline": "Aug 2026",
     "overall_level": "beginner-intermediate",
     "daily_availability": "2hrs weekdays",

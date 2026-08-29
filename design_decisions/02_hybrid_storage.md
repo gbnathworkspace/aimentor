@@ -14,7 +14,7 @@ Vector DB               →  episodic memory (doubts, summaries)       ─┘
 
 ## Why MongoDB over a relational DB
 The skill graph schema is generated per user at runtime by the LLM.
-Different goals (20 LPA vs FAANG) need different fields.
+Different goals (System Design mastery vs CBSE board exams) need different fields.
 A rigid relational schema can't accommodate this — MongoDB gives
 structure and flexibility at the same time.
 

@@ -14,8 +14,8 @@ curated KB entries as a reliable fallback.
 ## Two-tier approach
 
 Tier 1 — Seeded common goals (curated, high reliability)
-  20 LPA, 30 LPA, FAANG, service-based company, AWS certification
-  Sourced from Glassdoor, Naukri, prep sites.
+  System Design mastery, CBSE board exams, AWS certification, DSA fundamentals
+  Sourced from syllabi, role expectations, prep sites.
 
 Tier 2 — LLM-derived on the fly (for any other goal)
   User states goal → LLM reasons what it requires per topic
@@ -24,7 +24,7 @@ Tier 2 — LLM-derived on the fly (for any other goal)
 ## What it stores
 ```json
 {
-  "goal": "20 LPA",
+  "goal": "System Design mastery",
   "source": "curated",
   "requirements": {
     "arrays":         "medium",
@@ -49,5 +49,5 @@ required_level updated across all nodes → gaps recalculated.
 
 ## Refresh cadence
 Refresh cadence: manual trigger for v1.
-Admin triggers a re-fetch when interview patterns feel stale.
+Admin triggers a re-fetch when a goal's requirements feel stale.
 Move to monthly cron in v2 when user base grows.

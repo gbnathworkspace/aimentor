@@ -19,7 +19,7 @@ A user's memory contains very different *kinds* of things, each with a different
 
 | Memory type | Example | Changes | Recall need |
 |---|---|---|---|
-| **Goal** | "Get 20 LPA in 3 months" | Rarely | Almost always relevant |
+| **Goal** | "Master System Design in 3 months" | Rarely | Almost always relevant |
 | **Skill assessment** | "Weak in graphs" | Over weeks | When studying related topic |
 | **Session doubt** | "Confused about Dijkstra + negative edges" | Resolves fast | Semantically, when relevant |
 
@@ -54,7 +54,7 @@ Vector DB               ──→  episodic memory (doubts, summaries)  ──�
 Web/Curated sources     ──→  goal curriculum (required level per topic)
 ```
 
-- **MongoDB (document DB)** — stores the Skill Graph. Chosen over a rigid relational DB because the **model generates the schema per user at runtime**, and different goals (20 LPA vs. FAANG) need different fields. MongoDB gives structure *and* flexibility.
+- **MongoDB (document DB)** — stores the Skill Graph. Chosen over a rigid relational DB because the **model generates the schema per user at runtime**, and different goals (System Design mastery vs. CBSE board exams) need different fields. MongoDB gives structure *and* flexibility.
 - **Vector DB** — semantic retrieval of past doubts and experiences.
 - **LLM** — the reasoning engine. Has no memory of its own; the two DBs *are* its memory.
 
@@ -62,12 +62,12 @@ Web/Curated sources     ──→  goal curriculum (required level per topic)
 
 ## 5. The Skill Graph Node
 
-The crucial idea: **proficiency is measured relative to the goal**, not in absolute terms. You don't need to master graph theory for 20 LPA — you need to clear the interviews that come with it.
+The crucial idea: **proficiency is measured relative to the goal**, not in absolute terms. You don't need to master graph theory in full depth for a System Design goal — you need what that goal actually demands.
 
 Example documents (note the schema differs by goal):
 
 ```json
-// Goal: 20 LPA
+// Goal: System Design mastery
 {
   "topic": "graphs",
   "required_level": "medium",
@@ -79,7 +79,7 @@ Example documents (note the schema differs by goal):
   }
 }
 
-// Goal: FAANG
+// Goal: Competitive programming mastery
 {
   "topic": "graphs",
   "required_level": "hard",
@@ -93,9 +93,9 @@ Example documents (note the schema differs by goal):
 
 ## 6. Setting the Benchmark (`required_level`)
 
-The model does **not** guess what a goal requires. It pulls from **curated, structured sources** (Glassdoor interview experiences, Naukri JDs, established prep sites) — higher signal-to-noise than random blogs — and stores the parsed result as a **Goal Knowledge Base**: the system's source of truth.
+The model does **not** guess what a goal requires. It pulls from **curated, structured sources** relevant to the goal (e.g. exam syllabi, role expectations, established prep material) — higher signal-to-noise than random blogs — and stores the parsed result as a **Goal Knowledge Base**: the system's source of truth.
 
-> Open item: refresh cadence. Interview patterns change, so this should be periodically re-fetched rather than set once.
+> Open item: refresh cadence. Requirements for a given goal change over time, so this should be periodically re-fetched rather than set once.
 
 ---
 
@@ -125,7 +125,7 @@ This drives the alerts and suggestions feature.
 
 No forms — a **conversational onboarding**. The model acts as an invested mentor and asks for what it needs:
 
-> User: "Goal is 20 LPA, ready in 3 months."
+> User: "Goal is System Design mastery, ready in 3 months."
 > Model asks → user answers / uploads → model gathers context → generates schema → writes first MongoDB document.
 
 What the model gathers: the goal, current progress, **resume (PDF)**, **progress exports (CSV/Excel)**. The developer is **not** in the loop for per-user schema decisions — the model owns that.

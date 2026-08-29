@@ -20,7 +20,7 @@ Recency bias:     last 3 turns dominate reasoning over Layer 1
 ```
 ...conversation history...
 
-REMINDER: User's goal is 20 LPA by Aug 2026.
+REMINDER: User's goal is System Design mastery by Aug 2026.
 10 weeks left. Biggest gap is graphs (40%).
 Keep responses tied to this context.
 

@@ -41,7 +41,7 @@ MongoDB — Layer 2 (Skill Graph)
 
 Vector DB — Layer 3
   first episodic entry:
-  "Onboarding session. Goal is 20 LPA. Weak in graphs
+  "Onboarding session. Goal is System Design mastery. Weak in graphs
    and DP. Has internship experience. 2hrs/day."
 ```
 

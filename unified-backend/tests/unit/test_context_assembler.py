@@ -131,18 +131,22 @@ class TestRecentEpisodes:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_prefers_same_topic_then_recent(self):
-        """Same-topic sessions come first, then other recent ones; limit respected."""
-        docs = [
-            {"session_id": "s3", "topic": "Trees", "summary": "newest other"},
-            {"session_id": "s2", "topic": "Graphs", "summary": "mid same"},
-            {"session_id": "s1", "topic": "Graphs", "summary": "old same"},
-        ]
-        col = _mock_sessions_returning(docs)
+    async def test_scopes_query_to_given_topic(self):
+        """When a topic is given, the query filters to it — no cross-topic backfill."""
+        col = _mock_sessions_returning([])
         with patch("app.services.context_assembler.sessions_col", return_value=col):
-            result = await _recent_episodes("u1", "Graphs", limit=2)
-        assert [d["topic"] for d in result] == ["Graphs", "Graphs"]
-        assert len(result) == 2
+            await _recent_episodes("u1", "Graphs", limit=2)
+        query = col.find.call_args.args[0]
+        assert query["topic"] == "Graphs"
+
+    @pytest.mark.asyncio
+    async def test_no_topic_filter_when_topic_omitted(self):
+        """Without a topic, the query has no topic filter (used by the on-demand tool)."""
+        col = _mock_sessions_returning([])
+        with patch("app.services.context_assembler.sessions_col", return_value=col):
+            await _recent_episodes("u1", None, limit=2)
+        query = col.find.call_args.args[0]
+        assert "topic" not in query
 
     @pytest.mark.asyncio
     async def test_query_filters_ended_with_summary(self):

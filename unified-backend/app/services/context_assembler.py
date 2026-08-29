@@ -39,6 +39,7 @@ _MAX_DOCUMENT_CHUNKS = 12
 async def assemble(
     user_id: str, topic: str, query: str,
     l1_scope: list[dict] | None = None, taught_concepts: list[str] | None = None,
+    summary_blocks: list[dict] | None = None,
 ) -> dict:
     """Gather L1 profile, L2 skill, and L3 episodes for the given user/topic.
 
@@ -56,10 +57,14 @@ async def assemble(
             record, same tier as `episodes` below, just topic-scoped and
             concept-grained instead of cross-topic and narrative-grained.
             Same pass-through-only treatment as l1_scope, for the same reason.
+        summary_blocks: The topic's own `topic.summaryBlocks` (see
+            session-narrative-summary spec) — one entry per closed session,
+            distinct from the single RollingSummary folded into `episodes`
+            below. Same pass-through-only treatment as l1_scope/taught_concepts.
 
     Returns:
         A dict with keys: profile, skill, episodes, documents, skill_graph,
-        l1_scope, taught_concepts.
+        l1_scope, taught_concepts, summary_blocks.
 
     Raises:
         HTTPException(400): If no profile exists for the user.
@@ -84,11 +89,11 @@ async def assemble(
     # L3 — Episodic memory: most-recent ended-session summaries (optional).
     # `query` is reserved for future vector ranking (#5); recency works today
     # without an Atlas vector index. Degrades to [] on failure.
-    # Two sources: the topic's own rolling summary (topics_col — at most one
-    # per topic, see rolling-topic-summary spec) and cross-topic Sessions
-    # (sessions_col, issue #40). The topic's own summary leads since it's
-    # always maximally relevant to the current conversation; the remaining
-    # slots are filled from cross-topic episodic history.
+    # Two sources, both scoped to the current topic: the topic's own rolling
+    # summary (topics_col — at most one per topic, see rolling-topic-summary
+    # spec) and this topic's own past Sessions (sessions_col). The rolling
+    # summary leads since it's always maximally relevant; remaining slots are
+    # filled from this topic's other past sessions. No cross-topic backfill.
     topic_summary = await _recent_topic_summaries(user_id, topic)
     episodes = (topic_summary + await _recent_episodes(user_id, topic, limit=3))[:3]
 
@@ -115,6 +120,7 @@ async def assemble(
         "skill_graph": skill_graph,
         "l1_scope": l1_scope,
         "taught_concepts": taught_concepts,
+        "summary_blocks": summary_blocks,
     }
 
 
@@ -142,17 +148,22 @@ async def fetch_additional_episodes(user_id: str, topic: str | None, limit: int)
 
 
 async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:
-    """Fetch the user's most recent ended-session summaries.
+    """Fetch the user's most recent ended-session summaries for this topic.
 
     Recency-based L3: no vector search. This avoids both the missing Atlas index
-    and the writer/reader collection mismatch (#5), and works offline. Same-topic
-    sessions are preferred, then filled with other recent ones. [] on any failure.
+    and the writer/reader collection mismatch (#5), and works offline. Scoped to
+    the current topic only — cross-topic backfill was removed as unwanted noise.
+    [] on any failure.
     """
     try:
+        query = {"user_id": user_id, "status": "ended", "summary": {"$nin": [None, ""]}}
+        if topic:
+            query["topic"] = topic
+
         cursor = (
             sessions_col()
             .find(
-                {"user_id": user_id, "status": "ended", "summary": {"$nin": [None, ""]}},
+                query,
                 {
                     "_id": 0,
                     "session_id": 1,
@@ -164,16 +175,9 @@ async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:
                 },
             )
             .sort("updated_at", -1)
-            .limit(limit * 4)  # over-fetch so the same-topic preference has options
+            .limit(limit)
         )
-        docs = await cursor.to_list(length=limit * 4)
-
-        if topic:
-            same = [d for d in docs if d.get("topic") == topic]
-            others = [d for d in docs if d.get("topic") != topic]
-            docs = same + others
-
-        return docs[:limit]
+        return await cursor.to_list(length=limit)
 
     except Exception as e:
         logger.warning(

@@ -2,12 +2,14 @@
 
 import pytest
 
+from datetime import datetime, timezone
+
 from app.services.prompt_store import (
     clear_cache,
     get_onboarding_prompt,
     get_system_prompt,
-    _format_episodes,
     _format_learning_context,
+    _format_summary_blocks,
     _format_taught_concepts,
     _interpolate,
 )
@@ -144,21 +146,18 @@ class TestGetSystemPrompt:
         result = get_system_prompt("socratic", context)
         assert "Not specified" in result
 
-    def test_includes_episodes_in_prompt(self):
+    def test_includes_summary_blocks_in_prompt(self):
         context = {
             "profile": {},
             "skill": {},
-            "episodes": [
+            "summary_blocks": [
                 {
-                    "title": "Arrays session",
-                    "summary": "Covered array basics and two-pointer technique",
-                    "topic": "Arrays",
-                    "date": "2025-01-15",
+                    "text": "Covered array basics and two-pointer technique",
+                    "createdAt": "2025-01-15",
                 }
             ],
         }
         result = get_system_prompt("socratic", context)
-        assert "Arrays session" in result
         assert "two-pointer" in result
 
     def test_uses_topic_from_context_when_skill_missing(self):
@@ -383,46 +382,31 @@ class TestGetOnboardingPrompt:
         assert "onboarding_complete" in result
 
 
-class TestFormatEpisodes:
-    """Tests for the episode formatting helper."""
+class TestFormatSummaryBlocks:
+    """Tests for this topic's own SummaryBlocks — no truncation, oldest first
+    (session-narrative-summary spec, Requirement 7.1, 7.2)."""
 
-    def test_empty_episodes(self):
-        result = _format_episodes([])
+    def test_empty_blocks(self):
+        result = _format_summary_blocks(None)
         assert "no prior sessions" in result.lower()
 
-    def test_single_episode(self):
-        episodes = [
-            {
-                "title": "BFS deep dive",
-                "summary": "Covered breadth-first search on graphs",
-                "topic": "Graphs",
-                "date": "2025-01-10",
-            }
-        ]
-        result = _format_episodes(episodes)
-        assert "[1]" in result
-        assert "BFS deep dive" in result
-        assert "Graphs" in result
-        assert "2025-01-10" in result
+    def test_not_truncated_at_500_words(self):
+        long_text = "word " * 500
+        blocks = [{
+            "blockId": "b1", "text": long_text, "wordCount": 500,
+            "createdAt": datetime(2025, 1, 1, tzinfo=timezone.utc),
+        }]
+        result = _format_summary_blocks(blocks)
+        assert result.strip() == long_text.strip()
+        assert "…" not in result
 
-    def test_multiple_episodes(self):
-        episodes = [
-            {"title": "Session A", "summary": "Summary A", "topic": "T1", "date": "2025-01-01"},
-            {"title": "Session B", "summary": "Summary B", "topic": "T2", "date": "2025-01-02"},
+    def test_oldest_first(self):
+        blocks = [
+            {"blockId": "b2", "text": "second", "createdAt": datetime(2025, 1, 2, tzinfo=timezone.utc)},
+            {"blockId": "b1", "text": "first", "createdAt": datetime(2025, 1, 1, tzinfo=timezone.utc)},
         ]
-        result = _format_episodes(episodes)
-        assert "[1]" in result
-        assert "[2]" in result
-        assert "Session A" in result
-        assert "Session B" in result
-
-    def test_truncates_long_summaries(self):
-        long_summary = "x" * 500
-        episodes = [{"title": "Long", "summary": long_summary, "topic": "T", "date": ""}]
-        result = _format_episodes(episodes)
-        # Should be truncated to ~300 chars + ellipsis
-        assert "…" in result
-        assert len(result) < 500
+        result = _format_summary_blocks(blocks)
+        assert result.index("first") < result.index("second")
 
 
 class TestInterpolate:

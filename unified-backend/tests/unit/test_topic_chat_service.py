@@ -5,7 +5,7 @@ Tests cover:
 - LLM failure mid-stream yields an in-band error marker, user message preserved
 - Post-turn hook triggers compaction check after the stream ends
 - Post-turn hook failure doesn't crash the service
-- Tool loop: get_skill_detail / get_more_past_sessions executed mid-turn, then a final answer
+- Tool loop: get_skill_detail executed mid-turn, then a final answer
 - Loop is capped at _MAX_LOOP_ROUNDS regardless of further tool_calls
 """
 
@@ -75,6 +75,17 @@ def _mock_count_tokens(text: str) -> int:
 @pytest.fixture(autouse=True)
 def mock_tiktoken():
     with patch("app.services.token_counter.count_tokens", side_effect=_mock_count_tokens):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_session_boundary_check():
+    """Session-boundary detection hits topics_col directly (not through the
+    mocked TopicService) — irrelevant to these handle_message tests, so
+    no-op it out, same treatment as mock_tiktoken above."""
+    with patch(
+        "app.services.topic_chat_service.check_and_close_on_new_message", new=AsyncMock()
+    ):
         yield
 
 
@@ -196,7 +207,8 @@ class TestHandleMessageHappyPath:
             await _collect_stream(result)
 
         mock_assembler.assemble.assert_called_once_with(
-            "user-123", "Test Topic", "What is DFS?", l1_scope=None, taught_concepts=None
+            "user-123", "Test Topic", "What is DFS?",
+            l1_scope=None, taught_concepts=None, summary_blocks=None,
         )
         mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
 
@@ -210,9 +222,11 @@ class TestHandleMessageHappyPath:
         passed straight through to context_assembler.assemble()."""
         scope = [{"situation": "preparing for interviews", "relevant": True, "reason": "x"}]
         concepts = ["Signed URLs in CloudFront"]
+        blocks = [{"blockId": "b1", "text": "did stuff"}]
         mock_topic_service.get_topic.return_value = {
             "topicId": "topic-abc", "userId": "user-123", "title": "Test Topic",
             "status": "active", "messages": [], "l1_scope": scope, "taughtConcepts": concepts,
+            "summaryBlocks": blocks,
         }
         mock_assembler.assemble = AsyncMock(return_value={
             "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
@@ -229,7 +243,8 @@ class TestHandleMessageHappyPath:
             await _collect_stream(result)
 
         mock_assembler.assemble.assert_called_once_with(
-            "user-123", "Test Topic", "What is DFS?", l1_scope=scope, taught_concepts=concepts
+            "user-123", "Test Topic", "What is DFS?",
+            l1_scope=scope, taught_concepts=concepts, summary_blocks=blocks,
         )
 
     @pytest.mark.asyncio
@@ -495,7 +510,7 @@ class TestPostTurnHook:
     ):
         mock_compaction_service.should_compact.side_effect = RuntimeError("connection lost")
 
-        await chat_service._post_turn_hook("topic-abc", "user-123", 2)
+        await chat_service._post_turn_hook("topic-abc", "user-123")
 
         mock_compaction_service.should_compact.assert_called_once()
 
@@ -773,8 +788,8 @@ class TestDiagnosticRouting:
 
 
 class TestToolLoop:
-    """The mentor can call get_skill_detail / get_more_past_sessions mid-turn,
-    see the result, and answer in a second round."""
+    """The mentor can call get_skill_detail mid-turn, see the result, and
+    answer in a second round."""
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -811,7 +826,7 @@ class TestToolLoop:
         assert mock_cls.return_value.bind_tools.call_count == 2
         # Final round's tools exclude the loop tools (forced final answer).
         final_round_tools = mock_cls.return_value.bind_tools.call_args_list[1][0][0]
-        assert all(t["name"] not in {"get_skill_detail", "get_more_past_sessions"} for t in final_round_tools)
+        assert all(t["name"] != "get_skill_detail" for t in final_round_tools)
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")

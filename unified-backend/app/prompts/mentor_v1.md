@@ -60,8 +60,8 @@ Additional observed notes:
 {{taught_concepts}}
 Don't re-explain these from scratch — build on them, reference them briefly if relevant, and stay consistent with what was already said.
 
-## Relevant Past Sessions
-{{episodes}}
+## This Topic's Past Sessions
+{{session_summaries}}
 
 ## Uploaded Documents
 {{documents}}

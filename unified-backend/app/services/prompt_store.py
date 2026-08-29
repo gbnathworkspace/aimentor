@@ -1,7 +1,7 @@
 """Mode → template mapping for mentor prompts.
 
 Loads markdown prompt templates from app/prompts/ and interpolates
-user context (profile, skill, episodes) into placeholders.
+user context (profile, skill, summary blocks) into placeholders.
 """
 
 import re
@@ -211,10 +211,9 @@ def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | Non
 def _format_taught_concepts(taught_concepts: list[str] | None) -> str:
     """Format the topic's accumulated taughtConcepts list (see
     CompactionService._apply_taught_concepts, TS-1) — an L3 episodic memory
-    record (same tier as _format_episodes below), scoped to this topic and
-    concept-grained rather than cross-topic and narrative-grained. Specific
-    things already taught in this topic, so the mentor doesn't re-teach from
-    scratch or contradict what it already said."""
+    record, scoped to this topic and concept-grained rather than narrative-
+    grained. Specific things already taught in this topic, so the mentor
+    doesn't re-teach from scratch or contradict what it already said."""
     if not taught_concepts:
         return "(nothing recorded yet)"
     return "\n".join(f"- {c}" for c in taught_concepts)
@@ -230,31 +229,14 @@ def _format_style_notes(style_notes: list[dict[str, Any]]) -> str:
     )
 
 
-def _format_episodes(episodes: list[dict[str, Any]]) -> str:
-    """Format episodic memory entries into a readable block for the prompt."""
-    if not episodes:
-        return "(no prior sessions found)"
-
-    lines = []
-    for i, ep in enumerate(episodes, 1):
-        title = ep.get("title", "Untitled session")
-        summary = ep.get("summary", "")
-        topic = ep.get("topic", "")
-        date = ep.get("date", "")
-
-        # Truncate long summaries
-        if len(summary) > 300:
-            summary = summary[:300] + "…"
-
-        header = f"[{i}] {title}"
-        if topic:
-            header += f" [{topic}]"
-        if date:
-            header += f" — {date}"
-
-        lines.append(f"{header}\n{summary}")
-
-    return "\n\n".join(lines)
+def _format_summary_blocks(blocks: list[dict[str, Any]] | None) -> str:
+    """Format this topic's own SummaryBlocks (session-narrative-summary spec),
+    oldest first (Requirement 7.2), full text, not truncated (Requirement
+    7.1) — this topic's sole narrative L3 source."""
+    if not blocks:
+        return "(no prior sessions in this topic yet)"
+    ordered = sorted(blocks, key=lambda b: b.get("createdAt"))
+    return "\n\n".join(b.get("text", "") for b in ordered)
 
 
 def _format_next_skills(skill_graph: list[dict[str, Any]]) -> str:
@@ -271,7 +253,6 @@ def _build_context_variables(
     """Extract template variables from the assembled context dict."""
     profile = context.get("profile", {})
     skill = context.get("skill", {})
-    episodes = context.get("episodes", [])
 
     mode_instructions = _MODE_INSTRUCTIONS.get(mode, "")
     if mode == "planning":
@@ -290,9 +271,9 @@ def _build_context_variables(
         "required_level": skill.get("required_level", "Not assessed"),
         "current_level": skill.get("current_level", "Not assessed"),
         "gap": skill.get("gap", "Unknown"),
-        # L3 Episodes
-        "episodes": _format_episodes(episodes),
+        # L3 Episodic memory
         "taught_concepts": _format_taught_concepts(context.get("taught_concepts")),
+        "session_summaries": _format_summary_blocks(context.get("summary_blocks")),
         # Uploaded documents (ingested files)
         "documents": _format_documents(context.get("documents", [])),
         # Mode
@@ -312,7 +293,7 @@ def get_system_prompt(
         mode: One of "planning", "doubt", "evaluation", or a routed topic
             sub-mode from mode_router.py ("diagnostic", "direct", "socratic",
             "hint", "guided").
-        context: Dict with keys "profile", "skill", "episodes" from context_assembler.
+        context: Dict with keys "profile", "skill", "summary_blocks" from context_assembler.
         tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.
 
     Returns:

@@ -25,6 +25,7 @@ from app.auth.token_manager import TokenManager
 from app.config.database import get_db, topics_col
 from app.config.settings import get_settings
 from app.services.compaction_service import CompactionService
+from app.services.session_boundary import close_all_sessions_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +371,7 @@ async def refresh_token(request: Request, response: Response):
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(request: Request, response: Response):
-    """Invalidate refresh token, clear cookie, and fire a best-effort skill checkpoint."""
+    """Invalidate refresh token, clear cookie, and close out any open topic sessions."""
     # Extract refresh token from cookie
     token_value = request.cookies.get(REFRESH_COOKIE_NAME)
 
@@ -379,7 +380,7 @@ async def logout(request: Request, response: Response):
         # Revoke the refresh token in the database
         await _token_manager.revoke_refresh_token(token_value)
         if user_id:
-            asyncio.create_task(_skill_checkpoint_for_user(user_id))
+            asyncio.create_task(close_all_sessions_for_user(user_id))
 
     # Clear the cookie regardless
     _clear_refresh_cookie(response)

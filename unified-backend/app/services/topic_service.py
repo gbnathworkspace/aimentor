@@ -73,6 +73,7 @@ class TopicService:
             "createdAt": now,
             "lastActiveAt": now,
             "messages": [],
+            "summaryBlocks": [],
             "compactionCount": 0,
             "metadata": {
                 "totalMessageCount": 0,

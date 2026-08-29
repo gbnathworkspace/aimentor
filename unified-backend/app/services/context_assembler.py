@@ -1,10 +1,10 @@
 """L1 + L2 + L3 context assembly for mentor chat.
 
-Gathers the user's profile, skill node for the topic, and relevant
-past session episodes via vector search. Implements graceful degradation:
+Gathers the user's profile, skill node for the topic, and this topic's own
+SummaryBlocks (session-narrative-summary spec) for L3. Implements graceful
+degradation:
 - Profile missing → HTTP 400 (onboarding required)
 - Skill fetch fails → empty dict
-- Vector search fails → empty list (logged warning)
 
 Also provides `prepare_conversation_window` for topic-based conversations:
 validates, orders, and budget-trims a mixed list of Messages and SummaryBlocks.
@@ -24,8 +24,6 @@ from app.config.database import (
     embeddings_col,
     profiles_col,
     skill_graph_col,
-    sessions_col,
-    topics_col,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,12 +39,13 @@ async def assemble(
     l1_scope: list[dict] | None = None, taught_concepts: list[str] | None = None,
     summary_blocks: list[dict] | None = None,
 ) -> dict:
-    """Gather L1 profile, L2 skill, and L3 episodes for the given user/topic.
+    """Gather L1 profile, L2 skill, and L3 memory for the given user/topic.
 
     Args:
         user_id: The authenticated user's ID.
         topic: The current mentoring topic.
-        query: The user's latest message (used for vector search).
+        query: The user's latest message. Currently unused — reserved for
+            future semantic retrieval (issue #5).
         l1_scope: The topic's cached relevance judgments (see
             TopicService._ensure_l1_scope), if the caller has a topic
             document to read one from. Passed straight through to the
@@ -54,16 +53,15 @@ async def assemble(
             a topic title, not a topic id.
         taught_concepts: The topic's accumulated `taughtConcepts` list (see
             CompactionService._apply_taught_concepts, TS-1) — an L3 episodic
-            record, same tier as `episodes` below, just topic-scoped and
-            concept-grained instead of cross-topic and narrative-grained.
-            Same pass-through-only treatment as l1_scope, for the same reason.
+            record, topic-scoped and concept-grained. Same pass-through-only
+            treatment as l1_scope, for the same reason.
         summary_blocks: The topic's own `topic.summaryBlocks` (see
             session-narrative-summary spec) — one entry per closed session,
-            distinct from the single RollingSummary folded into `episodes`
-            below. Same pass-through-only treatment as l1_scope/taught_concepts.
+            this topic's sole narrative L3 source. Same pass-through-only
+            treatment as l1_scope/taught_concepts.
 
     Returns:
-        A dict with keys: profile, skill, episodes, documents, skill_graph,
+        A dict with keys: profile, skill, documents, skill_graph,
         l1_scope, taught_concepts, summary_blocks.
 
     Raises:
@@ -86,17 +84,6 @@ async def assemble(
         logger.warning("Skill graph fetch failed for user=%s topic=%s: %s", user_id, topic, e)
         skill = None
 
-    # L3 — Episodic memory: most-recent ended-session summaries (optional).
-    # `query` is reserved for future vector ranking (#5); recency works today
-    # without an Atlas vector index. Degrades to [] on failure.
-    # Two sources, both scoped to the current topic: the topic's own rolling
-    # summary (topics_col — at most one per topic, see rolling-topic-summary
-    # spec) and this topic's own past Sessions (sessions_col). The rolling
-    # summary leads since it's always maximally relevant; remaining slots are
-    # filled from this topic's other past sessions. No cross-topic backfill.
-    topic_summary = await _recent_topic_summaries(user_id, topic)
-    episodes = (topic_summary + await _recent_episodes(user_id, topic, limit=3))[:3]
-
     # Uploaded documents (résumé / LeetCode etc. ingested at onboarding).
     # Without this read the ingest pipeline is orphaned — files embedded, never used (issue #4).
     documents = await _fetch_documents(user_id)
@@ -115,7 +102,6 @@ async def assemble(
     return {
         "profile": profile,
         "skill": skill or {},
-        "episodes": episodes,
         "documents": documents,
         "skill_graph": skill_graph,
         "l1_scope": l1_scope,
@@ -135,117 +121,6 @@ async def _fetch_documents(user_id: str, limit: int = _MAX_DOCUMENT_CHUNKS) -> l
     except Exception as e:
         logger.warning("Document fetch failed for user=%s: %s. Returning no documents.", user_id, e)
         return []
-
-
-async def fetch_additional_episodes(user_id: str, topic: str | None, limit: int) -> list:
-    """Public wrapper for on-demand episode lookup (get_more_past_sessions tool).
-
-    Same recency-based fetch as the default 3 injected into every turn's
-    context, just callable again with a higher limit when the mentor asks
-    for more mid-turn.
-    """
-    return await _recent_episodes(user_id, topic, limit)
-
-
-async def _recent_episodes(user_id: str, topic: str | None, limit: int) -> list:
-    """Fetch the user's most recent ended-session summaries for this topic.
-
-    Recency-based L3: no vector search. This avoids both the missing Atlas index
-    and the writer/reader collection mismatch (#5), and works offline. Scoped to
-    the current topic only — cross-topic backfill was removed as unwanted noise.
-    [] on any failure.
-    """
-    try:
-        query = {"user_id": user_id, "status": "ended", "summary": {"$nin": [None, ""]}}
-        if topic:
-            query["topic"] = topic
-
-        cursor = (
-            sessions_col()
-            .find(
-                query,
-                {
-                    "_id": 0,
-                    "session_id": 1,
-                    "title": 1,
-                    "summary": 1,
-                    "topic": 1,
-                    "date": 1,
-                    "skill_update": 1,
-                },
-            )
-            .sort("updated_at", -1)
-            .limit(limit)
-        )
-        return await cursor.to_list(length=limit)
-
-    except Exception as e:
-        logger.warning(
-            "Recent-episode fetch failed for user=%s: %s. Returning empty episodes.",
-            user_id,
-            e,
-        )
-        return []
-
-
-async def _recent_topic_summaries(user_id: str, topic: str | None) -> list:
-    """Fetch the current topic's rolling summary, if one exists (issue #40, #23).
-
-    Topics store their data in topics_col, not sessions_col — the rolling
-    summary lives inline in the topic's `messages` array (type == "summary").
-    Under the rolling-topic-summary model, at most one such entry can exist
-    per topic (see .kiro/specs/rolling-topic-summary), so this returns a 0-
-    or 1-item list — no count limit needed. Remaining episode slots are
-    filled cross-topic by `_recent_episodes`. [] on any failure.
-    """
-    if not topic:
-        return []
-
-    try:
-        pipeline = [
-            {"$match": {"userId": user_id, "title": topic}},
-            {
-                "$project": {
-                    "_id": 0,
-                    "title": 1,
-                    "summaryBlocks": {
-                        "$filter": {
-                            "input": "$messages",
-                            "as": "m",
-                            "cond": {"$eq": ["$$m.type", "summary"]},
-                        }
-                    },
-                }
-            },
-        ]
-        topic_docs = await topics_col().aggregate(pipeline).to_list(length=1)
-    except Exception as e:
-        logger.warning(
-            "Recent-topic-summary fetch failed for user=%s: %s. Returning empty episodes.",
-            user_id,
-            e,
-        )
-        return []
-
-    if not topic_docs:
-        return []
-
-    doc = topic_docs[0]
-    blocks = doc.get("summaryBlocks") or []
-    if not blocks:
-        return []
-
-    block = blocks[0]  # at most one exists under the rolling-summary model
-    title = doc.get("title", "")
-    date = (block.get("compactedRange") or {}).get("to") or block.get("createdAt")
-    return [
-        {
-            "title": title,
-            "topic": title,
-            "summary": block.get("summary", ""),
-            "date": date.isoformat() if hasattr(date, "isoformat") else str(date or ""),
-        }
-    ]
 
 
 # ---------------------------------------------------------------------------

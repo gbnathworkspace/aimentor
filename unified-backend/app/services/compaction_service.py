@@ -530,10 +530,9 @@ class CompactionService:
 
     async def _apply_taught_concepts(self, topic_id: str, user_id: str, new_concepts: list[str]) -> None:
         """Append newly-taught concepts onto the topic's `taughtConcepts` list —
-        an L3 (episodic memory) record, same tier as the session summaries in
-        `_recent_episodes`, just concept-grained instead of narrative-grained
-        (TS-1: episodic memory should say what was previously taught in a
-        topic, not just a vague session narrative). Deduplicated, capped at MAX_TAUGHT_CONCEPTS
+        an L3 (episodic memory) record, concept-grained instead of narrative-
+        grained (TS-1: episodic memory should say what was previously taught
+        in a topic, not just a vague session narrative). Deduplicated, capped at MAX_TAUGHT_CONCEPTS
         (oldest dropped first). Best-effort: a failure here never blocks the
         summary/skill-update write it rides alongside.
         """

@@ -6,9 +6,9 @@ and compaction is checked after each assistant response.
 
 The mentor call streams tokens back to the client (issue: 2-10s perceived
 latency) and can loop up to one extra round if the model reaches for
-get_skill_detail / get_more_past_sessions before answering (issue: agentic
-context pull). See design_decisions/15_llm_orchestration.md for why
-LangChain stays here specifically (raw SDK everywhere else).
+get_skill_detail before answering (issue: agentic context pull). See
+design_decisions/15_llm_orchestration.md for why LangChain stays here
+specifically (raw SDK everywhere else).
 
 Requirements: 4.3, 4.4, 4.5, 4.6, 6.4, 14.1
 """
@@ -30,6 +30,7 @@ from app.services import context_assembler, mode_router, skill_graph_repo
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
+from app.services.session_boundary import check_and_close_on_new_message
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
 
@@ -98,23 +99,7 @@ _GET_SKILL_DETAIL_TOOL = {
     },
 }
 
-_GET_MORE_EPISODES_TOOL = {
-    "name": "get_more_past_sessions",
-    "description": (
-        "Fetch additional past-session summaries beyond the ones already "
-        "shown in Relevant Past Sessions. Use this when the user references "
-        "history that isn't covered there."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "topic": {"type": "string", "description": "Optional: filter to a specific topic."},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 10},
-        },
-    },
-}
-
-_LOOP_TOOL_NAMES = {_GET_SKILL_DETAIL_TOOL["name"], _GET_MORE_EPISODES_TOOL["name"]}
+_LOOP_TOOL_NAMES = {_GET_SKILL_DETAIL_TOOL["name"]}
 
 # One tool-decision round, then one forced-final-answer round. Keeps worst
 # case latency to 2 model calls instead of unbounded looping.
@@ -139,14 +124,6 @@ _FENCE_START = "```json suggestions"
 # structured data instead of an error string.
 _META_MARKER = "\x00META\x00"
 
-# Compaction only extracts skill updates as a side effect of reclaiming context
-# space — a topic that never grows big enough to compact never touches the skill
-# graph. This runs a lightweight skill-only check every N messages regardless.
-# ponytail: cadence is total-array-length modulo, which drifts after compaction
-# shrinks the array (a summary block collapses many messages into one) — good
-# enough for a periodic progress signal, not a precise per-turn counter.
-SKILL_CHECK_EVERY_N_MESSAGES = 16  # 8 user+assistant exchanges
-
 
 class TopicChatService:
     """Orchestrates per-turn LLM calls within topic threads.
@@ -157,7 +134,7 @@ class TopicChatService:
     3. Get all messages from topic (including SummaryBlocks)
     4. Assemble context (L1/L2/L3 via existing context_assembler)
     5. Stream the LLM reply (via ChatAnthropic), looping once if the model
-       reaches for get_skill_detail / get_more_past_sessions
+       reaches for get_skill_detail
     6. Append assistant response to topic thread
     7. Post-turn hook: check if compaction needed, trigger async if so
     """
@@ -206,6 +183,11 @@ class TopicChatService:
 
         now = datetime.now(timezone.utc)
 
+        # Step 0b: Close out the prior session if this message arrives after
+        # a >10min idle gap, before the new message is appended (session-
+        # narrative-summary spec, Requirement 1.1).
+        await check_and_close_on_new_message(topic_id, user_id, now)
+
         # Step 1: Create and append user message (Req 4.1)
         user_msg = {
             "type": "message",
@@ -227,6 +209,7 @@ class TopicChatService:
         context = await context_assembler.assemble(
             user_id, topic_title, content,
             l1_scope=topic.get("l1_scope"), taught_concepts=topic.get("taughtConcepts"),
+            summary_blocks=topic.get("summaryBlocks"),
         )
 
         # Step 3b: Route "topic" turns to a specific teaching tactic instead of
@@ -251,7 +234,6 @@ class TopicChatService:
             system_prompt += f"\n\n## This Turn's Specific Instruction\n{instruction_override}"
 
         include_diagnostic_tool = effective_mode == "diagnostic"
-        total_messages = len(messages) + 1  # +1 for the assistant turn about to be appended
 
         return StreamingResponse(
             self._stream_turn(
@@ -263,7 +245,6 @@ class TopicChatService:
                 include_diagnostic_tool=include_diagnostic_tool,
                 effective_mode=effective_mode,
                 context=context,
-                total_messages=total_messages,
             ),
             media_type="text/plain; charset=utf-8",
         )
@@ -278,7 +259,6 @@ class TopicChatService:
         include_diagnostic_tool: bool,
         effective_mode: str,
         context: dict,
-        total_messages: int,
     ):
         """Run the tool-loop mentor call, streaming text as it's generated.
 
@@ -297,7 +277,7 @@ class TopicChatService:
 
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages)
-            tools = [_WEB_SEARCH_TOOL, _GET_SKILL_DETAIL_TOOL, _GET_MORE_EPISODES_TOOL]
+            tools = [_WEB_SEARCH_TOOL, _GET_SKILL_DETAIL_TOOL]
             if include_diagnostic_tool:
                 tools.append(_DIAGNOSTIC_VERDICT_TOOL)
 
@@ -378,7 +358,7 @@ class TopicChatService:
         }
         await self._topic_service.append_message(topic_id, user_id, assistant_msg)
 
-        asyncio.create_task(self._post_turn_hook(topic_id, user_id, total_messages))
+        asyncio.create_task(self._post_turn_hook(topic_id, user_id))
 
         yield _META_MARKER + json.dumps({"mode": effective_mode, "suggestions": suggestions})
 
@@ -409,16 +389,6 @@ class TopicChatService:
         try:
             if name == "get_skill_detail":
                 return self._format_skill_detail(tool_input.get("topic", ""), context)
-            if name == "get_more_past_sessions":
-                topic = tool_input.get("topic") or None
-                limit = min(max(int(tool_input.get("limit") or 5), 1), 10)
-                episodes = await context_assembler.fetch_additional_episodes(user_id, topic, limit)
-                if not episodes:
-                    return "No additional past sessions found."
-                return "\n\n".join(
-                    f"[{e.get('title', 'Untitled session')}] {e.get('summary', '')}"
-                    for e in episodes
-                )
             return f"Unknown tool: {name}"
         except Exception as e:
             logger.warning("Loop tool %s failed for user=%s: %s", name, user_id, e)
@@ -574,14 +544,16 @@ class TopicChatService:
 
         return api_messages
 
-    async def _post_turn_hook(self, topic_id: str, user_id: str, total_messages: int) -> None:
+    async def _post_turn_hook(self, topic_id: str, user_id: str) -> None:
         """Post-turn compaction / skill-checkpoint check (Req 6.4, 14.1).
 
         Runs asynchronously after the response is returned to the user. Checks if
         compaction is needed and triggers it if so — compaction already extracts
-        skill updates as part of its flow. Otherwise, every SKILL_CHECK_EVERY_N_MESSAGES
-        messages, runs a skill-only checkpoint so topics that never grow large enough
-        to compact still contribute to the skill graph.
+        skill updates as part of its flow. Skill-update/taught-concept extraction
+        that used to ride on a fixed message-count checkpoint now happens on
+        session-close instead (session-narrative-summary spec, Requirement 4.3),
+        triggered from check_and_close_on_new_message / idle_sweep / logout,
+        not from here.
         """
         try:
             should_compact = await self._compaction_service.should_compact(
@@ -589,8 +561,6 @@ class TopicChatService:
             )
             if should_compact:
                 await self._compaction_service.compact(topic_id, user_id)
-            elif total_messages > 0 and total_messages % SKILL_CHECK_EVERY_N_MESSAGES == 0:
-                await self._compaction_service.extract_skill_updates_only(topic_id, user_id)
         except Exception as e:
             logger.error(
                 "Post-turn hook failed for topic %s: %s", topic_id, str(e)

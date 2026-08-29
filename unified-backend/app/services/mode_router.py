@@ -157,8 +157,7 @@ async def route_user_turn(
 
     user_payload = (
         f"User query: {query!r}\n\n"
-        f"Skill state: current_level={skill.get('current_level')}, "
-        f"required_level={skill.get('required_level')}, gap={skill.get('gap')}\n\n"
+        f"Skill state: current_level={skill.get('current_level')}\n\n"
         f"Recent turns in this topic:\n{_format_recent_messages(recent_messages, _RECENT_MESSAGE_WINDOW)}"
     )
 

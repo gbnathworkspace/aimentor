@@ -43,8 +43,6 @@ export interface CoreProfile {
 export interface SkillNode {
   topic: string;
   current_level: string;
-  required_level: string;
-  gap: any;
   signals?: Record<string, any>;
   [key: string]: any;
 }

@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 
 from app.config.database import skill_graph_col
 from app.models.session import SessionSkillUpdate
-from app.services.onboarding_bootstrap import compute_gap
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +19,8 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
     """Upsert a skill graph node with the latest session skill data.
 
     Uses MongoDB update_one with upsert=True on the compound index
-    (user_id, topic). Writes current_level (the field planning reads) and a
-    recomputed string gap, plus weak_areas, strong_areas, last_studied.
+    (user_id, topic). Writes current_level (the field planning reads), plus
+    weak_areas, strong_areas, last_studied.
 
     On MongoDB write failure, logs the error and returns without raising.
     This keeps the session-end pipeline non-blocking.
@@ -33,19 +32,15 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
     try:
         now = datetime.now(timezone.utc).isoformat()
 
-        # gap was never recomputed on update (issue #3): write the level planning
-        # actually reads (current_level) and derive gap from the existing
-        # required_level. new_level vocab is now graph-canonical (no translation).
+        # new_level vocab is graph-canonical (no translation).
         current_level = skill_update.new_level.value
         existing = await skill_graph_col().find_one(
             {"user_id": user_id, "topic": skill_update.topic},
-            {"required_level": 1, "current_level": 1, "_id": 0},
+            {"current_level": 1, "_id": 0},
         )
-        required_level = (existing or {}).get("required_level", "intermediate")
         # Remember the level we're replacing so the UI can show a "since last
         # session" delta (issue #16). None for a brand-new topic.
         previous_level = (existing or {}).get("current_level")
-        gap = compute_gap(required_level, current_level)
 
         await skill_graph_col().update_one(
             {"user_id": user_id, "topic": skill_update.topic},
@@ -55,7 +50,6 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
                     "topic": skill_update.topic,
                     "current_level": current_level,
                     "previous_level": previous_level,
-                    "gap": gap,
                     "weak_areas": skill_update.weak_areas,
                     "strong_areas": skill_update.strong_areas,
                     "last_studied": now,
@@ -69,11 +63,10 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
         )
 
         logger.info(
-            "Skill graph upserted — user_id=%s, topic=%s, level=%s, gap=%s",
+            "Skill graph upserted — user_id=%s, topic=%s, level=%s",
             user_id,
             skill_update.topic,
             current_level,
-            gap,
         )
 
     except Exception as e:
@@ -86,8 +79,7 @@ async def apply_update(user_id: str, skill_update: SessionSkillUpdate) -> None:
 
 
 def next_best_topics(nodes: list[dict], limit: int = 3) -> list[dict]:
-    """Order skill nodes by prerequisite edges, then keep only unmastered ones
-    in learn-next order (issue #10).
+    """Order skill nodes by prerequisite edges, in learn-next order (issue #10).
 
     Pure/sync, no DB access — takes the raw skill_graph list already fetched
     by context_assembler. A DFS post-order gives a valid topological order:
@@ -112,8 +104,7 @@ def next_best_topics(nodes: list[dict], limit: int = 3) -> list[dict]:
         visit(n["topic"])
 
     ranked = [
-        {"topic": t, "gap": topic_by_name[t].get("gap", "unknown")}
+        {"topic": t, "current_level": topic_by_name[t].get("current_level", "beginner")}
         for t in order
-        if topic_by_name[t].get("gap", "none") != "none"
     ]
     return ranked[:limit]

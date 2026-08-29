@@ -253,7 +253,7 @@ async def test_proficiency_populated_and_clamped_on_goal_intent_path():
     ):
         result = await derive_subtopic_weights(
             topic="SQL", goal="job_performance", subtopics=subtopics,
-            goal_intent="some goal", current_level="intermediate", skill_gap="low",
+            goal_intent="some goal", current_level="intermediate",
         )
 
     assert result.proficiency == {"a": 70.0, "b": 15.0}
@@ -269,7 +269,7 @@ async def test_score_proficiency_llm_defaults_missing_subtopic_to_zero_and_clamp
         with patch("app.services.subtopic_weights.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
             scores = await _score_proficiency_llm(
-                "some intent", "SQL", ["a", "b", "c"], "beginner", "high"
+                "some intent", "SQL", ["a", "b", "c"], "beginner"
             )
 
     assert scores == {"a": 100.0, "b": 0.0, "c": 0.0}

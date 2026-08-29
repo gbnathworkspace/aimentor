@@ -22,7 +22,7 @@ def _run_apply(existing):
         with patch.object(repo, "skill_graph_col", return_value=fake):
             await repo.apply_update(
                 "u1",
-                SessionSkillUpdate(topic="Graphs", new_level=SkillLevel.advanced, gap=20),
+                SessionSkillUpdate(topic="Graphs", new_level=SkillLevel.advanced),
             )
 
     asyncio.run(go())
@@ -30,7 +30,7 @@ def _run_apply(existing):
 
 
 def test_previous_level_captured_from_existing():
-    written = _run_apply({"required_level": "expert", "current_level": "intermediate"})
+    written = _run_apply({"current_level": "intermediate"})
     assert written["previous_level"] == "intermediate"
     assert written["current_level"] == "advanced"
 
@@ -44,7 +44,7 @@ def test_previous_level_none_for_new_topic():
 def test_apply_update_marks_assessed_true():
     """Issue #50: any verified write flips assessed, distinguishing it from
     the onboarding placeholder guess."""
-    written = _run_apply({"required_level": "expert", "current_level": "beginner", "assessed": False})
+    written = _run_apply({"current_level": "beginner", "assessed": False})
     assert written["assessed"] is True
 
 
@@ -53,25 +53,17 @@ class TestNextBestTopics:
 
     def test_orders_prerequisites_before_dependents(self):
         nodes = [
-            {"topic": "Algorithms", "gap": "medium", "prerequisites": ["Data Structures"]},
-            {"topic": "Data Structures", "gap": "large", "prerequisites": []},
+            {"topic": "Algorithms", "current_level": "beginner", "prerequisites": ["Data Structures"]},
+            {"topic": "Data Structures", "current_level": "beginner", "prerequisites": []},
         ]
         ranked = repo.next_best_topics(nodes)
         assert [n["topic"] for n in ranked] == ["Data Structures", "Algorithms"]
 
-    def test_mastered_topics_are_excluded(self):
-        nodes = [
-            {"topic": "Basics", "gap": "none", "prerequisites": []},
-            {"topic": "Advanced", "gap": "small", "prerequisites": ["Basics"]},
-        ]
-        ranked = repo.next_best_topics(nodes)
-        assert [n["topic"] for n in ranked] == ["Advanced"]
-
     def test_respects_limit(self):
-        nodes = [{"topic": f"T{i}", "gap": "small", "prerequisites": []} for i in range(5)]
+        nodes = [{"topic": f"T{i}", "current_level": "beginner", "prerequisites": []} for i in range(5)]
         assert len(repo.next_best_topics(nodes, limit=2)) == 2
 
     def test_missing_prerequisite_is_ignored(self):
-        nodes = [{"topic": "Solo", "gap": "medium", "prerequisites": ["Nonexistent"]}]
+        nodes = [{"topic": "Solo", "current_level": "beginner", "prerequisites": ["Nonexistent"]}]
         ranked = repo.next_best_topics(nodes)
         assert [n["topic"] for n in ranked] == ["Solo"]

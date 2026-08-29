@@ -87,7 +87,6 @@ def _build_combined_prompt(
         f'2. "skill_update": An object with the following fields:\n'
         f'   - "topic" (string): The main topic studied\n'
         f'   - "new_level" (string): One of "beginner", "intermediate", "advanced", "expert"\n'
-        f'   - "gap" (integer): A score from 0 to 100 representing the knowledge gap\n'
         f'   - "weak_areas" (array of strings, max 10): Areas where the student struggled\n'
         f'   - "strong_areas" (array of strings, max 10): Areas where the student excelled\n'
         f'   - "eval_score" (string, optional): An evaluation score if applicable\n\n'

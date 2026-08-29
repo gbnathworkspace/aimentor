@@ -73,11 +73,10 @@ _COMPACTION_TOOL_SCHEMA = {
                             "type": "string",
                             "enum": ["beginner", "intermediate", "advanced", "expert"],
                         },
-                        "gap": {"type": "integer", "minimum": 0, "maximum": 100},
                         "weak_areas": {"type": "array", "items": {"type": "string"}},
                         "strong_areas": {"type": "array", "items": {"type": "string"}},
                     },
-                    "required": ["topic", "new_level", "gap", "weak_areas", "strong_areas"],
+                    "required": ["topic", "new_level", "weak_areas", "strong_areas"],
                 },
                 "description": "Skill updates detected from the conversation. Empty array if no progress detected.",
             },
@@ -148,7 +147,6 @@ def _validate_skill_updates(skill_updates: list) -> list[dict]:
 
         topic = update.get("topic")
         new_level = update.get("new_level")
-        gap = update.get("gap")
         weak_areas = update.get("weak_areas")
         strong_areas = update.get("strong_areas")
 
@@ -157,14 +155,6 @@ def _validate_skill_updates(skill_updates: list) -> list[dict]:
             continue
         if new_level not in _VALID_LEVELS:
             continue
-        if not isinstance(gap, int) or gap < 0 or gap > 100:
-            # Try to coerce numeric types
-            try:
-                gap = int(gap)
-                if gap < 0 or gap > 100:
-                    continue
-            except (TypeError, ValueError):
-                continue
         if not isinstance(weak_areas, list):
             weak_areas = []
         if not isinstance(strong_areas, list):
@@ -177,7 +167,6 @@ def _validate_skill_updates(skill_updates: list) -> list[dict]:
         validated.append({
             "topic": topic.strip(),
             "new_level": new_level,
-            "gap": gap,
             "weak_areas": weak_areas,
             "strong_areas": strong_areas,
         })
@@ -376,7 +365,7 @@ class CompactionService:
 
         The LLM is given the conversation excerpt and asked to produce:
         1. A narrative summary (3-5 sentences) capturing the key learning points
-        2. Zero or more structured skill updates (topic, new_level, gap, weak_areas, strong_areas)
+        2. Zero or more structured skill updates (topic, new_level, weak_areas, strong_areas)
 
         Uses Anthropic's tool_use feature to get reliable JSON output.
 

@@ -52,9 +52,7 @@ Additional observed notes:
 {{style_notes}}
 <!--L1-BOUNDARY-->
 ## Current Topic: {{topic}}
-- **Required Level:** {{required_level}}
 - **Current Level:** {{current_level}}
-- **Gap:** {{gap}}
 
 ## Already Taught In This Topic
 {{taught_concepts}}

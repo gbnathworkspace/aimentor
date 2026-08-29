@@ -18,8 +18,8 @@ class SessionStatus(str, Enum):
 class SkillLevel(str, Enum):
     """Valid skill levels for LLM-extracted skill updates.
 
-    Canonical vocabulary shared with the skill graph (onboarding_bootstrap.
-    LEVEL_ORDER) so session output feeds compute_gap/planning without translation.
+    Canonical vocabulary shared with the skill graph so session output
+    feeds planning without translation.
     """
 
     beginner = "beginner"
@@ -53,7 +53,6 @@ class SessionSkillUpdate(BaseModel):
 
     topic: str
     new_level: SkillLevel = Field(..., alias="new_level")
-    gap: int = Field(..., ge=0, le=100)
     weak_areas: list[str] = Field(default_factory=list, max_length=10)
     strong_areas: list[str] = Field(default_factory=list, max_length=10)
     eval_score: Optional[str] = None

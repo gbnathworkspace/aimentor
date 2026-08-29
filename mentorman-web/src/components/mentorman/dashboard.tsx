@@ -11,13 +11,16 @@ const LEVEL_PCT: Record<string, number> = {
 };
 const lvl = (s: string) => LEVEL_PCT[s?.toLowerCase()] ?? 50;
 
+// There's no per-topic required_level (removed — the backend never
+// computed a real goal-relative target). req is a flat intermediate
+// baseline so the gap bar still shows progress-toward-competent.
+const BASELINE_REQ = LEVEL_PCT.intermediate;
+
 function skillToTopic(s: SkillNode): Topic {
   const sig = (s.signals ?? {}) as Record<string, unknown>;
   const cur = lvl(s.current_level);
-  const req = lvl(s.required_level);
-  // gap is a string scale ("none/small/medium/large") from the backend; derive a
-  // % from levels. parseInt also covers legacy numeric docs. (issue #3)
-  const gap = parseInt(String(s.gap)) || Math.max(0, req - cur);
+  const req = BASELINE_REQ;
+  const gap = Math.max(0, req - cur);
   const prev = s.previous_level as string | undefined;
   const levelUp = prev && prev !== s.current_level
     ? { from: prev, to: s.current_level, up: lvl(s.current_level) > lvl(prev) }
@@ -29,7 +32,7 @@ function skillToTopic(s: SkillNode): Topic {
     req,
     last: (sig.last_studied as string) ?? (sig.last as string) ?? '–',
     gap,
-    level: `${s.current_level} → ${s.required_level}`,
+    level: `${s.current_level} → intermediate`,
     levelUp,
     strong: (sig.strong_areas as string[]) ?? (sig.strong as string[]) ?? [],
     weak: (sig.weak_areas as string[]) ?? (sig.weak as string[]) ?? [],

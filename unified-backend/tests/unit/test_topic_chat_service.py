@@ -801,7 +801,6 @@ class TestToolLoop:
             "profile": {}, "skill": {}, "episodes": [], "documents": [],
             "skill_graph": [
                 {"topic": "Recursion", "current_level": "beginner",
-                 "required_level": "intermediate", "gap": "medium",
                  "weak_areas": ["base cases"], "strong_areas": []},
             ],
         })

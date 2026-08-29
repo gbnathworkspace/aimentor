@@ -66,28 +66,21 @@ _DIAGNOSTIC_VERDICT_TOOL = {
                 "type": "string",
                 "enum": ["beginner", "intermediate", "advanced", "expert"],
             },
-            "gap": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 100,
-                "description": "Estimated gap to required proficiency: 0 = none, 100 = huge.",
-            },
             "weak_areas": {"type": "array", "items": {"type": "string"}},
             "strong_areas": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["new_level", "gap", "weak_areas", "strong_areas"],
+        "required": ["new_level", "weak_areas", "strong_areas"],
     },
 }
 
 # --- Loop tools: the model can call these mid-turn, see the result, and keep
-# reasoning before its final reply. Both reuse data the backend already
-# fetches — no new DB infra. Real semantic search over episodic memory is
-# out of scope (no Atlas vector index exists yet).
+# reasoning before its final reply. Reuses data the backend already fetches
+# — no new DB infra.
 
 _GET_SKILL_DETAIL_TOOL = {
     "name": "get_skill_detail",
     "description": (
-        "Look up the user's current level, gap, and weak/strong areas for a "
+        "Look up the user's current level and weak/strong areas for a "
         "topic OTHER than the one currently being discussed. Use this when "
         "the conversation references another topic's skill state that "
         "isn't already in your context."
@@ -408,8 +401,6 @@ class TopicChatService:
         return (
             f"Topic: {node.get('topic')}\n"
             f"Current level: {node.get('current_level', 'not assessed')}\n"
-            f"Required level: {node.get('required_level', 'unknown')}\n"
-            f"Gap: {node.get('gap', 'unknown')}\n"
             f"Weak areas: {', '.join(node.get('weak_areas') or []) or 'none recorded'}\n"
             f"Strong areas: {', '.join(node.get('strong_areas') or []) or 'none recorded'}"
         )

@@ -2,7 +2,6 @@
 
 Provides:
 - GOAL_KNOWLEDGE_BASE: predefined skill topics for common learning goals
-- compute_gap(required, current): gap calculation between skill levels
 - bootstrap_skills(user_id, goal, overall_level): async function to generate and persist skill nodes
 """
 
@@ -16,9 +15,6 @@ from app.config.database import skill_graph_col
 from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Ordered skill levels from lowest to highest
-LEVEL_ORDER = ["beginner", "intermediate", "advanced", "expert"]
 
 # Predefined skill topics for common learning goals
 GOAL_KNOWLEDGE_BASE: dict[str, list[str]] = {
@@ -107,44 +103,6 @@ GOAL_KNOWLEDGE_BASE: dict[str, list[str]] = {
         "AI Ethics",
     ],
 }
-
-
-def compute_gap(required: str, current: str) -> str:
-    """Compute the gap between required and current skill levels.
-
-    Level order: beginner < intermediate < advanced < expert
-
-    Returns:
-        "none" if current >= required
-        "small" if 1 level difference
-        "medium" if 2 levels difference
-        "large" if 3 levels difference
-    """
-    required_lower = required.lower().strip()
-    current_lower = current.lower().strip()
-
-    # Default to intermediate/beginner if unrecognized
-    required_idx = (
-        LEVEL_ORDER.index(required_lower)
-        if required_lower in LEVEL_ORDER
-        else LEVEL_ORDER.index("intermediate")
-    )
-    current_idx = (
-        LEVEL_ORDER.index(current_lower)
-        if current_lower in LEVEL_ORDER
-        else LEVEL_ORDER.index("beginner")
-    )
-
-    diff = required_idx - current_idx
-
-    if diff <= 0:
-        return "none"
-    elif diff == 1:
-        return "small"
-    elif diff == 2:
-        return "medium"
-    else:
-        return "large"
 
 
 def _lookup_goal_in_kb(goal: str) -> Optional[list[str]]:
@@ -241,10 +199,6 @@ async def bootstrap_skills(
         logger.warning(f"No topics derived for user '{user_id}' (no focus areas or context label)")
         return []
 
-    # required_level: hardcoded until the Goal Knowledge Base grows per-topic
-    # required levels instead of one flat default (unchanged from prior behavior).
-    required_level = "intermediate"
-
     # ponytail: L1 no longer carries a self-reported overall_level (dropped per
     # the L1 schema redesign) — seed every topic at "beginner" and let the
     # evidence-based evaluation loop (issue #50) correct it from there.
@@ -253,13 +207,10 @@ async def bootstrap_skills(
     # Build skill nodes and upsert into DB
     skill_nodes = []
     for i, topic in enumerate(topics):
-        gap = compute_gap(required_level, current_level)
         node = {
             "user_id": user_id,
             "topic": topic,
-            "required_level": required_level,
             "current_level": current_level,
-            "gap": gap,
             # Hand-seeded linear chain from the curated topic order (issue #10).
             "prerequisites": [topics[i - 1]] if i > 0 else [],
             # current_level above is a guess, not a measurement — gate the

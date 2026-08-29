@@ -38,7 +38,7 @@ _ONBOARDING_TEMPLATE = "onboarding.md"
 _MODE_INSTRUCTIONS: dict[str, str] = {
     "planning": (
         "You are in PLANNING mode. Your job is to help the user create a concrete study plan.\n"
-        "- Identify the 1-2 highest priority topics based on gap size and time remaining.\n"
+        "- Identify the 1-2 highest priority topics based on the suggested next-best-skill order and time remaining.\n"
         "- Translate priorities into a concrete weekly study plan with hours and deliverables.\n"
         "- If the user picks a topic that isn't the highest priority, push back with data.\n"
         "- Factor in their daily availability — don't overcommit.\n"
@@ -243,8 +243,11 @@ def _format_next_skills(skill_graph: list[dict[str, Any]]) -> str:
     """Format the prerequisite-ordered next-best-skill sequence (issue #10)."""
     ranked = next_best_topics(skill_graph)
     if not ranked:
-        return "(no pending topics — skill graph empty or fully mastered)"
-    return "\n".join(f"{i}. {item['topic']} (gap: {item['gap']})" for i, item in enumerate(ranked, 1))
+        return "(no pending topics — skill graph empty)"
+    return "\n".join(
+        f"{i}. {item['topic']} (current level: {item['current_level']})"
+        for i, item in enumerate(ranked, 1)
+    )
 
 
 def _build_context_variables(
@@ -257,7 +260,7 @@ def _build_context_variables(
     mode_instructions = _MODE_INSTRUCTIONS.get(mode, "")
     if mode == "planning":
         mode_instructions += (
-            "\n- Suggested next-best-skill order (prerequisites-first, unmastered only):\n"
+            "\n- Suggested next-best-skill order (prerequisites-first):\n"
             + _format_next_skills(context.get("skill_graph") or [])
         )
 
@@ -268,9 +271,7 @@ def _build_context_variables(
         "style_notes": _format_style_notes(profile.get("style_notes") or []),
         # L2 Skill fields
         "topic": skill.get("topic", context.get("topic", "General")),
-        "required_level": skill.get("required_level", "Not assessed"),
         "current_level": skill.get("current_level", "Not assessed"),
-        "gap": skill.get("gap", "Unknown"),
         # L3 Episodic memory
         "taught_concepts": _format_taught_concepts(context.get("taught_concepts")),
         "session_summaries": _format_summary_blocks(context.get("summary_blocks")),

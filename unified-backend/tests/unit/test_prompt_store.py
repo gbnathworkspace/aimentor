@@ -77,17 +77,12 @@ class TestGetSystemPrompt:
             "profile": {},
             "skill": {
                 "topic": "System Design",
-                "required_level": "advanced",
                 "current_level": "intermediate",
-                "gap": "40%",
             },
-            "episodes": [],
         }
         result = get_system_prompt("socratic", context)
         assert "System Design" in result
-        assert "advanced" in result
         assert "intermediate" in result
-        assert "40%" in result
 
     def test_includes_mode_instructions_planning(self):
         context = {"profile": {}, "skill": {}, "episodes": []}

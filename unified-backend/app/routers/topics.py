@@ -278,13 +278,12 @@ async def get_subtopic_weights(
     # L2 skill graph node for this topic (if any) anchors the proficiency
     # estimate — a "beginner" overall level keeps per-subtopic mastery
     # scores from drifting high just because the stated intent sounds
-    # confident. Defaults match SkillNode's own onboarding defaults.
+    # confident. Default matches SkillNode's own onboarding default.
     skill_node = await skill_graph_col().find_one(
         {"user_id": user_id, "topic": topic["title"]},
-        {"current_level": 1, "gap": 1, "_id": 0},
+        {"current_level": 1, "_id": 0},
     )
     current_level = (skill_node or {}).get("current_level", "beginner")
-    skill_gap = (skill_node or {}).get("gap", "medium")
 
     try:
         result = await derive_subtopic_weights(
@@ -296,7 +295,6 @@ async def get_subtopic_weights(
             pairwise_comparisons=body.pairwise_comparisons,
             user_nudges=body.user_nudges,
             current_level=current_level,
-            skill_gap=skill_gap,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -18,29 +18,31 @@ Generic AI chat gives the same answer whether it's your first session or your fi
 The most interesting design decision in this system is how memory is structured and injected.
 
 ```
-Layer 1 — Core Profile        ~200 tokens · always injected
-  goal, deadline, availability
-  Small and stable — no retrieval cost
+Layer 1 — Core Profile        always injected, filtered per topic
+  Free-text "Facts About You" (situations) + style notes
+  (pacing, communication, motivation, misconceptions, context)
+  A Haiku classification call scopes which facts are relevant
+  to the current topic, cached until the profile changes
 
-Layer 2 — Skill Graph         ~400 tokens · topic-filtered query
-  per-topic: current_level, required_level, gap, signals
-  Gap = required_level − current_level (goal-relative, not absolute)
+Layer 2 — Skill Graph         topic-filtered query
+  per-topic: current_level, signals, prerequisites, assessed
+  current_level starts at a seeded guess, then updates from real
+  evidence (diagnostic verdicts, session-end extraction). No
+  required_level/gap — those were a flat, non-goal-derived constant
+  and were removed rather than kept as fake precision
 
-Layer 3 — Episodic Memory     ~300 tokens · conditionally retrieved
-  session summaries + resolved doubts, embedded via Voyage AI
-  A Haiku intent pre-check gates retrieval — most calls skip it entirely
+Layer 3 — Episodic Memory     topic-scoped, recency-based
+  Topic's own rolling summary + that topic's past session summaries
+  Session summaries ARE embedded via Voyage AI at session end and
+  written to Atlas Vector Search — but nothing reads them back yet.
+  Retrieval today is "most recent," not semantic similarity.
 
-Goal anchor                    ~50 tokens · repeated at bottom
-  Fights "lost in the middle" attention decay on long contexts
-
-Conversation history           ~500 tokens · rolling 6-turn window
-─────────────────────────────────────────────────────────────────
-Total context budget per call: ~1,550 tokens
+Conversation history           rolling window
 ```
 
-**Why not a flat vector store?** Structured facts (gap %, deadlines) should be queried directly, not retrieved by cosine similarity. Vector search is reserved for episodic memory — the one layer where semantic retrieval actually makes sense.
+**Why not vector search for retrieval yet?** The write path exists (Voyage AI embeddings, Atlas Vector Search upsert on every session end) but the read path doesn't query them — recency-based fetch avoids a missing Atlas index and a writer/reader collection mismatch that haven't been resolved. This is a known gap, not a design choice: semantic retrieval over past sessions is the natural next step once that's fixed.
 
-**Why not two databases?** MongoDB Atlas Vector Search handles all three layers in one cluster (one connection, one IAM role, one failure surface). Pinecone would give marginally better retrieval at scale — not a measurable problem for a single user's session history.
+**Why not two databases?** MongoDB Atlas Vector Search would handle all three layers in one cluster (one connection, one IAM role, one failure surface) once retrieval is wired up. Pinecone would give marginally better retrieval at scale — not a measurable problem for a single user's session history.
 
 ---
 
@@ -50,7 +52,7 @@ The mentor detects session mode from the user's first message. It's never user-s
 
 | Mode | What it does |
 |---|---|
-| **Planning** | Builds a study plan prioritised by skill gap |
+| **Planning** | Builds a study plan prioritised by prerequisite order |
 | **Topic** | Teaches the concept, probes understanding depth |
 | **Doubt** | Resolves the specific gap, checks root cause |
 | **Evaluation** | Recall → Application → Depth question sequence |
@@ -63,16 +65,32 @@ At session end, one Sonnet call over the full transcript produces two outputs:
 
 ---
 
+## Agent Loop
+
+The mentor isn't a single LLM call per turn — it's a bounded ReAct-style tool loop (`topic_chat_service.py`): reason → optionally call a tool → observe the result → reason again, up to 2 rounds (worst case: one tool-decision call + one forced-final-answer call, so latency stays bounded instead of looping unboundedly).
+
+Tools bound with `tool_choice="auto"` (the model decides whether to act):
+
+| Tool | Purpose |
+|---|---|
+| `web_search` | Native Claude web search, capped at 3 uses per turn |
+| `get_skill_detail` | Look up current level for a topic other than the one being discussed |
+| `record_diagnostic_verdict` | Diagnostic-mode only — records an assessed skill level once there's enough signal, in the same call as the reply text rather than a separate round trip |
+
+On the final round, `get_skill_detail` is stripped from the tool set so the model is forced to answer instead of requesting another lookup — this is the hard stop on the loop. `record_diagnostic_verdict` is never treated as a loop tool: calling it always ends the turn.
+
+---
+
 ## Skill Graph Design
 
-Proficiency is measured relative to the user's goal, not in absolute terms. The `required_level` per topic comes from a curated Goal Knowledge Base of proficiency benchmarks — never guessed by the LLM.
+Proficiency is tracked per topic from real evidence — diagnostic verdicts, session-end extraction — not self-reported. There's no goal-specific target to compare against yet (a Goal Knowledge Base was planned but never built), so this tracks absolute level, not a goal-relative gap.
 
 ```json
 {
   "topic": "graphs",
   "current_level": "easy",
-  "required_level": "medium",
-  "gap": "40%",
+  "assessed": true,
+  "prerequisites": ["arrays"],
   "signals": {
     "leetcode_solved": { "easy": 10, "medium": 2, "hard": 0 },
     "mentor_eval_score": "3/5",

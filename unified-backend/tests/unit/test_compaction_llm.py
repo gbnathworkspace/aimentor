@@ -80,7 +80,6 @@ class TestValidateSkillUpdates:
             {
                 "topic": "Graph Algorithms",
                 "new_level": "intermediate",
-                "gap": 40,
                 "weak_areas": ["DFS traversal"],
                 "strong_areas": ["BFS basics"],
             }
@@ -89,7 +88,6 @@ class TestValidateSkillUpdates:
         assert len(result) == 1
         assert result[0]["topic"] == "Graph Algorithms"
         assert result[0]["new_level"] == "intermediate"
-        assert result[0]["gap"] == 40
 
     def test_invalid_level_rejected(self):
         """Skill update with invalid level is filtered out."""
@@ -97,21 +95,6 @@ class TestValidateSkillUpdates:
             {
                 "topic": "Graphs",
                 "new_level": "master",  # invalid
-                "gap": 50,
-                "weak_areas": [],
-                "strong_areas": [],
-            }
-        ]
-        result = _validate_skill_updates(updates)
-        assert len(result) == 0
-
-    def test_gap_out_of_range_rejected(self):
-        """Skill update with gap > 100 is filtered out."""
-        updates = [
-            {
-                "topic": "Graphs",
-                "new_level": "beginner",
-                "gap": 150,
                 "weak_areas": [],
                 "strong_areas": [],
             }
@@ -125,7 +108,6 @@ class TestValidateSkillUpdates:
             {
                 "topic": "",
                 "new_level": "beginner",
-                "gap": 50,
                 "weak_areas": [],
                 "strong_areas": [],
             }
@@ -145,7 +127,6 @@ class TestValidateSkillUpdates:
             {
                 "topic": "Graphs",
                 "new_level": "beginner",
-                "gap": 50,
                 "weak_areas": "not a list",
                 "strong_areas": None,
             }
@@ -161,28 +142,12 @@ class TestValidateSkillUpdates:
             {
                 "topic": "Graphs",
                 "new_level": "beginner",
-                "gap": 50,
                 "weak_areas": ["valid", 123, None, "also valid"],
                 "strong_areas": ["ok"],
             }
         ]
         result = _validate_skill_updates(updates)
         assert result[0]["weak_areas"] == ["valid", "also valid"]
-
-    def test_gap_coerced_from_float(self):
-        """Numeric gap values that can be coerced to int are accepted."""
-        updates = [
-            {
-                "topic": "Graphs",
-                "new_level": "beginner",
-                "gap": 50.0,
-                "weak_areas": [],
-                "strong_areas": [],
-            }
-        ]
-        result = _validate_skill_updates(updates)
-        assert len(result) == 1
-        assert result[0]["gap"] == 50
 
 
 class TestCallSummarizationLLM:
@@ -262,7 +227,6 @@ class TestCallSummarizationLLM:
             {
                 "topic": "Graph Algorithms",
                 "new_level": "intermediate",
-                "gap": 35,
                 "weak_areas": ["DFS backtracking"],
                 "strong_areas": ["BFS traversal", "Queue usage"],
             }
@@ -284,7 +248,6 @@ class TestCallSummarizationLLM:
         assert len(result["skill_updates"]) == 1
         assert result["skill_updates"][0]["topic"] == "Graph Algorithms"
         assert result["skill_updates"][0]["new_level"] == "intermediate"
-        assert result["skill_updates"][0]["gap"] == 35
 
     @pytest.mark.asyncio
     async def test_parses_taught_concepts(self, service, sample_messages):

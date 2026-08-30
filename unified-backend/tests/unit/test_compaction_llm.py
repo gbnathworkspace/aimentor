@@ -72,82 +72,57 @@ class TestFormatConversationExcerpt:
 
 
 class TestValidateSkillUpdates:
-    """Tests for _validate_skill_updates helper."""
+    """Tests for _validate_skill_updates helper. Subtopic-level validation
+    itself is delegated to subtopic_weights.validate_subtopic_updates and
+    mocked here (tested separately in test_subtopic_weights.py)."""
 
-    def test_valid_update_passes(self):
+    @pytest.mark.asyncio
+    async def test_valid_update_passes(self):
         """A well-formed skill update passes validation."""
-        updates = [
-            {
-                "topic": "Graph Algorithms",
-                "new_level": "intermediate",
-                "weak_areas": ["DFS traversal"],
-                "strong_areas": ["BFS basics"],
-            }
-        ]
-        result = _validate_skill_updates(updates)
+        from app.models.skill import SubtopicMasteryUpdate
+
+        updates = [{"topic": "Graph Algorithms", "subtopic_updates": [{"subtopic": "DFS", "mastery": 40}]}]
+        with patch(
+            "app.services.subtopic_weights.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="DFS", mastery=40)]),
+        ):
+            result = await _validate_skill_updates(updates)
         assert len(result) == 1
         assert result[0]["topic"] == "Graph Algorithms"
-        assert result[0]["new_level"] == "intermediate"
+        assert result[0]["subtopic_updates"][0].subtopic == "DFS"
 
-    def test_invalid_level_rejected(self):
-        """Skill update with invalid level is filtered out."""
-        updates = [
-            {
-                "topic": "Graphs",
-                "new_level": "master",  # invalid
-                "weak_areas": [],
-                "strong_areas": [],
-            }
-        ]
-        result = _validate_skill_updates(updates)
+    @pytest.mark.asyncio
+    async def test_all_subtopics_dropped_rejects_whole_entry(self):
+        """If subtopic validation drops every proposed subtopic, the entry
+        carries no information and is dropped entirely."""
+        updates = [{"topic": "Graphs", "subtopic_updates": [{"subtopic": "Nonsense", "mastery": 10}]}]
+        with patch(
+            "app.services.subtopic_weights.validate_subtopic_updates",
+            AsyncMock(return_value=[]),
+        ):
+            result = await _validate_skill_updates(updates)
         assert len(result) == 0
 
-    def test_missing_topic_rejected(self):
+    @pytest.mark.asyncio
+    async def test_missing_topic_rejected(self):
         """Skill update with empty topic is filtered out."""
-        updates = [
-            {
-                "topic": "",
-                "new_level": "beginner",
-                "weak_areas": [],
-                "strong_areas": [],
-            }
-        ]
-        result = _validate_skill_updates(updates)
+        updates = [{"topic": "", "subtopic_updates": [{"subtopic": "x", "mastery": 10}]}]
+        result = await _validate_skill_updates(updates)
         assert len(result) == 0
 
-    def test_non_dict_items_filtered(self):
+    @pytest.mark.asyncio
+    async def test_non_dict_items_filtered(self):
         """Non-dict items in the list are filtered out."""
         updates = ["not a dict", 123, None]
-        result = _validate_skill_updates(updates)
+        result = await _validate_skill_updates(updates)
         assert len(result) == 0
 
-    def test_non_list_areas_default_to_empty(self):
-        """Non-list weak_areas/strong_areas default to empty lists."""
-        updates = [
-            {
-                "topic": "Graphs",
-                "new_level": "beginner",
-                "weak_areas": "not a list",
-                "strong_areas": None,
-            }
-        ]
-        result = _validate_skill_updates(updates)
-        assert len(result) == 1
-        assert result[0]["weak_areas"] == []
-        assert result[0]["strong_areas"] == []
-
-    def test_non_string_items_in_areas_filtered(self):
-        """Non-string items within area lists are filtered out."""
-        updates = [
-            {
-                "topic": "Graphs",
-                "new_level": "beginner",
-                "weak_areas": ["valid", 123, None, "also valid"],
-                "strong_areas": ["ok"],
-            }
-        ]
-        result = _validate_skill_updates(updates)
-        assert result[0]["weak_areas"] == ["valid", "also valid"]
+    @pytest.mark.asyncio
+    async def test_non_list_subtopic_updates_rejected(self):
+        """A non-list subtopic_updates value is rejected outright (no default-empty)."""
+        updates = [{"topic": "Graphs", "subtopic_updates": "not a list"}]
+        result = await _validate_skill_updates(updates)
+        assert len(result) == 0
 
 
 class TestCallSummarizationLLM:
@@ -223,13 +198,10 @@ class TestCallSummarizationLLM:
     @pytest.mark.asyncio
     async def test_parses_valid_tool_use_response(self, service, sample_messages):
         """Valid tool_use response is parsed correctly with summary and skill updates."""
+        from app.models.skill import SubtopicMasteryUpdate
+
         skill_updates = [
-            {
-                "topic": "Graph Algorithms",
-                "new_level": "intermediate",
-                "weak_areas": ["DFS backtracking"],
-                "strong_areas": ["BFS traversal", "Queue usage"],
-            }
+            {"topic": "Graph Algorithms", "subtopic_updates": [{"subtopic": "DFS backtracking", "mastery": 30}]}
         ]
         mock_response = self._make_tool_use_response(
             "Student explored BFS and DFS algorithms, showing good understanding of BFS queue-based traversal but struggling with DFS backtracking mechanics.",
@@ -238,16 +210,20 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
-                mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages)
+        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client), \
+             patch("app.services.compaction_service.get_settings") as mock_settings, \
+             patch(
+                 "app.services.subtopic_weights.validate_subtopic_updates",
+                 AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="DFS backtracking", mastery=30)]),
+             ):
+            mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
+            result = await service._call_summarization_llm(sample_messages)
 
         assert result["summary"].startswith("Student explored BFS and DFS")
         assert result["skill_updates"] is not None
         assert len(result["skill_updates"]) == 1
         assert result["skill_updates"][0]["topic"] == "Graph Algorithms"
-        assert result["skill_updates"][0]["new_level"] == "intermediate"
+        assert result["skill_updates"][0]["subtopic_updates"][0].subtopic == "DFS backtracking"
 
     @pytest.mark.asyncio
     async def test_parses_taught_concepts(self, service, sample_messages):
@@ -349,22 +325,12 @@ class TestCallSummarizationLLM:
 
     @pytest.mark.asyncio
     async def test_invalid_skill_updates_filtered(self, service, sample_messages):
-        """Invalid skill updates in response are filtered out; valid ones kept."""
+        """An entry whose subtopics all fail canonical-list validation is filtered out; valid ones kept."""
+        from app.models.skill import SubtopicMasteryUpdate
+
         skill_updates = [
-            {
-                "topic": "Graphs",
-                "new_level": "intermediate",
-                "gap": 40,
-                "weak_areas": ["recursion"],
-                "strong_areas": ["iteration"],
-            },
-            {
-                "topic": "Invalid",
-                "new_level": "master",  # invalid level
-                "gap": 50,
-                "weak_areas": [],
-                "strong_areas": [],
-            },
+            {"topic": "Graphs", "subtopic_updates": [{"subtopic": "recursion", "mastery": 40}]},
+            {"topic": "Invalid", "subtopic_updates": [{"subtopic": "made up subtopic", "mastery": 50}]},
         ]
         mock_response = self._make_tool_use_response(
             "Learning about graph algorithms.", skill_updates
@@ -372,10 +338,16 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
-                mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages)
+        async def fake_validate(topic, raw):
+            if topic == "Graphs":
+                return [SubtopicMasteryUpdate(subtopic="recursion", mastery=40)]
+            return []  # "Invalid" topic's subtopic never matches the canonical list
+
+        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client), \
+             patch("app.services.compaction_service.get_settings") as mock_settings, \
+             patch("app.services.subtopic_weights.validate_subtopic_updates", side_effect=fake_validate):
+            mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
+            result = await service._call_summarization_llm(sample_messages)
 
         # Only the valid one should remain
         assert result["skill_updates"] is not None

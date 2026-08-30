@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from app.models.chat import MentorRequest
 from app.routers.sessions import SessionUpdate
 
-_VALID_MODES = ["planning", "topic", "doubt", "evaluation"]
+_VALID_MODES = ["topic"]
 _MESSAGES = [{"role": "user", "content": "hi"}]
 
 

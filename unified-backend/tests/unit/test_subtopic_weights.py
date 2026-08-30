@@ -10,6 +10,7 @@ from app.services.subtopic_weights import (
     apply_nudges,
     derive_subtopic_weights,
     pairwise_wins_to_counts,
+    validate_subtopic_updates,
     _count_mentions_llm,
     _normalize,
     _parse_json_object,
@@ -253,7 +254,7 @@ async def test_proficiency_populated_and_clamped_on_goal_intent_path():
     ):
         result = await derive_subtopic_weights(
             topic="SQL", goal="job_performance", subtopics=subtopics,
-            goal_intent="some goal", current_level="intermediate",
+            goal_intent="some goal",
         )
 
     assert result.proficiency == {"a": 70.0, "b": 15.0}
@@ -269,10 +270,35 @@ async def test_score_proficiency_llm_defaults_missing_subtopic_to_zero_and_clamp
         with patch("app.services.subtopic_weights.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
             scores = await _score_proficiency_llm(
-                "some intent", "SQL", ["a", "b", "c"], "beginner"
+                "some intent", "SQL", ["a", "b", "c"]
             )
 
     assert scores == {"a": 100.0, "b": 0.0, "c": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_validate_subtopic_updates_drops_unrecognized_names():
+    with patch(
+        "app.services.subtopic_weights.get_subtopics",
+        AsyncMock(return_value=["Loops", "Recursion"]),
+    ):
+        result = await validate_subtopic_updates(
+            "Python",
+            [{"subtopic": "Loops", "mastery": 80}, {"subtopic": "Made Up", "mastery": 10}],
+        )
+    assert len(result) == 1
+    assert result[0].subtopic == "Loops"
+    assert result[0].mastery == 80
+
+
+@pytest.mark.asyncio
+async def test_validate_subtopic_updates_normalizes_casing():
+    with patch(
+        "app.services.subtopic_weights.get_subtopics",
+        AsyncMock(return_value=["Loops", "Recursion"]),
+    ):
+        result = await validate_subtopic_updates("Python", [{"subtopic": "loops", "mastery": 80}])
+    assert result[0].subtopic == "Loops"
 
 
 if __name__ == "__main__":

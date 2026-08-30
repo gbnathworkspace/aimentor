@@ -18,9 +18,6 @@ _cache: dict[str, str] = {}
 
 # Mode → template filename mapping
 _MODE_TEMPLATES: dict[str, str] = {
-    "planning": "mentor_v1.md",
-    "doubt": "mentor_v1.md",
-    "evaluation": "mentor_v1.md",
     # Routed sub-modes for "topic" turns — selected per-turn by
     # mode_router.route_user_turn() instead of one static "topic" block
     # that used to give contradictory instructions.
@@ -35,33 +32,27 @@ _ONBOARDING_TEMPLATE = "onboarding.md"
 
 # Mode-specific instruction blocks appended to the base mentor template
 _MODE_INSTRUCTIONS: dict[str, str] = {
-    "planning": (
-        "You are in PLANNING mode. Your job is to help the user create a concrete study plan.\n"
-        "- Identify the 1-2 highest priority topics based on the suggested next-best-skill order and time remaining.\n"
-        "- Translate priorities into a concrete weekly study plan with hours and deliverables.\n"
-        "- If the user picks a topic that isn't the highest priority, push back with data.\n"
-        "- Factor in their daily availability — don't overcommit.\n"
-        "- Do NOT start teaching. Planning is the entire goal of this session."
-    ),
     # Routed sub-modes for "topic" turns (see mode_router.py). Each is
     # self-contained — no shared universal "always end with a question"
     # suffix, since that used to defeat DIRECT's whole purpose.
     "diagnostic": (
         "You are running a brief DIAGNOSTIC before teaching this topic.\n"
-        "- Ask 1-2 targeted questions to gauge the student's actual current "
-        "level (beginner/intermediate/advanced/expert). Do NOT teach content "
-        "yet, do NOT give the full picture up front. This holds even if the "
-        "user's profile below says they prefer answer-first explanations — "
-        "that preference shapes how you teach once diagnosis is done, it "
-        "does not skip diagnosis.\n"
+        "- Ask 1-2 targeted questions to gauge the student's actual mastery of "
+        "specific subtopics within this topic. Do NOT teach content yet, do "
+        "NOT give the full picture up front. This holds even if the user's "
+        "profile below says they prefer answer-first explanations — that "
+        "preference shapes how you teach once diagnosis is done, it does not "
+        "skip diagnosis.\n"
         "- If Relevant Past Sessions below show related experience, let it "
         "inform your first question's difficulty, but still verify — don't "
         "skip diagnosis on assumption.\n"
         "- Use the quick-reply option format for questions with discrete "
         "plausible answers.\n"
-        "- Once the user's answer gives you enough signal, call the "
-        "record_diagnostic_verdict tool with your assessment, and tell them "
-        "their level in one line before moving into teaching."
+        "- Once the user's answer gives you enough signal on one or more "
+        "subtopics, call the record_diagnostic_verdict tool with a mastery "
+        "estimate (0-100) for just those subtopics — leave out any subtopic "
+        "you haven't actually tested — and tell them briefly what you found "
+        "before moving into teaching."
     ),
     "direct": (
         "You are in DIRECT mode. The user wants a direct, concise answer — "
@@ -98,27 +89,6 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "- Walk through step 1 only — don't dump the remaining steps at "
         "once.\n"
         "- End with a check that they've got step 1 before continuing."
-    ),
-    "doubt": (
-        "You are in DOUBT mode. The user has a specific doubt or confusion to resolve.\n"
-        "- Let them state the doubt fully before responding.\n"
-        "- Attempt-first: ask what they think or have tried before resolving it. Lead with a "
-        "hint, escalate only if they're still stuck (hint → worked step → answer), and fade "
-        "this ladder as the Current Level rises — advanced students get a direct answer faster.\n"
-        "- Give a clear, precise answer once they've engaged. Don't pad with unrequested background.\n"
-        "- Reference relevant past sessions if applicable.\n"
-        "- After resolving, ask one targeted question to confirm understanding.\n"
-        "- If the doubt reveals a deeper gap, name it and suggest a dedicated session.\n"
-        "- Keep it short and focused. Doubt resolution is the goal, not comprehensive coverage."
-    ),
-    "evaluation": (
-        "You are in EVALUATION mode. Your job is to assess proficiency — not to teach.\n"
-        "- Run a 3-level question sequence: Recall → Application → Depth.\n"
-        "- Ask one question at a time. Wait for the answer before proceeding.\n"
-        "- Do not give hints or rephrase questions if they struggle.\n"
-        "- After each answer, give a brief verdict: Strong / Partial / Weak.\n"
-        "- After all levels, provide a final summary with gaps and strengths.\n"
-        "- Do NOT confirm correct answers mid-evaluation."
     ),
 }
 
@@ -238,6 +208,17 @@ def _format_summary_blocks(blocks: list[dict[str, Any]] | None) -> str:
     return "\n\n".join(b.get("text", "") for b in ordered)
 
 
+def _format_subtopic_mastery(subtopic_mastery: dict[str, float] | None) -> str:
+    """Format the topic's per-subtopic mastery map (see
+    .kiro/specs/skill-graph-subtopic-mastery) — replaces the old single
+    current_level word with a per-subtopic breakdown, sorted weakest first
+    so the mentor sees what needs attention up top."""
+    if not subtopic_mastery:
+        return "(not assessed yet)"
+    ordered = sorted(subtopic_mastery.items(), key=lambda kv: kv[1])
+    return "\n".join(f"- {name}: {mastery:.0f}%" for name, mastery in ordered)
+
+
 def _build_context_variables(
     context: dict[str, Any], mode: str, tone: ToneId
 ) -> dict[str, str]:
@@ -254,7 +235,7 @@ def _build_context_variables(
         "style_notes": _format_style_notes(profile.get("style_notes") or []),
         # L2 Skill fields
         "topic": skill.get("topic", context.get("topic", "General")),
-        "current_level": skill.get("current_level", "Not assessed"),
+        "subtopic_mastery": _format_subtopic_mastery(skill.get("subtopic_mastery")),
         # L3 Episodic memory
         "taught_concepts": _format_taught_concepts(context.get("taught_concepts")),
         "session_summaries": _format_summary_blocks(context.get("summary_blocks")),
@@ -274,9 +255,8 @@ def get_system_prompt(
     """Load and format the system prompt for a given mentor mode.
 
     Args:
-        mode: One of "planning", "doubt", "evaluation", or a routed topic
-            sub-mode from mode_router.py ("diagnostic", "direct", "socratic",
-            "hint", "guided").
+        mode: A routed topic sub-mode from mode_router.py ("diagnostic",
+            "direct", "socratic", "hint", "guided").
         context: Dict with keys "profile", "skill", "summary_blocks" from context_assembler.
         tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.
 

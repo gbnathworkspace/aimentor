@@ -7,7 +7,7 @@ import { ArchivedTopics } from './ArchivedTopics';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
 import { Onboarding, Settings, AdminUsers } from './screens';
-import { DEFAULT_TONE, type ModeId, type ToneId, type Topic } from './data';
+import { DEFAULT_TONE, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'onboarding';
@@ -17,7 +17,6 @@ export function MentorManApp() {
   const t = { density: 'cozy' };
   const [view, setView] = useState<View>('chat');
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
-  const [mode, setMode] = useState<ModeId>('topic');
   const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
   const [profile, setProfile] = useState<CoreProfile | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -100,7 +99,6 @@ export function MentorManApp() {
 
   const startTopic = (_t?: Topic) => {
     setActiveTopic(null);
-    setMode('topic');
     setView('chat');
     setChatKey(k => k + 1);
   };
@@ -167,8 +165,6 @@ export function MentorManApp() {
             <ChatPanel
               key={chatKey}
               topicId={activeTopic}
-              mode={mode}
-              setMode={setMode}
               tone={tone}
               setTone={setTone}
               onNav={(v) => setView(v as View)}

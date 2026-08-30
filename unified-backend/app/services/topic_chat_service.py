@@ -25,12 +25,12 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config.settings import get_settings
-from app.models.session import SessionSkillUpdate
 from app.services import context_assembler, mode_router, skill_graph_repo
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
 from app.services.session_boundary import check_and_close_on_new_message
+from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
 from app.services.vector_search import vector_search
@@ -56,21 +56,29 @@ _WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_us
 _DIAGNOSTIC_VERDICT_TOOL = {
     "name": "record_diagnostic_verdict",
     "description": (
-        "Record the assessed skill level once the user's answer gives enough "
-        "signal to judge it. Do not call this until you're confident — it's "
-        "fine to ask another question first and call it on a later turn."
+        "Record mastery for the specific subtopics the user's answers gave enough "
+        "signal to judge, once you have that signal. Do not call this until you're "
+        "confident on at least one subtopic — it's fine to ask another question "
+        "first and call it on a later turn. Only include subtopics you actually "
+        "assessed this turn; do not guess at the rest."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "new_level": {
-                "type": "string",
-                "enum": ["beginner", "intermediate", "advanced", "expert"],
+            "subtopic_updates": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "subtopic": {"type": "string"},
+                        "mastery": {"type": "number", "minimum": 0, "maximum": 100},
+                    },
+                    "required": ["subtopic", "mastery"],
+                },
             },
-            "weak_areas": {"type": "array", "items": {"type": "string"}},
-            "strong_areas": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["new_level", "weak_areas", "strong_areas"],
+        "required": ["subtopic_updates"],
     },
 }
 
@@ -176,7 +184,7 @@ class TopicChatService:
             topic_id: The topic identifier.
             user_id: The authenticated user's ID.
             content: The user's message text.
-            mode: Chat mode (topic/planning/doubt/evaluation).
+            mode: Chat mode (always "topic").
 
         Returns:
             A dict with an "error" key if the turn is rejected before any
@@ -352,8 +360,8 @@ class TopicChatService:
             yield "\n\n[error: the mentor response was interrupted — please try again]"
             return
 
-        # Diagnostic verdict write-back (Req: flips assessed=True so the
-        # cold-start gate stops firing on the next message).
+        # Diagnostic verdict write-back (Req: populates subtopic_mastery so
+        # the cold-start gate stops firing on the next message).
         if include_diagnostic_tool:
             await self._apply_diagnostic_verdict(final_tool_calls, user_id, topic_title)
 
@@ -453,8 +461,9 @@ class TopicChatService:
             return
 
         try:
-            skill_update = SessionSkillUpdate(topic=topic_title, **verdict["args"])
-            await skill_graph_repo.apply_update(user_id, skill_update)
+            raw_updates = (verdict.get("args") or {}).get("subtopic_updates") or []
+            validated = await validate_subtopic_updates(topic_title, raw_updates)
+            await skill_graph_repo.apply_update(user_id, topic_title, validated)
         except Exception as e:
             logger.warning(
                 "Diagnostic verdict write failed for topic=%s user=%s: %s",

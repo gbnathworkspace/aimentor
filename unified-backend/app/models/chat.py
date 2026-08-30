@@ -6,10 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.session import Message
 
-# The four supported mentor session modes. Constraining the API boundary to this
+# The only supported mentor session mode. Constraining the API boundary to this
 # set turns an unknown/corrupted mode into a 422 at request-validation time,
 # instead of an uncaught ValueError → 500 inside get_system_prompt (issue #6).
-MentorMode = Literal["planning", "topic", "doubt", "evaluation"]
+MentorMode = Literal["topic"]
 
 # Mentor voice. Same boundary contract as MentorMode: an unknown tone is a 422,
 # never a silently-dropped field. Behavioral text for each tone lives in

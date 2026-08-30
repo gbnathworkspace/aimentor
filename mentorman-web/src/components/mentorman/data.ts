@@ -41,15 +41,7 @@ export type Topic = {
   weak: string[];
 };
 
-export type ModeId = 'planning' | 'topic' | 'doubt' | 'evaluation';
 export type DensityId = 'compact' | 'cozy' | 'comfy';
-
-export const MODES: { id: ModeId; label: string; blurb: string }[] = [
-  { id: 'planning',   label: 'Planning',   blurb: 'Map the roadmap to your goal — milestones, sequencing, pace.' },
-  { id: 'topic',      label: 'Topic',      blurb: 'Deep-dive one subject. Warmups, variants, escalating difficulty.' },
-  { id: 'doubt',      label: 'Doubt',      blurb: 'Bring a specific problem. Quick unblock, no long detours.' },
-  { id: 'evaluation', label: 'Evaluation', blurb: 'Get tested. Q → graded verdict → adjusted difficulty → score.' },
-];
 
 // Single source of truth for mentor voice. Behavioral text lives backend-side
 // (prompt_store._TONE_INSTRUCTIONS); the UI only needs ids + labels for the picker.
@@ -61,7 +53,3 @@ export const TONES = [
 ] as const;
 export type ToneId = typeof TONES[number]['id'];
 export const DEFAULT_TONE: ToneId = 'balanced';
-
-export const catToMode: Record<string, ModeId> = {
-  Topic: 'topic', Doubt: 'doubt', Planning: 'planning', Eval: 'evaluation'
-};

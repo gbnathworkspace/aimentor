@@ -1,7 +1,7 @@
 """Pydantic data models for the unified backend."""
 
 from app.models.profile import ProfileCreate, ProfileUpdate, ProfileResponse
-from app.models.skill import SkillNode, SkillUpdate
+from app.models.skill import SkillNode, SkillUpdate, SubtopicMasteryUpdate
 from app.models.session import (
     Message,
     SessionCreate,
@@ -10,7 +10,6 @@ from app.models.session import (
     SessionEndResult,
     SessionSkillUpdate,
     SessionStatus,
-    SkillLevel,
 )
 from app.models.episodic import EpisodicEntry, SearchQuery
 from app.models.ingestion import IngestionJobResponse
@@ -30,6 +29,7 @@ __all__ = [
     # Skill
     "SkillNode",
     "SkillUpdate",
+    "SubtopicMasteryUpdate",
     # Session
     "Message",
     "SessionCreate",
@@ -38,7 +38,6 @@ __all__ = [
     "SessionEndResult",
     "SessionSkillUpdate",
     "SessionStatus",
-    "SkillLevel",
     # Episodic
     "EpisodicEntry",
     "SearchQuery",

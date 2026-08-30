@@ -202,7 +202,7 @@ class TestHandleMessageHappyPath:
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message(
-                "topic-abc", "user-123", "What is DFS?", mode="doubt"
+                "topic-abc", "user-123", "What is DFS?", mode="topic"
             )
             await _collect_stream(result)
 
@@ -210,7 +210,7 @@ class TestHandleMessageHappyPath:
             "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
             l1_scope=None, taught_concepts=None, summary_blocks=None,
         )
-        mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
+        mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -238,7 +238,7 @@ class TestHandleMessageHappyPath:
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message(
-                "topic-abc", "user-123", "What is DFS?", mode="doubt"
+                "topic-abc", "user-123", "What is DFS?", mode="topic"
             )
             await _collect_stream(result)
 
@@ -673,18 +673,18 @@ class TestDiagnosticRouting:
 
         verdict_call = _tool_call(
             "record_diagnostic_verdict",
-            {
-                "new_level": "beginner",
-                "gap": 40,
-                "weak_areas": ["loops"],
-                "strong_areas": [],
-            },
+            {"subtopic_updates": [{"subtopic": "Loops", "mastery": 15}]},
         )
+
+        from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Got it — you're a beginner.", [verdict_call])]]),
-        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
+            "app.services.topic_chat_service.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
+        ):
             mock_repo.apply_update = AsyncMock()
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "no I've never coded", mode="topic"
@@ -692,11 +692,11 @@ class TestDiagnosticRouting:
             await _collect_stream(result)
 
         mock_repo.apply_update.assert_called_once()
-        called_user_id, skill_update = mock_repo.apply_update.call_args[0]
+        called_user_id, called_topic, subtopic_updates = mock_repo.apply_update.call_args[0]
         assert called_user_id == "user-123"
-        assert skill_update.topic == "Test Topic"
-        assert skill_update.new_level.value == "beginner"
-        assert skill_update.weak_areas == ["loops"]
+        assert called_topic == "Test Topic"
+        assert subtopic_updates[0].subtopic == "Loops"
+        assert subtopic_updates[0].mastery == 15
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -728,7 +728,7 @@ class TestDiagnosticRouting:
         self, mock_get_prompt, mock_assembler, chat_service
     ):
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {"assessed": True, "current_level": "intermediate"},
+            "profile": {}, "skill": {"subtopic_mastery": {"Arrays": 55}},
             "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "direct prompt"
@@ -760,33 +760,6 @@ class TestDiagnosticRouting:
         bound_tools = mock_cls.return_value.bind_tools.call_args[0][0]
         assert all(t["name"] != "record_diagnostic_verdict" for t in bound_tools)
 
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_doubt_mode_skips_router_entirely(
-        self, mock_get_prompt, mock_assembler, chat_service
-    ):
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
-        })
-        mock_get_prompt.return_value = "doubt prompt"
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([[_chunk("Answer")]]),
-        ), patch(
-            "app.services.topic_chat_service.mode_router.route_user_turn",
-            new_callable=AsyncMock,
-        ) as mock_route:
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "What is DFS?", mode="doubt"
-            )
-            await _collect_stream(result)
-
-        mock_route.assert_not_called()
-        mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
-
-
 class TestToolLoop:
     """The mentor can call search_documents/search_other_topics mid-turn,
     see the result, and answer in a second round."""
@@ -806,14 +779,19 @@ class TestToolLoop:
 
         verdict_call = _tool_call(
             "record_diagnostic_verdict",
-            {"new_level": "beginner", "gap": 40, "weak_areas": [], "strong_areas": []},
+            {"subtopic_updates": [{"subtopic": "Loops", "mastery": 15}]},
         )
         round0 = [_chunk("Got it.", [verdict_call])]
+
+        from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([round0]),
-        ) as mock_cls, patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        ) as mock_cls, patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
+            "app.services.topic_chat_service.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
+        ):
             mock_repo.apply_update = AsyncMock()
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "no I've never coded", mode="topic"

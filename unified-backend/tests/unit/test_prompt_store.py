@@ -47,7 +47,7 @@ class TestGetSystemPrompt:
             "skill": {},
             "episodes": [],
         }
-        result = get_system_prompt("planning", context)
+        result = get_system_prompt("socratic", context)
         assert "Crack FAANG" in result
         assert "System Design" in result
         assert "DSA" in result
@@ -67,7 +67,7 @@ class TestGetSystemPrompt:
             "skill": {},
             "episodes": [],
         }
-        result = get_system_prompt("planning", context)
+        result = get_system_prompt("socratic", context)
         assert "leading the backend rewrite" in result
         # `label` duplicates situations[0] — injected once, not twice
         assert result.count("interviewing for staff roles") == 1
@@ -77,18 +77,12 @@ class TestGetSystemPrompt:
             "profile": {},
             "skill": {
                 "topic": "System Design",
-                "current_level": "intermediate",
+                "subtopic_mastery": {"CAP theorem": 55},
             },
         }
         result = get_system_prompt("socratic", context)
         assert "System Design" in result
-        assert "intermediate" in result
-
-    def test_includes_mode_instructions_planning(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("planning", context)
-        assert "PLANNING mode" in result
-        assert "study plan" in result
+        assert "CAP theorem: 55%" in result
 
     def test_includes_mode_instructions_socratic(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
@@ -118,18 +112,6 @@ class TestGetSystemPrompt:
         result = get_system_prompt("guided", context)
         assert "GUIDED mode" in result
         assert "step 1" in result.lower()
-
-    def test_includes_mode_instructions_doubt(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("doubt", context)
-        assert "DOUBT mode" in result
-        assert "doubt" in result.lower()
-
-    def test_includes_mode_instructions_evaluation(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("evaluation", context)
-        assert "EVALUATION mode" in result
-        assert "assess" in result.lower()
 
     def test_raises_for_unknown_mode(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
@@ -315,21 +297,6 @@ class TestAttemptFirstTeaching:
             result = get_system_prompt(mode, context)
             assert "Current Level" in result, mode
         assert "leading question" in get_system_prompt("socratic", context).lower()
-
-    def test_doubt_mode_still_has_hint_ladder(self):
-        """doubt mode's own instructions (untouched by the routing change)
-        still carry the fading hint ladder."""
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("doubt", context)
-        assert "ladder" in result.lower()
-        assert "Current Level" in result
-
-    def test_evaluation_stays_hint_free(self):
-        # Evaluation must NOT gain a hint ladder — it withholds hints by design.
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("evaluation", context)
-        assert "Do not give hints" in result
-
 
 class TestUploadedDocuments:
     """Issue #4: ingested file chunks must reach the mentor prompt."""

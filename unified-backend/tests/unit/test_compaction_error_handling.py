@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.models.skill import SubtopicMasteryUpdate
 from app.services.compaction_service import (
     MAX_CONSECUTIVE_FAILURES,
     MAX_SKILL_UPDATE_RETRIES,
@@ -267,13 +268,10 @@ class TestSkillGraphRetry:
         svc = CompactionService(token_counter=tc)
 
         skill_updates = [
-            {"topic": "BFS", "new_level": "intermediate", "gap": 40, "weak_areas": [], "strong_areas": []}
+            {"topic": "BFS", "subtopic_updates": [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]}
         ]
 
-        with patch("app.services.skill_graph_repo.apply_update", new_callable=AsyncMock) as mock_apply, \
-             patch("app.models.session.SessionSkillUpdate") as mock_ssu:
-
-            mock_ssu.return_value = MagicMock()
+        with patch("app.services.skill_graph_repo.apply_update", new_callable=AsyncMock) as mock_apply:
             mock_apply.side_effect = [RuntimeError("Temporary DB error"), None]
 
             await svc._apply_skill_updates("user-1", skill_updates)
@@ -288,13 +286,10 @@ class TestSkillGraphRetry:
         svc = CompactionService(token_counter=tc)
 
         skill_updates = [
-            {"topic": "BFS", "new_level": "intermediate", "gap": 40, "weak_areas": [], "strong_areas": []}
+            {"topic": "BFS", "subtopic_updates": [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]}
         ]
 
-        with patch("app.services.skill_graph_repo.apply_update", new_callable=AsyncMock) as mock_apply, \
-             patch("app.models.session.SessionSkillUpdate") as mock_ssu:
-
-            mock_ssu.return_value = MagicMock()
+        with patch("app.services.skill_graph_repo.apply_update", new_callable=AsyncMock) as mock_apply:
             mock_apply.side_effect = RuntimeError("Persistent DB error")
 
             # Should NOT raise — failure is handled internally
@@ -314,7 +309,7 @@ class TestSkillGraphRetry:
         topic_doc = _build_topic_doc(messages)
 
         skill_updates = [
-            {"topic": "BFS", "new_level": "intermediate", "gap": 40, "weak_areas": [], "strong_areas": []}
+            {"topic": "BFS", "subtopic_updates": [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]}
         ]
 
         svc._call_summarization_llm = AsyncMock(return_value={
@@ -324,14 +319,12 @@ class TestSkillGraphRetry:
 
         with patch("app.services.compaction_service.topics_col") as mock_topics, \
              patch("app.services.compaction_service.compaction_events_col") as mock_events, \
-             patch("app.models.session.SessionSkillUpdate") as mock_ssu, \
              patch("app.services.skill_graph_repo.apply_update") as mock_apply:
 
             mock_col, mock_events_col = _setup_mocks_for_compaction(topic_doc)
             mock_topics.return_value = mock_col
             mock_events.return_value = mock_events_col
 
-            mock_ssu.return_value = MagicMock()
             mock_apply.side_effect = RuntimeError("Persistent DB error")
 
             result = await svc.compact("topic-1", "user-1")

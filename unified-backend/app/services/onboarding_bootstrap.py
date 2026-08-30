@@ -199,23 +199,15 @@ async def bootstrap_skills(
         logger.warning(f"No topics derived for user '{user_id}' (no focus areas or context label)")
         return []
 
-    # ponytail: L1 no longer carries a self-reported overall_level (dropped per
-    # the L1 schema redesign) — seed every topic at "beginner" and let the
-    # evidence-based evaluation loop (issue #50) correct it from there.
-    current_level = "beginner"
-
     # Build skill nodes and upsert into DB
     skill_nodes = []
-    for i, topic in enumerate(topics):
+    for topic in topics:
         node = {
             "user_id": user_id,
             "topic": topic,
-            "current_level": current_level,
-            # Hand-seeded linear chain from the curated topic order (issue #10).
-            "prerequisites": [topics[i - 1]] if i > 0 else [],
-            # current_level above is a guess, not a measurement — gate the
-            # cold-start diagnostic mode until a real assessment lands.
-            "assessed": False,
+            # Empty until a real diagnostic verdict or compaction extraction
+            # lands — empty is itself the cold-start gate (issue #50).
+            "subtopic_mastery": {},
         }
 
         # Upsert into skill_graph collection

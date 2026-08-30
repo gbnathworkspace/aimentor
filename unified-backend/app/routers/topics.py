@@ -18,7 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.auth.dependencies import require_auth
-from app.config.database import weight_nudges_col, skill_graph_col
+from app.config.database import weight_nudges_col
+from app.models.chat import MentorMode
 from app.services.extraction import process_topic_document
 from app.services.file_upload import store_file, validate_files
 from app.services.vector_search import delete_topic_document, list_topic_documents
@@ -60,7 +61,7 @@ class SendMessageRequest(BaseModel):
     """Request body for sending a message within a topic."""
 
     content: str = Field(..., min_length=1, max_length=50000)
-    mode: str = Field(default="topic")
+    mode: MentorMode = Field(default="topic")
 
 
 class ResolveL1ScopeRequest(BaseModel):
@@ -334,16 +335,6 @@ async def get_subtopic_weights(
     topic = await _topic_service.get_topic(topic_id, user_id)
     subtopics = await get_subtopics(topic["title"])
 
-    # L2 skill graph node for this topic (if any) anchors the proficiency
-    # estimate — a "beginner" overall level keeps per-subtopic mastery
-    # scores from drifting high just because the stated intent sounds
-    # confident. Default matches SkillNode's own onboarding default.
-    skill_node = await skill_graph_col().find_one(
-        {"user_id": user_id, "topic": topic["title"]},
-        {"current_level": 1, "_id": 0},
-    )
-    current_level = (skill_node or {}).get("current_level", "beginner")
-
     try:
         result = await derive_subtopic_weights(
             topic=topic["title"],
@@ -353,7 +344,6 @@ async def get_subtopic_weights(
             goal_intent=body.goal_intent,
             pairwise_comparisons=body.pairwise_comparisons,
             user_nudges=body.user_nudges,
-            current_level=current_level,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

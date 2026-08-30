@@ -39,12 +39,12 @@ class TestRule1ColdStart:
         mock_client_cls.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_assessed_false_short_circuits_to_diagnostic(self):
-        """Skill node exists but assessed=False (onboarding placeholder guess)."""
+    async def test_empty_mastery_map_short_circuits_to_diagnostic(self):
+        """Skill node exists but subtopic_mastery is empty (never diagnosed)."""
         with patch("app.services.mode_router.anthropic.AsyncAnthropic") as mock_client_cls:
             decision = await route_user_turn(
                 query="teach me JS",
-                skill={"current_level": "beginner", "assessed": False},
+                skill={"subtopic_mastery": {}},
                 recent_messages=[],
             )
 
@@ -55,7 +55,7 @@ class TestRule1ColdStart:
 class TestRoutedRules:
     @pytest.mark.asyncio
     async def test_assessed_skill_calls_haiku_and_parses_decision(self):
-        """Once assessed=True, Rule 1 doesn't fire — a real router call happens."""
+        """Once subtopic_mastery is non-empty, Rule 1 doesn't fire — a real router call happens."""
         fake_client = MagicMock()
         fake_client.messages.create = AsyncMock(
             return_value=_tool_use_response(
@@ -69,7 +69,7 @@ class TestRoutedRules:
         with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="syntax for array push in JS",
-                skill={"current_level": "intermediate", "assessed": True},
+                skill={"subtopic_mastery": {"Arrays": 55}},
                 recent_messages=[],
             )
 
@@ -98,7 +98,7 @@ class TestFailureFallback:
         with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="anything",
-                skill={"assessed": True},
+                skill={"subtopic_mastery": {"x": 1}},
                 recent_messages=[],
             )
 
@@ -112,7 +112,7 @@ class TestFailureFallback:
 
         with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
-                query="anything", skill={"assessed": True}, recent_messages=[]
+                query="anything", skill={"subtopic_mastery": {"x": 1}}, recent_messages=[]
             )
 
         assert decision.selected_mode == MentorMode.SOCRATIC
@@ -127,7 +127,7 @@ class TestFailureFallback:
 
         with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
-                query="anything", skill={"assessed": True}, recent_messages=[]
+                query="anything", skill={"subtopic_mastery": {"x": 1}}, recent_messages=[]
             )
 
         assert decision.selected_mode == MentorMode.SOCRATIC
@@ -146,7 +146,7 @@ class TestFailureFallback:
 
         with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
-                query="anything", skill={"assessed": True}, recent_messages=[]
+                query="anything", skill={"subtopic_mastery": {"x": 1}}, recent_messages=[]
             )
 
         assert decision.selected_mode == MentorMode.SOCRATIC

@@ -42,8 +42,7 @@ export interface CoreProfile {
 
 export interface SkillNode {
   topic: string;
-  current_level: string;
-  signals?: Record<string, any>;
+  subtopic_mastery?: Record<string, number>;
   [key: string]: any;
 }
 

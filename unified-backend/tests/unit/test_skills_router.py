@@ -57,8 +57,8 @@ class TestListSkills:
     @pytest.mark.asyncio
     async def test_returns_all_skills(self, auth_headers, mock_skill_col):
         skills_data = [
-            {"topic": "python", "current_level": "intermediate"},
-            {"topic": "fastapi", "current_level": "beginner"},
+            {"topic": "python", "subtopic_mastery": {"loops": 60}},
+            {"topic": "fastapi", "subtopic_mastery": {}},
         ]
         cursor_mock = MagicMock()
         cursor_mock.to_list = AsyncMock(return_value=skills_data)
@@ -77,7 +77,7 @@ class TestListSkills:
         assert data[0]["topic"] == "python"
         assert data[1]["topic"] == "fastapi"
         # Verify camelCase field names in response
-        assert "currentLevel" in data[0]
+        assert "subtopicMastery" in data[0]
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_skills(self, auth_headers, mock_skill_col):
@@ -101,7 +101,7 @@ class TestGetSkill:
 
     @pytest.mark.asyncio
     async def test_returns_skill_by_topic(self, auth_headers, mock_skill_col):
-        skill_doc = {"topic": "python", "current_level": "intermediate"}
+        skill_doc = {"topic": "python", "subtopic_mastery": {"loops": 60}}
         mock_skill_col.find_one = AsyncMock(return_value=skill_doc)
 
         with patch("app.routers.skills.skill_graph_col", return_value=mock_skill_col):
@@ -114,7 +114,7 @@ class TestGetSkill:
         assert resp.status_code == 200
         assert resp.json()["topic"] == "python"
         # Verify camelCase field names in response
-        assert "currentLevel" in resp.json()
+        assert "subtopicMastery" in resp.json()
 
     @pytest.mark.asyncio
     async def test_returns_404_for_missing_topic(self, auth_headers, mock_skill_col):
@@ -146,13 +146,13 @@ class TestUpsertSkill:
                 resp = await client.post(
                     "/api/skills",
                     headers=auth_headers,
-                    json={"topic": "python", "currentLevel": "beginner"},
+                    json={"topic": "python", "subtopicMastery": {"loops": 20}},
                 )
 
         assert resp.status_code == 201
         data = resp.json()
         assert data["topic"] == "python"
-        assert data["currentLevel"] == "beginner"
+        assert data["subtopicMastery"] == {"loops": 20}
         mock_skill_col.update_one.assert_called_once()
 
 
@@ -161,7 +161,7 @@ class TestUpdateSkill:
 
     @pytest.mark.asyncio
     async def test_update_returns_updated_skill(self, auth_headers, mock_skill_col):
-        updated_doc = {"topic": "python", "current_level": "advanced"}
+        updated_doc = {"topic": "python", "subtopic_mastery": {"loops": 80}}
         mock_skill_col.find_one_and_update = AsyncMock(return_value=updated_doc)
 
         with patch("app.routers.skills.skill_graph_col", return_value=mock_skill_col):
@@ -172,11 +172,11 @@ class TestUpdateSkill:
                 resp = await client.put(
                     "/api/skills/python",
                     headers=auth_headers,
-                    json={"currentLevel": "advanced"},
+                    json={"subtopicMastery": {"loops": 80}},
                 )
 
         assert resp.status_code == 200
-        assert resp.json()["currentLevel"] == "advanced"
+        assert resp.json()["subtopicMastery"] == {"loops": 80}
 
     @pytest.mark.asyncio
     async def test_update_returns_404_for_missing_topic(self, auth_headers, mock_skill_col):
@@ -190,7 +190,7 @@ class TestUpdateSkill:
                 resp = await client.put(
                     "/api/skills/nonexistent",
                     headers=auth_headers,
-                    json={"currentLevel": "advanced"},
+                    json={"subtopicMastery": {"loops": 80}},
                 )
 
         assert resp.status_code == 404

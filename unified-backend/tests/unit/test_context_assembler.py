@@ -1,11 +1,11 @@
 """Unit tests for app/services/context_assembler.py — context assembly logic."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
-from app.services.context_assembler import assemble
+from app.services.context_assembler import _fetch_documents, assemble
 
 
 class TestAssemble:
@@ -92,3 +92,47 @@ class TestAssemble:
             result = await assemble("u1", "topic", "query")
 
         assert result["skill"] == {}
+
+
+class TestFetchDocuments:
+    """Topic-scoped documents take priority; the rest of the budget is
+    filled with the user's user-wide ingested chunks."""
+
+    @pytest.mark.asyncio
+    async def test_no_topic_id_returns_only_general_documents(self):
+        general = [{"text": "resume chunk"}]
+        with patch("app.services.context_assembler.embeddings_col") as mock_col:
+            mock_col.return_value.find.return_value.limit.return_value.to_list = AsyncMock(
+                return_value=general
+            )
+            result = await _fetch_documents("u1", topic_id=None, limit=12)
+
+        assert result == general
+
+    @pytest.mark.asyncio
+    async def test_topic_documents_come_first_and_cap_the_remaining_budget(self):
+        topic_docs = [{"text": "topic note"}]
+        general = [{"text": "resume chunk"}]
+
+        with patch("app.services.context_assembler.embeddings_col") as mock_col:
+            def find_side_effect(filter_clause, *_a, **_kw):
+                cursor = MagicMock()
+                if filter_clause.get("metadata.source") == "topic_document":
+                    cursor.to_list = AsyncMock(return_value=topic_docs)
+                else:
+                    cursor.limit.return_value.to_list = AsyncMock(return_value=general)
+                return cursor
+
+            mock_col.return_value.find.side_effect = find_side_effect
+
+            result = await _fetch_documents("u1", topic_id="topic-abc", limit=12)
+
+        assert result == topic_docs + general
+
+    @pytest.mark.asyncio
+    async def test_fetch_failure_returns_empty_list(self):
+        with patch("app.services.context_assembler.embeddings_col") as mock_col:
+            mock_col.return_value.find.side_effect = Exception("DB down")
+            result = await _fetch_documents("u1", topic_id="topic-abc")
+
+        assert result == []

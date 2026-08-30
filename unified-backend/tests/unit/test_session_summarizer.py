@@ -63,7 +63,8 @@ class TestCloseSession:
                  new=AsyncMock(return_value={"summary": "did stuff", "skill_updates": None, "taught_concepts": []}),
              ), \
              patch.object(ss._compaction_service, "_apply_skill_updates", new=AsyncMock()) as mock_skills, \
-             patch.object(ss._compaction_service, "_apply_taught_concepts", new=AsyncMock()) as mock_concepts:
+             patch.object(ss._compaction_service, "_apply_taught_concepts", new=AsyncMock()) as mock_concepts, \
+             patch.object(ss, "_sync_block_embeddings", new=AsyncMock()):
             mock_col = MagicMock()
             mock_col.find_one = AsyncMock(return_value=topic_doc)
             mock_col.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
@@ -209,3 +210,58 @@ class TestNoDoubleSummarization:
         all_ids = [mid for b in result for mid in b["sourceSessionIds"]]
         assert len(all_ids) == len(set(all_ids))
         assert len(all_ids) == total_ids_before
+
+
+class TestSyncBlockEmbeddings:
+    """_sync_block_embeddings diffs old vs. new blocks by blockId: embeds
+    only genuinely new/merged blocks, deletes vectors for blocks that got
+    merged away, and never re-embeds an unchanged block."""
+
+    @pytest.mark.asyncio
+    async def test_embeds_only_new_blocks(self):
+        ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        unchanged = _block("b1", ["m1"], 50, ts)
+        fresh = _block("b2", ["m2"], 50, ts)
+
+        with (
+            patch.object(ss, "embed_and_upsert", new=AsyncMock()) as mock_embed,
+            patch.object(ss, "delete_vectors", new=AsyncMock()) as mock_delete,
+        ):
+            await ss._sync_block_embeddings("t1", "u1", [unchanged], [unchanged, fresh])
+
+        mock_embed.assert_called_once()
+        assert mock_embed.call_args.kwargs["vector_id"] == "b2"
+        assert mock_embed.call_args.kwargs["source"] == "summary_block"
+        mock_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deletes_merged_away_blocks(self):
+        ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        a = _block("b1", ["m1"], 300, ts)
+        b = _block("b2", ["m2"], 300, ts)
+        merged = _block("b3", ["m1", "m2"], 400, ts)
+
+        with (
+            patch.object(ss, "embed_and_upsert", new=AsyncMock()) as mock_embed,
+            patch.object(ss, "delete_vectors", new=AsyncMock()) as mock_delete,
+        ):
+            await ss._sync_block_embeddings("t1", "u1", [a, b], [merged])
+
+        mock_delete.assert_called_once()
+        assert set(mock_delete.call_args.args[0]) == {"b1", "b2"}
+        mock_embed.assert_called_once()
+        assert mock_embed.call_args.kwargs["vector_id"] == "b3"
+
+    @pytest.mark.asyncio
+    async def test_noop_when_nothing_changed(self):
+        ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        block = _block("b1", ["m1"], 50, ts)
+
+        with (
+            patch.object(ss, "embed_and_upsert", new=AsyncMock()) as mock_embed,
+            patch.object(ss, "delete_vectors", new=AsyncMock()) as mock_delete,
+        ):
+            await ss._sync_block_embeddings("t1", "u1", [block], [block])
+
+        mock_embed.assert_not_called()
+        mock_delete.assert_not_called()

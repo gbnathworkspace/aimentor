@@ -24,7 +24,7 @@ EVAL_CASES = [
     },
     {
         "query": "let's start on React hooks",
-        "skill": {"assessed": False},
+        "skill": {"subtopic_mastery": {}},
         "recent_messages": [],
         "expected_mode": "DIAGNOSTIC",
         "category": "rule1_cold_start",
@@ -33,28 +33,28 @@ EVAL_CASES = [
     # --- rule2_urgency_direct: explicit direct-answer or factual lookup ---
     {
         "query": "just tell me the answer, what's the time complexity of quicksort worst case?",
-        "skill": {"current_level": "intermediate", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "DIRECT",
         "category": "rule2_urgency_direct",
     },
     {
         "query": "what port does HTTPS use?",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "DIRECT",
         "category": "rule2_urgency_direct",
     },
     {
         "query": "syntax for pushing to an array in JS",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "DIRECT",
         "category": "rule2_urgency_direct",
     },
     {
         "query": "no rush but can you just give me the exact npm command to install React Router",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "DIRECT",
         "category": "rule2_urgency_direct",
@@ -63,7 +63,7 @@ EVAL_CASES = [
     # --- rule3_high_frustration: repeated failed attempts or explicit frustration ---
     {
         "query": "still getting the same TypeError, I've tried three different fixes and nothing works",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [
             {"type": "message", "role": "user", "content": "I tried adding a null check but it still throws"},
             {"type": "message", "role": "mentor", "content": "Try guarding the array access before the map call."},
@@ -75,14 +75,14 @@ EVAL_CASES = [
     },
     {
         "query": "I'm completely lost, I don't even know where to start with this whole authentication flow",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "GUIDED",
         "category": "rule3_high_frustration",
     },
     {
         "query": "nothing I try fixes this recursion bug, I've been stuck for an hour",
-        "skill": {"current_level": "intermediate", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [
             {"type": "message", "role": "user", "content": "my recursive function isn't terminating"},
             {"type": "message", "role": "mentor", "content": "Check your base case."},
@@ -103,21 +103,21 @@ EVAL_CASES = [
             "    curr.next = prev\n"
             "    return curr"
         ),
-        "skill": {"current_level": "intermediate", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "HINT",
         "category": "rule4_single_error_hint",
     },
     {
         "query": "I used useEffect with an empty dependency array but my state still isn't updating on prop changes, here's my component: useEffect(() => { setValue(props.value) }, [])",
-        "skill": {"current_level": "intermediate", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "HINT",
         "category": "rule4_single_error_hint",
     },
     {
         "query": "my SQL query returns duplicate rows, I think it's my JOIN but not sure why: SELECT * FROM orders o JOIN order_items oi ON o.id = oi.order_id",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "HINT",
         "category": "rule4_single_error_hint",
@@ -126,21 +126,21 @@ EVAL_CASES = [
     # --- rule5_zero_attempt_socratic: broad conceptual ask, no attempt yet ---
     {
         "query": "what is a hash map and how does it actually work under the hood?",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "SOCRATIC",
         "category": "rule5_zero_attempt_socratic",
     },
     {
         "query": "how would you approach designing a URL shortener?",
-        "skill": {"current_level": "intermediate", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "SOCRATIC",
         "category": "rule5_zero_attempt_socratic",
     },
     {
         "query": "can you explain how garbage collection works in the JVM?",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "SOCRATIC",
         "category": "rule5_zero_attempt_socratic",
@@ -149,14 +149,14 @@ EVAL_CASES = [
     # --- urgency_casualness_confound: casual tone shouldn't override the actual rule ---
     {
         "query": "hey no rush at all, just wondering — what's the exact syntax for a JS array push again?",
-        "skill": {"current_level": "beginner", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [],
         "expected_mode": "DIRECT",
         "category": "urgency_casualness_confound",
     },
     {
         "query": "whenever you get a chance, urgent-ish — I have 2 failed deploys in a row and nothing I change fixes the build error",
-        "skill": {"current_level": "intermediate", "assessed": True},
+        "skill": {"subtopic_mastery": {"General": 50}},
         "recent_messages": [
             {"type": "message", "role": "user", "content": "build fails with a module resolution error"},
             {"type": "message", "role": "mentor", "content": "Try clearing node_modules and reinstalling."},

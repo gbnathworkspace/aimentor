@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify';
 import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
 import { SpeakButton } from './SpeakButton';
-import { MODES, type Session } from './data';
+import { type Session } from './data';
 import { truncateFilename, formatFileSize } from '@/lib/chat-upload/utils';
 import type { CoreProfile, SessionRecord } from '@/lib/mentorman-api';
 

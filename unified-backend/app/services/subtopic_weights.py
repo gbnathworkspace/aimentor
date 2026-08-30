@@ -2,7 +2,9 @@
 topic's subtopics from real evidence (the user's own commits/tickets/PR
 comments), instead of guessing or weighting everything equally.
 
-See .kiro/specs/skill-graph-v2/design.md for the taxonomy this feeds into.
+Also home to validate_subtopic_updates(), the shared guard that keeps
+diagnostic-verdict / compaction skill extractions from writing near-duplicate
+subtopic names into the skill graph (see .kiro/specs/skill-graph-subtopic-mastery).
 """
 
 import json
@@ -15,6 +17,7 @@ import anthropic
 
 from app.config.database import subtopic_lists_col
 from app.config.settings import get_settings
+from app.models.skill import SubtopicMasteryUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +55,8 @@ class WeightResult:
     # pairwise ranking from the user and re-call with pairwise_comparisons.
     needs_pairwise: bool = False
     # 0-100 estimated mastery per subtopic (see _score_proficiency_llm) — only
-    # populated on the goal_intent path, where there's a current_level to
-    # anchor the estimate on. None elsewhere, not a fabricated equal split.
+    # populated on the goal_intent path. None elsewhere, not a fabricated
+    # equal split.
     proficiency: dict[str, float] | None = None
 
 
@@ -76,6 +79,41 @@ async def get_subtopics(topic: str) -> list[str]:
         upsert=True,
     )
     return subtopics
+
+
+async def validate_subtopic_updates(
+    topic: str, raw_updates: list[dict]
+) -> list[SubtopicMasteryUpdate]:
+    """Filter+normalize LLM-proposed (subtopic, mastery) pairs against the
+    topic's canonical subtopic list, so near-duplicate names (e.g.
+    "Closures" vs "Closure") never fragment the mastery map.
+
+    A pair whose subtopic doesn't case-insensitively match an entry in
+    get_subtopics(topic) is dropped; a surviving pair's subtopic is
+    rewritten to the canonical spelling before being returned.
+    """
+    canonical = await get_subtopics(topic)
+    by_lower = {s.lower(): s for s in canonical}
+
+    validated: list[SubtopicMasteryUpdate] = []
+    for raw in raw_updates:
+        name = raw.get("subtopic")
+        mastery = raw.get("mastery")
+        if not isinstance(name, str):
+            continue
+        canonical_name = by_lower.get(name.strip().lower())
+        if canonical_name is None:
+            logger.info(
+                "Dropping unrecognized subtopic %r for topic=%s (not in canonical list)",
+                name, topic,
+            )
+            continue
+        try:
+            validated.append(SubtopicMasteryUpdate(subtopic=canonical_name, mastery=mastery))
+        except ValueError:
+            continue
+
+    return validated
 
 
 async def _decompose_via_llm(topic: str) -> list[str]:
@@ -197,13 +235,10 @@ async def _score_relevance_llm(intent: str, topic: str, subtopics: list[str]) ->
 
 
 async def _score_proficiency_llm(
-    intent: str, topic: str, subtopics: list[str], current_level: str,
+    intent: str, topic: str, subtopics: list[str],
 ) -> dict[str, float]:
     """Estimate 0-100% mastery per subtopic — an LLM inference from the
-    learner's stated intent plus their L2 skill-graph level for the whole
-    topic, not a real diagnostic (no test was taken). Anchoring on
-    current_level keeps a "beginner" learner from being scored as broadly
-    proficient just because their stated intent sounds confident.
+    learner's stated intent, not a real diagnostic (no test was taken).
     """
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -215,16 +250,13 @@ async def _score_proficiency_llm(
         messages=[{
             "role": "user",
             "content": (
-                f"A learner studying {topic!r} is rated overall as {current_level!r} "
-                f"level. They state this "
+                f"A learner studying {topic!r} states this "
                 f'goal/context:\n"""\n{intent[:EVIDENCE_CHAR_LIMIT]}\n"""\n\n'
                 f"Subtopics of {topic!r}:\n{subtopic_list}\n\n"
                 "Estimate how caught up the learner likely already is on each subtopic, "
                 "0-100%: 0 = no exposure yet, 50 = functional but shaky, 100 = fully "
-                "confident. Use the overall level as your anchor (a 'beginner' learner "
-                "should rarely score above ~40 on any subtopic; an 'expert' rarely below "
-                "~60), then adjust per subtopic based on what the stated goal/context "
-                "implies they already know or have worked with. This is an estimate, not "
+                "confident. Base this only on what the stated goal/context implies they "
+                "already know or have worked with. This is an estimate, not "
                 "a measured score — say so only via the numbers, no hedging text. "
                 "Return ONLY a JSON object mapping each subtopic name (exactly as given) "
                 'to a number 0-100, no explanation. Example: {"Subtopic 1": 65, "Subtopic 2": 10}'
@@ -304,7 +336,6 @@ async def derive_subtopic_weights(
     goal_intent: str | None = None,
     pairwise_comparisons: list[tuple[str, str]] | None = None,
     user_nudges: dict[str, float] | None = None,
-    current_level: str = "beginner",
 ) -> WeightResult:
     """Weight each subtopic by how prominently it shows up in evidence for
     `goal`, then apply any bounded user nudges on top.
@@ -315,9 +346,6 @@ async def derive_subtopic_weights(
     Pass `goal_intent` (a stated goal, not a body of evidence) to score
     subtopics by relevance instead of counting mentions — see
     _score_relevance_llm for why intent can't go through the counting path.
-    `current_level` (from the L2 skill graph) anchors the proficiency
-    estimate computed alongside it on this path only — see
-    _score_proficiency_llm.
     """
     proficiency: dict[str, float] | None = None
     if pairwise_comparisons is not None:
@@ -329,9 +357,7 @@ async def derive_subtopic_weights(
         # Smoothed like the counting path: a 0 here means "not relevant to this
         # goal", not "never study this" — keep a floor so nothing hits 0%.
         baseline = _normalize({s: v + SMOOTHING for s, v in scores.items()})
-        proficiency = await _score_proficiency_llm(
-            goal_intent, topic, subtopics, current_level
-        )
+        proficiency = await _score_proficiency_llm(goal_intent, topic, subtopics)
     else:
         evidence = await _gather_evidence(work_evidence)
         counts = await _count_mentions_llm(evidence, subtopics)

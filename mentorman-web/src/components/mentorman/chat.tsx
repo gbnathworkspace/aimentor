@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing } from './ui';
-import { MODES, TONES, type MessageItem, type ModeId, type ToneId, type Topic } from './data';
+import { TONES, type MessageItem, type ToneId, type Topic } from './data';
 import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
@@ -11,9 +11,7 @@ import { SubtopicWeightsModal, buildGoalCards } from './SubtopicWeightsModal';
 import { UncertainRelevanceModal, type UncertainL1ScopeItem } from './UncertainRelevanceModal';
 import { L1MemoryModal } from './L1MemoryModal';
 import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
-import { AttachmentPreview } from './chat/AttachmentPreview';
-import { AttachButton } from './chat/AttachButton';
-import { useAttachedFiles } from '@/lib/chat-upload/useAttachedFiles';
+import { TopicContextPanel } from './TopicContextPanel';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
 // Must match _META_MARKER in unified-backend/app/services/topic_chat_service.py
@@ -28,25 +26,7 @@ export interface L1ScopeEntry {
   userResolved?: boolean;
 }
 
-function ModeBar({ mode, onMode, locked }: { mode: ModeId; onMode: (m: ModeId) => void; locked?: boolean }) {
-  return (
-    <div className="modes" role="tablist" aria-label="Session mode">
-      <span className="bar-label">mode</span>
-      {MODES.map(m => (
-        <div key={m.id}
-             className={`mode-tab ${mode === m.id ? 'active' : ''} ${locked ? 'locked' : ''}`}
-             onClick={() => { if (!locked) onMode(m.id); }}
-             aria-disabled={locked || undefined}
-             title={locked ? 'Mode is fixed for this chat — start a new topic to change it' : m.blurb}>
-          {m.label}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Collapsed by default — the mode bar already takes a lot of header space,
-// and voice is changed far less often than mode. Click to reveal the options.
+// Collapsed by default. Click to reveal the options.
 function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -94,83 +74,49 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
   );
 }
 
-function Composer({ mode, tone, onSend, busy, disabled, sessionId, onAttachSend }: {
-  mode: ModeId;
+function Composer({ tone, onSend, busy, disabled }: {
   tone: ToneId;
   onSend: (text: string) => void;
   busy: boolean;
   disabled?: boolean;
-  /** Session ID for the document uploader. */
-  sessionId?: string;
-  /** Called when Send submits staged file attachments alongside the typed text. */
-  onAttachSend?: (text: string, files: File[]) => void;
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const attachment = useAttachedFiles();
-  const canAttach = !!(sessionId && onAttachSend);
 
   const grow = () => {
     const el = ref.current;
     if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; }
   };
 
-  // One Send action for both text and attachments — if valid files are
-  // staged, they're folded straight into this turn's chat message; otherwise
-  // it's a plain text send.
-  const hasDocsToSend = canAttach && attachment.hasValidFiles;
-  const canSubmit = !!val.trim() || hasDocsToSend;
+  const canSubmit = !!val.trim();
 
   const submit = () => {
     if (busy || disabled || !canSubmit) return;
     const text = val.trim();
     setVal('');
     if (ref.current) ref.current.style.height = 'auto';
-    if (hasDocsToSend) {
-      const validFiles = attachment.fileResults.filter(r => r.error === null).map(r => r.file);
-      onAttachSend!(text, validFiles);
-      attachment.clearAll();
-    } else {
-      onSend(text);
-    }
+    onSend(text);
   };
 
-  const isEval = mode === 'evaluation';
   return (
     <div className="composer">
-      {isEval && (
-        <div className="eval-flag"><span className="dot" /> Evaluation mode — your answer is graded</div>
-      )}
       <div className="composer-inner">
         <div className={`composer-box ${focus ? 'focus' : ''}`}>
-          {canAttach && (
-            <AttachmentPreview
-              fileResults={attachment.fileResults}
-              warning={attachment.warning}
-              skipReview={attachment.skipReview}
-              disabled={disabled}
-              onRemove={attachment.removeFile}
-              onClearAll={attachment.clearAll}
-              onToggleSkipReview={attachment.toggleSkipReview}
-              showSkipReview={false}
-            />
-          )}
           <textarea
             ref={ref} value={val} rows={1}
             id="composer-textarea"
             disabled={disabled}
-            placeholder={isEval ? 'Type your answer…' : 'Reply to your mentor…'}
+            placeholder="Reply to your mentor…"
             onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
             onChange={e => { setVal(e.target.value); grow(); }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
           />
           <div className="composer-tools">
             <button className="tool-btn" title="Code block">{'</>'}</button>
-            {canAttach && <AttachButton disabled={disabled} onSelect={attachment.selectFiles} />}
             <div className="spacer" />
             <button className="send-btn" onClick={submit} disabled={busy || disabled || !canSubmit} title="Send">
-              <Icon name={isEval ? 'arrowUp' : 'send'} />
+              <Icon name="send" />
             </button>
           </div>
         </div>
@@ -221,10 +167,8 @@ function AlertStack({ topics, onReview }: { topics: Topic[]; onReview: () => voi
   );
 }
 
-export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, userName }: {
+export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTopicCreated, topics = [], profile, userName }: {
   topicId: string | null;
-  mode: ModeId;
-  setMode: (m: ModeId) => void;
   tone: ToneId;
   setTone: (t: ToneId) => void;
   onNav: (v: string) => void;
@@ -355,7 +299,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       const res = await fetch(`/api/topic/${topicId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: opts?.backendContent ?? text, mode }),
+        body: JSON.stringify({ content: opts?.backendContent ?? text, mode: 'topic' }),
       });
 
       // Pre-flight rejections (e.g. topic at capacity) come back as plain
@@ -393,7 +337,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     } finally {
       setBusy(false);
     }
-  }, [topicId, mode]);
+  }, [topicId]);
 
   // Welcome screen: send the typed text into the topic the user picked, or —
   // when they picked "New topic" — create one first. A new topic's title is
@@ -465,19 +409,6 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     }).catch(() => {});
   }, [topicId]);
 
-  // Fold attached files straight into this turn's chat message — no upload
-  // job, no profile-extraction/proposal pipeline. The file's text becomes
-  // part of what the mentor reads for this one turn; the chat bubble shows
-  // the typed text (if any) plus a plain file chip, same as any chat app.
-  const handleAttachSend = useCallback((text: string, files: File[]) => {
-    const attachments = files.map(f => ({ name: f.name, size: f.size }));
-    Promise.all(files.map(f => f.text().catch(() => ''))).then(contents => {
-      const fileBlocks = files.map((f, i) => `[Attached file: ${f.name}]\n${contents[i]}`).join('\n\n');
-      const backendContent = [text, fileBlocks].filter(Boolean).join('\n\n');
-      send(text, { attachments, backendContent });
-    });
-  }, [send]);
-
   // Export the full topic transcript (all messages, not just the loaded page)
   // as a local .md file for offline analysis.
   const [exporting, setExporting] = useState(false);
@@ -520,7 +451,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       const lines: string[] = [
         `# ${topic.title || 'Topic'}`,
         '',
-        `- Mode: ${topic.mode || mode}`,
+        `- Mode: topic`,
         `- Created: ${topic.createdAt || ''}`,
         `- Exported: ${new Date().toISOString()}`,
         '',
@@ -566,7 +497,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
     } finally {
       setExporting(false);
     }
-  }, [topicId, mode, exporting]);
+  }, [topicId, exporting]);
 
   // No topic yet — the welcome screen doubles as topic creation: whatever the
   // user types opens a topic and becomes its first message.
@@ -583,6 +514,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
   }
 
   return (
+    <>
     <div className="panel">
       <div className="panel-head">
         <div className="ph-left">
@@ -593,8 +525,7 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
           />
         </div>
         <div className="ph-right">
-          {/* ponytail: mode + voice (tone) selectors hidden per request — remove `false &&` to re-enable; components/state kept intact. */}
-          {false && <ModeBar mode={mode} onMode={setMode} locked={msgs.some(m => m.who === 'user')} />}
+          {/* ponytail: voice (tone) selector hidden per request — remove `false &&` to re-enable; components/state kept intact. */}
           {false && <ToneBar tone={tone} onTone={setTone} />}
           <button
             className="icon-btn"
@@ -696,13 +627,12 @@ export function ChatPanel({ topicId, mode, setMode, tone, setTone, onNav, onTopi
       </div>
 
       <Composer
-        mode={mode}
         tone={tone}
         onSend={send}
         busy={busy}
-        sessionId={topicId ?? undefined}
-        onAttachSend={topicId ? handleAttachSend : undefined}
       />
     </div>
+    <TopicContextPanel topicId={topicId} />
+    </>
   );
 }

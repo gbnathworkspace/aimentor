@@ -12,7 +12,8 @@ Tests cover:
 """
 
 import os
-from unittest.mock import AsyncMock, patch
+from io import BytesIO
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -259,6 +260,167 @@ class TestGetTopic:
 
             async with await _client(app) as client:
                 resp = await client.get("/api/topic/nonexistent", headers=auth_headers)
+
+        assert resp.status_code == 404
+
+
+class TestUploadTopicDocument:
+    """POST /api/topic/{topic_id}/document — attach a topic-scoped document."""
+
+    @pytest.mark.asyncio
+    async def test_upload_valid_pdf_returns_202(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(return_value=_sample_topic())
+
+        with (
+            patch("app.routers.topics._topic_service", mock_service),
+            patch(
+                "app.routers.topics.validate_files",
+                new_callable=AsyncMock,
+                return_value=([MagicMock(filename="notes.pdf")], []),
+            ),
+            patch(
+                "app.routers.topics.store_file",
+                new_callable=AsyncMock,
+                return_value="/uploads/user-123/upload-1/notes.pdf",
+            ),
+            patch("app.routers.topics.process_topic_document"),
+        ):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topic/topic-abc/document",
+                    headers=auth_headers,
+                    files={"files": ("notes.pdf", BytesIO(b"%PDF-fake-content"), "application/pdf")},
+                )
+
+        assert resp.status_code == 202
+        assert resp.json()["accepted"] == 1
+        mock_service.get_topic.assert_awaited_once_with("topic-abc", "user-123")
+
+    @pytest.mark.asyncio
+    async def test_upload_rejects_unowned_topic_with_404(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Topic not found")
+        )
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topic/nonexistent/document",
+                    headers=auth_headers,
+                    files={"files": ("notes.pdf", BytesIO(b"%PDF-fake-content"), "application/pdf")},
+                )
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_upload_all_invalid_files_returns_400(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(return_value=_sample_topic())
+
+        with (
+            patch("app.routers.topics._topic_service", mock_service),
+            patch(
+                "app.routers.topics.validate_files",
+                new_callable=AsyncMock,
+                return_value=([], [{"filename": "bad.exe", "error": "Unsupported file type"}]),
+            ),
+        ):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.post(
+                    "/api/topic/topic-abc/document",
+                    headers=auth_headers,
+                    files={"files": ("bad.exe", BytesIO(b"junk"), "application/octet-stream")},
+                )
+
+        assert resp.status_code == 400
+
+
+class TestTopicDocumentsList:
+    @pytest.mark.asyncio
+    async def test_lists_documents_for_owned_topic(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(return_value=_sample_topic())
+        docs = [{"filename": "notes.pdf", "chunkCount": 2, "uploadedAt": "2026-08-30T00:00:00"}]
+
+        with (
+            patch("app.routers.topics._topic_service", mock_service),
+            patch(
+                "app.routers.topics.list_topic_documents",
+                new_callable=AsyncMock,
+                return_value=docs,
+            ),
+        ):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.get("/api/topic/topic-abc/documents", headers=auth_headers)
+
+        assert resp.status_code == 200
+        assert resp.json()["documents"] == docs
+
+    @pytest.mark.asyncio
+    async def test_returns_404_for_unowned_topic(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Topic not found")
+        )
+
+        with patch("app.routers.topics._topic_service", mock_service):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.get("/api/topic/nonexistent/documents", headers=auth_headers)
+
+        assert resp.status_code == 404
+
+
+class TestDeleteTopicDocumentEndpoint:
+    @pytest.mark.asyncio
+    async def test_deletes_existing_document(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(return_value=_sample_topic())
+
+        with (
+            patch("app.routers.topics._topic_service", mock_service),
+            patch(
+                "app.routers.topics.delete_topic_document",
+                new_callable=AsyncMock,
+                return_value=2,
+            ),
+        ):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.delete("/api/topic/topic-abc/documents/notes.pdf", headers=auth_headers)
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_returns_404_when_document_not_found(self, auth_headers):
+        mock_service = AsyncMock()
+        mock_service.get_topic = AsyncMock(return_value=_sample_topic())
+
+        with (
+            patch("app.routers.topics._topic_service", mock_service),
+            patch(
+                "app.routers.topics.delete_topic_document",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+        ):
+            from app.main import app
+
+            async with await _client(app) as client:
+                resp = await client.delete("/api/topic/topic-abc/documents/missing.pdf", headers=auth_headers)
 
         assert resp.status_code == 404
 

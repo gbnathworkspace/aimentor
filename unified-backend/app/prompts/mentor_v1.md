@@ -52,7 +52,8 @@ Additional observed notes:
 {{style_notes}}
 <!--L1-BOUNDARY-->
 ## Current Topic: {{topic}}
-- **Current Level:** {{current_level}}
+### Subtopic Mastery
+{{subtopic_mastery}}
 
 ## Already Taught In This Topic
 {{taught_concepts}}

@@ -5,8 +5,8 @@ appended to a topic thread, context is assembled including SummaryBlocks,
 and compaction is checked after each assistant response.
 
 The mentor call streams tokens back to the client (issue: 2-10s perceived
-latency) and can loop up to one extra round if the model reaches for
-get_skill_detail before answering (issue: agentic context pull). See
+latency) and can loop up to one extra round if the model reaches for a
+search tool before answering (issue: agentic context pull). See
 design_decisions/15_llm_orchestration.md for why LangChain stays here
 specifically (raw SDK everywhere else).
 
@@ -25,14 +25,15 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config.settings import get_settings
-from app.models.session import SessionSkillUpdate
 from app.services import context_assembler, mode_router, skill_graph_repo
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
 from app.services.session_boundary import check_and_close_on_new_message
+from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
+from app.services.vector_search import vector_search
 
 logger = logging.getLogger(__name__)
 
@@ -55,44 +56,76 @@ _WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_us
 _DIAGNOSTIC_VERDICT_TOOL = {
     "name": "record_diagnostic_verdict",
     "description": (
-        "Record the assessed skill level once the user's answer gives enough "
-        "signal to judge it. Do not call this until you're confident — it's "
-        "fine to ask another question first and call it on a later turn."
+        "Record mastery for the specific subtopics the user's answers gave enough "
+        "signal to judge, once you have that signal. Do not call this until you're "
+        "confident on at least one subtopic — it's fine to ask another question "
+        "first and call it on a later turn. Only include subtopics you actually "
+        "assessed this turn; do not guess at the rest."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "new_level": {
-                "type": "string",
-                "enum": ["beginner", "intermediate", "advanced", "expert"],
+            "subtopic_updates": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "subtopic": {"type": "string"},
+                        "mastery": {"type": "number", "minimum": 0, "maximum": 100},
+                    },
+                    "required": ["subtopic", "mastery"],
+                },
             },
-            "weak_areas": {"type": "array", "items": {"type": "string"}},
-            "strong_areas": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["new_level", "weak_areas", "strong_areas"],
+        "required": ["subtopic_updates"],
     },
 }
 
 # --- Loop tools: the model can call these mid-turn, see the result, and keep
-# reasoning before its final reply. Reuses data the backend already fetches
-# — no new DB infra.
+# reasoning before its final reply. The two search_* tools run real Atlas
+# $vectorSearch queries (see vector_search.py).
 
-_GET_SKILL_DETAIL_TOOL = {
-    "name": "get_skill_detail",
+# Real semantic search (Atlas $vectorSearch), not the dump-all default
+# injection — for pulling something specific that isn't already in context.
+_SEARCH_DOCUMENTS_TOOL = {
+    "name": "search_documents",
     "description": (
-        "Look up the user's current level and weak/strong areas for a "
-        "topic OTHER than the one currently being discussed. Use this when "
-        "the conversation references another topic's skill state that "
-        "isn't already in your context."
+        "Semantically search the user's uploaded documents (résumé, notes, "
+        "problem lists) for a specific query. Use this when you need a "
+        "detail that isn't already in the Uploaded Documents section — the "
+        "default injection is a small unranked sample, not the full set."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {"topic": {"type": "string"}},
-        "required": ["topic"],
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
     },
 }
 
-_LOOP_TOOL_NAMES = {_GET_SKILL_DETAIL_TOOL["name"]}
+# Cross-topic only — this topic's own history is already fully injected via
+# SummaryBlocks every turn, so searching it again would be redundant. This
+# is the deliberate, agentic replacement for the old always-on cross-topic
+# backfill: the model must choose to look, nothing crosses topics silently.
+_SEARCH_OTHER_TOPICS_TOOL = {
+    "name": "search_other_topics",
+    "description": (
+        "Semantically search the user's session history in OTHER topics "
+        "for a specific query. Use this only when the user references "
+        "something from a different topic that isn't already in your "
+        "context — not for anything about the current topic."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
+}
+
+_LOOP_TOOL_NAMES = {
+    _SEARCH_DOCUMENTS_TOOL["name"],
+    _SEARCH_OTHER_TOPICS_TOOL["name"],
+}
 
 # One tool-decision round, then one forced-final-answer round. Keeps worst
 # case latency to 2 model calls instead of unbounded looping.
@@ -127,7 +160,7 @@ class TopicChatService:
     3. Get all messages from topic (including SummaryBlocks)
     4. Assemble context (L1/L2/L3 via existing context_assembler)
     5. Stream the LLM reply (via ChatAnthropic), looping once if the model
-       reaches for get_skill_detail
+       reaches for a search tool
     6. Append assistant response to topic thread
     7. Post-turn hook: check if compaction needed, trigger async if so
     """
@@ -151,7 +184,7 @@ class TopicChatService:
             topic_id: The topic identifier.
             user_id: The authenticated user's ID.
             content: The user's message text.
-            mode: Chat mode (topic/planning/doubt/evaluation).
+            mode: Chat mode (always "topic").
 
         Returns:
             A dict with an "error" key if the turn is rejected before any
@@ -200,7 +233,7 @@ class TopicChatService:
         # if no profile — still surfaces as a normal error response since
         # nothing has streamed yet.
         context = await context_assembler.assemble(
-            user_id, topic_title, content,
+            user_id, topic_title, content, topic_id=topic_id,
             l1_scope=topic.get("l1_scope"), taught_concepts=topic.get("taughtConcepts"),
             summary_blocks=topic.get("summaryBlocks"),
         )
@@ -270,7 +303,7 @@ class TopicChatService:
 
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages)
-            tools = [_WEB_SEARCH_TOOL, _GET_SKILL_DETAIL_TOOL]
+            tools = [_WEB_SEARCH_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL]
             if include_diagnostic_tool:
                 tools.append(_DIAGNOSTIC_VERDICT_TOOL)
 
@@ -315,7 +348,7 @@ class TopicChatService:
                 lc_messages.append(accumulated)
                 for tc in loop_calls:
                     result_text = await self._execute_loop_tool(
-                        tc["name"], tc.get("args") or {}, user_id, context
+                        tc["name"], tc.get("args") or {}, user_id
                     )
                     lc_messages.append(ToolMessage(content=result_text, tool_call_id=tc["id"]))
 
@@ -327,8 +360,8 @@ class TopicChatService:
             yield "\n\n[error: the mentor response was interrupted — please try again]"
             return
 
-        # Diagnostic verdict write-back (Req: flips assessed=True so the
-        # cold-start gate stops firing on the next message).
+        # Diagnostic verdict write-back (Req: populates subtopic_mastery so
+        # the cold-start gate stops firing on the next message).
         if include_diagnostic_tool:
             await self._apply_diagnostic_verdict(final_tool_calls, user_id, topic_title)
 
@@ -374,36 +407,32 @@ class TopicChatService:
         ]
 
     async def _execute_loop_tool(
-        self, name: str, tool_input: dict, user_id: str, context: dict
+        self, name: str, tool_input: dict, user_id: str
     ) -> str:
         """Run a loop tool locally and return its result as plain text for
         the model. Fail-open on any error — matches context_assembler.py's
         pattern, a lookup miss shouldn't break the turn."""
         try:
-            if name == "get_skill_detail":
-                return self._format_skill_detail(tool_input.get("topic", ""), context)
+            if name == "search_documents":
+                results = await vector_search(
+                    tool_input.get("query", ""), user_id, source="ingestion", limit=5
+                )
+                return self._format_search_results(results, empty_msg="No matching documents found.")
+            if name == "search_other_topics":
+                results = await vector_search(
+                    tool_input.get("query", ""), user_id, source="summary_block", limit=5
+                )
+                return self._format_search_results(results, empty_msg="No matching past sessions found.")
             return f"Unknown tool: {name}"
         except Exception as e:
             logger.warning("Loop tool %s failed for user=%s: %s", name, user_id, e)
             return f"Lookup failed for {name} — proceed without this information."
 
     @staticmethod
-    def _format_skill_detail(topic: str, context: dict) -> str:
-        node = next(
-            (
-                n for n in context.get("skill_graph") or []
-                if str(n.get("topic", "")).lower() == topic.lower()
-            ),
-            None,
-        )
-        if not node:
-            return f"No skill data found for topic '{topic}'."
-        return (
-            f"Topic: {node.get('topic')}\n"
-            f"Current level: {node.get('current_level', 'not assessed')}\n"
-            f"Weak areas: {', '.join(node.get('weak_areas') or []) or 'none recorded'}\n"
-            f"Strong areas: {', '.join(node.get('strong_areas') or []) or 'none recorded'}"
-        )
+    def _format_search_results(results: list[dict], empty_msg: str) -> str:
+        if not results:
+            return empty_msg
+        return "\n\n".join(r.get("text", "") for r in results)
 
     def _to_langchain_messages(self, system_prompt: str, messages: list[dict]) -> list:
         """Convert the assembled system prompt + topic messages into LangChain
@@ -432,8 +461,9 @@ class TopicChatService:
             return
 
         try:
-            skill_update = SessionSkillUpdate(topic=topic_title, **verdict["args"])
-            await skill_graph_repo.apply_update(user_id, skill_update)
+            raw_updates = (verdict.get("args") or {}).get("subtopic_updates") or []
+            validated = await validate_subtopic_updates(topic_title, raw_updates)
+            await skill_graph_repo.apply_update(user_id, topic_title, validated)
         except Exception as e:
             logger.warning(
                 "Diagnostic verdict write failed for topic=%s user=%s: %s",

@@ -69,14 +69,21 @@ _COMPACTION_TOOL_SCHEMA = {
                     "type": "object",
                     "properties": {
                         "topic": {"type": "string"},
-                        "new_level": {
-                            "type": "string",
-                            "enum": ["beginner", "intermediate", "advanced", "expert"],
+                        "subtopic_updates": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "subtopic": {"type": "string"},
+                                    "mastery": {"type": "number", "minimum": 0, "maximum": 100},
+                                },
+                                "required": ["subtopic", "mastery"],
+                            },
+                            "description": "Mastery (0-100) for only the specific subtopics this excerpt gives real evidence about — do not guess at subtopics not discussed.",
                         },
-                        "weak_areas": {"type": "array", "items": {"type": "string"}},
-                        "strong_areas": {"type": "array", "items": {"type": "string"}},
                     },
-                    "required": ["topic", "new_level", "weak_areas", "strong_areas"],
+                    "required": ["topic", "subtopic_updates"],
                 },
                 "description": "Skill updates detected from the conversation. Empty array if no progress detected.",
             },
@@ -98,9 +105,6 @@ _COMPACTION_TOOL_SCHEMA = {
 MAX_TAUGHT_CONCEPTS = 30
 """Cap on a topic's stored taughtConcepts list — oldest dropped past this,
 same bounded-growth intent as the rolling summary itself."""
-
-# Valid skill levels for validation
-_VALID_LEVELS = {"beginner", "intermediate", "advanced", "expert"}
 
 
 def _load_compaction_prompt() -> str:
@@ -128,47 +132,42 @@ def _format_conversation_excerpt(messages: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def _validate_skill_updates(skill_updates: list) -> list[dict]:
+async def _validate_skill_updates(skill_updates: list) -> list[dict]:
     """Validate and sanitize skill updates from LLM output.
 
-    Filters out any updates that don't match the expected schema.
-    Returns only valid updates.
+    Filters out any updates that don't match the expected schema, and
+    validates each entry's subtopic_updates against that topic's canonical
+    subtopic list (see subtopic_weights.validate_subtopic_updates).
 
     Args:
         skill_updates: Raw list of skill update dicts from LLM.
 
     Returns:
-        List of validated skill update dicts.
+        List of validated skill update dicts. An entry with zero surviving
+        subtopic_updates after validation is dropped entirely.
     """
+    from app.services.subtopic_weights import validate_subtopic_updates
+
     validated = []
     for update in skill_updates:
         if not isinstance(update, dict):
             continue
 
         topic = update.get("topic")
-        new_level = update.get("new_level")
-        weak_areas = update.get("weak_areas")
-        strong_areas = update.get("strong_areas")
+        raw_subtopic_updates = update.get("subtopic_updates")
 
-        # Validate required fields
         if not isinstance(topic, str) or not topic.strip():
             continue
-        if new_level not in _VALID_LEVELS:
+        if not isinstance(raw_subtopic_updates, list):
             continue
-        if not isinstance(weak_areas, list):
-            weak_areas = []
-        if not isinstance(strong_areas, list):
-            strong_areas = []
 
-        # Filter to only string items in areas
-        weak_areas = [a for a in weak_areas if isinstance(a, str)]
-        strong_areas = [a for a in strong_areas if isinstance(a, str)]
+        subtopic_updates = await validate_subtopic_updates(topic.strip(), raw_subtopic_updates)
+        if not subtopic_updates:
+            continue
 
         validated.append({
             "topic": topic.strip(),
-            "new_level": new_level,
-            "weak_areas": weak_areas,
-            "strong_areas": strong_areas,
+            "subtopic_updates": subtopic_updates,
         })
 
     return validated
@@ -365,7 +364,7 @@ class CompactionService:
 
         The LLM is given the conversation excerpt and asked to produce:
         1. A narrative summary (3-5 sentences) capturing the key learning points
-        2. Zero or more structured skill updates (topic, new_level, weak_areas, strong_areas)
+        2. Zero or more structured skill updates (topic, subtopic_updates)
 
         Uses Anthropic's tool_use feature to get reliable JSON output.
 
@@ -412,7 +411,7 @@ class CompactionService:
             raise
 
         # Step 4: Parse the tool_use response
-        return self._parse_tool_use_response(response)
+        return await self._parse_tool_use_response(response)
 
     async def _call_merge_summarization_llm(
         self, existing_summary: dict | None, selected_messages: list[dict]
@@ -430,7 +429,7 @@ class CompactionService:
         prior_entry = {"role": "PRIOR SUMMARY", "content": existing_summary["summary"]}
         return await self._call_summarization_llm([prior_entry] + selected_messages)
 
-    def _parse_tool_use_response(self, response) -> dict:
+    async def _parse_tool_use_response(self, response) -> dict:
         """Parse the Anthropic tool_use response to extract summary and skill updates.
 
         Args:
@@ -465,7 +464,7 @@ class CompactionService:
             raw_skill_updates = []
 
         # Validate each skill update
-        validated_updates = _validate_skill_updates(raw_skill_updates)
+        validated_updates = await _validate_skill_updates(raw_skill_updates)
 
         raw_taught_concepts = tool_input.get("taught_concepts", [])
         if not isinstance(raw_taught_concepts, list):
@@ -896,14 +895,14 @@ class CompactionService:
             user_id: The user's ID.
             skill_updates: List of skill update dicts from LLM response.
         """
-        from app.models.session import SessionSkillUpdate
         from app.services.skill_graph_repo import apply_update
 
         for attempt in range(MAX_SKILL_UPDATE_RETRIES):
             try:
                 for update_data in skill_updates:
-                    skill_update = SessionSkillUpdate(**update_data)
-                    await apply_update(user_id, skill_update)
+                    await apply_update(
+                        user_id, update_data["topic"], update_data["subtopic_updates"]
+                    )
                 return  # success
             except Exception as e:
                 logger.error(

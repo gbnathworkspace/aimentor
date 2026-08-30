@@ -5,7 +5,7 @@ Tests cover:
 - LLM failure mid-stream yields an in-band error marker, user message preserved
 - Post-turn hook triggers compaction check after the stream ends
 - Post-turn hook failure doesn't crash the service
-- Tool loop: get_skill_detail executed mid-turn, then a final answer
+- Tool loop: search_documents/search_other_topics executed mid-turn, then a final answer
 - Loop is capped at _MAX_LOOP_ROUNDS regardless of further tool_calls
 """
 
@@ -202,15 +202,15 @@ class TestHandleMessageHappyPath:
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message(
-                "topic-abc", "user-123", "What is DFS?", mode="doubt"
+                "topic-abc", "user-123", "What is DFS?", mode="topic"
             )
             await _collect_stream(result)
 
         mock_assembler.assemble.assert_called_once_with(
-            "user-123", "Test Topic", "What is DFS?",
+            "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
             l1_scope=None, taught_concepts=None, summary_blocks=None,
         )
-        mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
+        mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -238,12 +238,12 @@ class TestHandleMessageHappyPath:
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message(
-                "topic-abc", "user-123", "What is DFS?", mode="doubt"
+                "topic-abc", "user-123", "What is DFS?", mode="topic"
             )
             await _collect_stream(result)
 
         mock_assembler.assemble.assert_called_once_with(
-            "user-123", "Test Topic", "What is DFS?",
+            "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
             l1_scope=scope, taught_concepts=concepts, summary_blocks=blocks,
         )
 
@@ -673,18 +673,18 @@ class TestDiagnosticRouting:
 
         verdict_call = _tool_call(
             "record_diagnostic_verdict",
-            {
-                "new_level": "beginner",
-                "gap": 40,
-                "weak_areas": ["loops"],
-                "strong_areas": [],
-            },
+            {"subtopic_updates": [{"subtopic": "Loops", "mastery": 15}]},
         )
+
+        from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Got it — you're a beginner.", [verdict_call])]]),
-        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
+            "app.services.topic_chat_service.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
+        ):
             mock_repo.apply_update = AsyncMock()
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "no I've never coded", mode="topic"
@@ -692,11 +692,11 @@ class TestDiagnosticRouting:
             await _collect_stream(result)
 
         mock_repo.apply_update.assert_called_once()
-        called_user_id, skill_update = mock_repo.apply_update.call_args[0]
+        called_user_id, called_topic, subtopic_updates = mock_repo.apply_update.call_args[0]
         assert called_user_id == "user-123"
-        assert skill_update.topic == "Test Topic"
-        assert skill_update.new_level.value == "beginner"
-        assert skill_update.weak_areas == ["loops"]
+        assert called_topic == "Test Topic"
+        assert subtopic_updates[0].subtopic == "Loops"
+        assert subtopic_updates[0].mastery == 15
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -728,7 +728,7 @@ class TestDiagnosticRouting:
         self, mock_get_prompt, mock_assembler, chat_service
     ):
         mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {"assessed": True, "current_level": "intermediate"},
+            "profile": {}, "skill": {"subtopic_mastery": {"Arrays": 55}},
             "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "direct prompt"
@@ -760,131 +760,9 @@ class TestDiagnosticRouting:
         bound_tools = mock_cls.return_value.bind_tools.call_args[0][0]
         assert all(t["name"] != "record_diagnostic_verdict" for t in bound_tools)
 
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_doubt_mode_skips_router_entirely(
-        self, mock_get_prompt, mock_assembler, chat_service
-    ):
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
-        })
-        mock_get_prompt.return_value = "doubt prompt"
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([[_chunk("Answer")]]),
-        ), patch(
-            "app.services.topic_chat_service.mode_router.route_user_turn",
-            new_callable=AsyncMock,
-        ) as mock_route:
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "What is DFS?", mode="doubt"
-            )
-            await _collect_stream(result)
-
-        mock_route.assert_not_called()
-        mock_get_prompt.assert_called_once_with("doubt", mock_assembler.assemble.return_value)
-
-
 class TestToolLoop:
-    """The mentor can call get_skill_detail mid-turn, see the result, and
-    answer in a second round."""
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_get_skill_detail_executes_then_final_round_answers(
-        self, mock_get_prompt, mock_assembler, chat_service
-    ):
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [],
-            "skill_graph": [
-                {"topic": "Recursion", "current_level": "beginner",
-                 "weak_areas": ["base cases"], "strong_areas": []},
-            ],
-        })
-        mock_get_prompt.return_value = "prompt"
-
-        round0 = [_chunk("", [_tool_call("get_skill_detail", {"topic": "Recursion"})])]
-        round1 = [_chunk("You're at beginner level on Recursion, gap: medium.")]
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([round0, round1]),
-        ) as mock_cls:
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "how am I doing on Recursion?", mode="topic"
-            )
-            full = await _collect_stream(result)
-
-        visible, meta = _split_meta(full)
-        assert visible == "You're at beginner level on Recursion, gap: medium."
-        assert meta is not None
-        # Bound twice — one per round.
-        assert mock_cls.return_value.bind_tools.call_count == 2
-        # Final round's tools exclude the loop tools (forced final answer).
-        final_round_tools = mock_cls.return_value.bind_tools.call_args_list[1][0][0]
-        assert all(t["name"] != "get_skill_detail" for t in final_round_tools)
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_skill_detail_miss_returns_graceful_string_not_crash(
-        self, mock_get_prompt, mock_assembler, chat_service
-    ):
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
-        })
-        mock_get_prompt.return_value = "prompt"
-
-        round0 = [_chunk("", [_tool_call("get_skill_detail", {"topic": "Recursion"})])]
-        round1 = [_chunk("I don't have data on that yet.")]
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([round0, round1]),
-        ):
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "how am I doing on Recursion?", mode="topic"
-            )
-            full = await _collect_stream(result)
-
-        visible, _ = _split_meta(full)
-        assert visible == "I don't have data on that yet."
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_loop_capped_at_max_rounds_even_if_model_keeps_wanting_tools(
-        self, mock_get_prompt, mock_assembler, chat_service
-    ):
-        """Round _MAX_LOOP_ROUNDS-1 strips loop tools from the bound set, so
-        the model can't ask for one — but even if a chunk somehow carried a
-        loop-tool call anyway, the loop must still stop there instead of
-        starting a third round."""
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
-        })
-        mock_get_prompt.return_value = "prompt"
-
-        round0 = [_chunk("", [_tool_call("get_skill_detail", {"topic": "X"})])]
-        # Contrived: final round's chunk still carries a loop tool call.
-        round1 = [_chunk("Final answer anyway.", [_tool_call("get_skill_detail", {"topic": "Y"})])]
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([round0, round1]),
-        ) as mock_cls:
-            result = await chat_service.handle_message(
-                "topic-abc", "user-123", "message", mode="topic"
-            )
-            full = await _collect_stream(result)
-
-        assert mock_cls.return_value.bind_tools.call_count == _MAX_LOOP_ROUNDS
-        visible, meta = _split_meta(full)
-        assert visible == "Final answer anyway."
-        assert meta is not None
+    """The mentor can call search_documents/search_other_topics mid-turn,
+    see the result, and answer in a second round."""
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
@@ -901,14 +779,19 @@ class TestToolLoop:
 
         verdict_call = _tool_call(
             "record_diagnostic_verdict",
-            {"new_level": "beginner", "gap": 40, "weak_areas": [], "strong_areas": []},
+            {"subtopic_updates": [{"subtopic": "Loops", "mastery": 15}]},
         )
         round0 = [_chunk("Got it.", [verdict_call])]
+
+        from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([round0]),
-        ) as mock_cls, patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        ) as mock_cls, patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
+            "app.services.topic_chat_service.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
+        ):
             mock_repo.apply_update = AsyncMock()
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "no I've never coded", mode="topic"

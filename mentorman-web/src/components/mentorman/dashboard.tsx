@@ -6,36 +6,32 @@ import { GapBar } from './ui';
 import type { Topic } from './data';
 import type { SkillNode, CoreProfile } from '@/lib/mentorman-api';
 
-const LEVEL_PCT: Record<string, number> = {
-  beginner: 25, intermediate: 50, advanced: 75, expert: 95,
-};
-const lvl = (s: string) => LEVEL_PCT[s?.toLowerCase()] ?? 50;
-
 // There's no per-topic required_level (removed — the backend never
-// computed a real goal-relative target). req is a flat intermediate
+// computed a real goal-relative target). req is a flat intermediate-ish
 // baseline so the gap bar still shows progress-toward-competent.
-const BASELINE_REQ = LEVEL_PCT.intermediate;
+const BASELINE_REQ = 50;
+const WEAK_THRESHOLD = 40;
+const STRONG_THRESHOLD = 70;
 
 function skillToTopic(s: SkillNode): Topic {
-  const sig = (s.signals ?? {}) as Record<string, unknown>;
-  const cur = lvl(s.current_level);
+  const mastery = s.subtopic_mastery ?? {};
+  const values = Object.values(mastery);
+  const cur = values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
   const req = BASELINE_REQ;
   const gap = Math.max(0, req - cur);
-  const prev = s.previous_level as string | undefined;
-  const levelUp = prev && prev !== s.current_level
-    ? { from: prev, to: s.current_level, up: lvl(s.current_level) > lvl(prev) }
-    : null;
+  const weak = Object.entries(mastery).filter(([, v]) => v < WEAK_THRESHOLD).map(([k]) => k);
+  const strong = Object.entries(mastery).filter(([, v]) => v >= STRONG_THRESHOLD).map(([k]) => k);
   return {
     name: s.topic,
-    cat: (sig.cat as string) ?? 'General',
+    cat: 'General',
     cur,
     req,
-    last: (sig.last_studied as string) ?? (sig.last as string) ?? '–',
+    last: '–',
     gap,
-    level: `${s.current_level} → intermediate`,
-    levelUp,
-    strong: (sig.strong_areas as string[]) ?? (sig.strong as string[]) ?? [],
-    weak: (sig.weak_areas as string[]) ?? (sig.weak as string[]) ?? [],
+    level: values.length ? `${cur}% avg mastery` : 'Not assessed',
+    levelUp: null,
+    strong,
+    weak,
   };
 }
 

@@ -3,8 +3,10 @@
 from enum import Enum
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
+
+from app.models.skill import SubtopicMasteryUpdate
 
 
 class SessionStatus(str, Enum):
@@ -13,19 +15,6 @@ class SessionStatus(str, Enum):
     active = "active"
     ending = "ending"
     ended = "ended"
-
-
-class SkillLevel(str, Enum):
-    """Valid skill levels for LLM-extracted skill updates.
-
-    Canonical vocabulary shared with the skill graph so session output
-    feeds planning without translation.
-    """
-
-    beginner = "beginner"
-    intermediate = "intermediate"
-    advanced = "advanced"
-    expert = "expert"
 
 
 class Message(BaseModel):
@@ -52,18 +41,8 @@ class SessionSkillUpdate(BaseModel):
     )
 
     topic: str
-    new_level: SkillLevel = Field(..., alias="new_level")
-    weak_areas: list[str] = Field(default_factory=list, max_length=10)
-    strong_areas: list[str] = Field(default_factory=list, max_length=10)
+    subtopic_updates: list[SubtopicMasteryUpdate] = Field(..., min_length=1)
     eval_score: Optional[str] = None
-
-    @field_validator("weak_areas", "strong_areas", mode="before")
-    @classmethod
-    def truncate_areas(cls, v: list[str]) -> list[str]:
-        """Ensure at most 10 items in area lists."""
-        if isinstance(v, list) and len(v) > 10:
-            return v[:10]
-        return v
 
 
 class SessionCreate(BaseModel):

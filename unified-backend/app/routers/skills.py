@@ -53,16 +53,23 @@ async def upsert_skill(data: SkillNode, user_id: str = Depends(require_auth)) ->
 async def update_skill(
     topic: str, data: SkillUpdate, user_id: str = Depends(require_auth)
 ) -> dict:
-    """Update a specific skill node. 404 if not found."""
-    update_data = data.model_dump(exclude_none=True)
-    if not update_data:
+    """Update a specific skill node. 404 if not found.
+
+    subtopic_mastery is merged (touched keys only), never replaces the
+    whole map — same semantics as skill_graph_repo.apply_update.
+    """
+    if not data.subtopic_mastery:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+    set_fields = {
+        f"subtopic_mastery.{name}": mastery
+        for name, mastery in data.subtopic_mastery.items()
+    }
     result = await skill_graph_col().find_one_and_update(
         {"user_id": user_id, "topic": topic},
-        {"$set": update_data},
+        {"$set": set_fields},
         return_document=True,
     )
     if not result:

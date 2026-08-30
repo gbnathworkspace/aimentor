@@ -20,6 +20,7 @@ from app.services.compaction_service import (
     _LLM_TIMEOUT_SECONDS,
     _SUMMARIZATION_MODEL,
 )
+from app.services.vector_search import delete_vectors, embed_and_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -176,4 +177,37 @@ async def close_session(topic_id: str, user_id: str, upto_timestamp: datetime) -
     if result.modified_count != 1:
         logger.error(
             "Session close failed: concurrent write conflict for topic %s", topic_id
+        )
+        return
+
+    # Best-effort, fire-and-forget: keep vector search in sync with the
+    # blocks that just changed. Never blocks or fails close_session itself.
+    asyncio.create_task(
+        _sync_block_embeddings(topic_id, user_id, existing_blocks, new_blocks)
+    )
+
+
+async def _sync_block_embeddings(
+    topic_id: str, user_id: str, old_blocks: list[dict], new_blocks: list[dict]
+) -> None:
+    """Embed newly-created/merged blocks, delete embeddings for blocks that
+    got merged away. Diffed by blockId so an unchanged block is never
+    re-embedded (Voyage calls cost money and time).
+    """
+    old_ids = {b["blockId"] for b in old_blocks}
+    new_ids = {b["blockId"] for b in new_blocks}
+
+    stale_ids = old_ids - new_ids
+    if stale_ids:
+        await delete_vectors(list(stale_ids))
+
+    for block in new_blocks:
+        if block["blockId"] in old_ids:
+            continue  # unchanged, already embedded
+        await embed_and_upsert(
+            vector_id=block["blockId"],
+            text=block["text"],
+            user_id=user_id,
+            source="summary_block",
+            metadata={"topic_id": topic_id, "block_id": block["blockId"]},
         )

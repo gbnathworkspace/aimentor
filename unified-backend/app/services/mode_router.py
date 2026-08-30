@@ -7,8 +7,9 @@ contradictory instructions ("probe first" vs "explain first" vs
 "attempt-first", all in one block, no priority order).
 
 Rule 1 (cold start) is a plain Python check, not an LLM call — it only
-depends on the skill graph's `assessed` flag. Rules 2-6 are a forced
-tool_use call to Haiku, only spent once a topic has a real assessment.
+depends on whether the skill graph's subtopic_mastery map is empty. Rules
+2-6 are a forced tool_use call to Haiku, only spent once a topic has a
+real assessment.
 """
 
 import asyncio
@@ -148,7 +149,7 @@ async def route_user_turn(
     Never raises — falls back to SOCRATIC on any failure, matching the
     fail-open pattern used throughout context_assembler.py.
     """
-    if not skill.get("assessed"):
+    if not skill.get("subtopic_mastery"):
         return RouterDecision(
             matched_rule=MatchedRule.RULE_1_COLD_START,
             selected_mode=MentorMode.DIAGNOSTIC,
@@ -157,7 +158,6 @@ async def route_user_turn(
 
     user_payload = (
         f"User query: {query!r}\n\n"
-        f"Skill state: current_level={skill.get('current_level')}\n\n"
         f"Recent turns in this topic:\n{_format_recent_messages(recent_messages, _RECENT_MESSAGE_WINDOW)}"
     )
 

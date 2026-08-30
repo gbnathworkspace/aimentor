@@ -17,9 +17,8 @@ You are analyzing a segment of a learning conversation that is being compacted t
 ## Rules for skill updates:
 - Only produce skill updates if clear learning progress or assessment is evident
 - If the conversation is casual or off-topic, return an empty skill_updates array
-- Each skill update must have: topic, new_level, weak_areas, strong_areas
-- new_level must be one of: beginner, intermediate, advanced, expert
-- weak_areas and strong_areas are lists of specific concept strings
+- Each skill update must have: topic, subtopic_updates
+- subtopic_updates is a list of {subtopic, mastery} pairs, mastery 0-100 — only include subtopics this excerpt gives real evidence about, do not guess at the rest
 
 ## Conversation excerpt to analyze:
 

@@ -20,6 +20,7 @@ from app.services.compaction_service import (
     _LLM_TIMEOUT_SECONDS,
     _SUMMARIZATION_MODEL,
 )
+from app.services.profiling_agent import propose_changes as propose_profile_changes
 from app.services.vector_search import delete_vectors, embed_and_upsert
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,10 @@ async def close_session(topic_id: str, user_id: str, upto_timestamp: datetime) -
     taught_concepts = llm_result.get("taught_concepts")
     if taught_concepts:
         await _compaction_service._apply_taught_concepts(topic_id, user_id, taught_concepts)
+
+    profile_signals = llm_result.get("profile_signals")
+    if profile_signals:
+        await propose_profile_changes(user_id, topic_id, profile_signals)
 
     summary_text = llm_result["summary"]
     new_block = {

@@ -20,6 +20,12 @@ You are analyzing a segment of a learning conversation that is being compacted t
 - Each skill update must have: topic, subtopic_updates
 - subtopic_updates is a list of {subtopic, mastery} pairs, mastery 0-100 — only include subtopics this excerpt gives real evidence about, do not guess at the rest
 
+## Rules for profile signals:
+- Only include a signal with real, specific evidence in this excerpt — do not force one
+- Return an empty profile_signals array if nothing stands out
+- Each signal is `{"field": "style_note", "proposed_value": {"category": ..., "note": "short claim, under 140 chars"}, "reason": "quote or paraphrase from the excerpt"}`
+- category is one of: pacing, communication, motivation, misconception, context
+
 ## Conversation excerpt to analyze:
 
 If the excerpt below begins with a "PRIOR SUMMARY" section, that is the

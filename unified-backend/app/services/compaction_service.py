@@ -97,8 +97,36 @@ _COMPACTION_TOOL_SCHEMA = {
                     "merely mentioned in passing. Empty array if nothing new was taught."
                 ),
             },
+            "profile_signals": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "field": {"type": "string", "enum": ["style_note"]},
+                        "proposed_value": {
+                            "type": "object",
+                            "properties": {
+                                "category": {
+                                    "type": "string",
+                                    "enum": ["pacing", "communication", "motivation", "misconception", "context"],
+                                },
+                                "note": {"type": "string"},
+                            },
+                            "required": ["category", "note"],
+                        },
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["field", "proposed_value", "reason"],
+                },
+                "description": (
+                    "Clear signals about how this student learns best or what "
+                    "motivates them, grounded in this excerpt. Only include a signal "
+                    "with real, specific evidence — return an empty array if nothing "
+                    "stands out. Do NOT force a signal every time."
+                ),
+            },
         },
-        "required": ["summary", "skill_updates", "taught_concepts"],
+        "required": ["summary", "skill_updates", "taught_concepts", "profile_signals"],
     },
 }
 
@@ -471,10 +499,15 @@ class CompactionService:
             raw_taught_concepts = []
         taught_concepts = [c.strip() for c in raw_taught_concepts if isinstance(c, str) and c.strip()]
 
+        raw_profile_signals = tool_input.get("profile_signals", [])
+        if not isinstance(raw_profile_signals, list):
+            raw_profile_signals = []
+
         return {
             "summary": summary.strip(),
             "skill_updates": validated_updates if validated_updates else None,
             "taught_concepts": taught_concepts,
+            "profile_signals": raw_profile_signals,
         }
 
     # ------------------------------------------------------------------

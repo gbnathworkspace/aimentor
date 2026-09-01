@@ -22,6 +22,7 @@ export function TopicContextPanel({ topicId }: { topicId: string | null }) {
   const [documents, setDocuments] = useState<TopicDocument[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
@@ -54,6 +55,22 @@ export function TopicContextPanel({ topicId }: { topicId: string | null }) {
 
   if (!topicId) return null;
 
+  if (collapsed) {
+    return (
+      <div className="context-panel context-panel-collapsed">
+        <button
+          type="button"
+          className="icon-btn"
+          title="Expand context"
+          aria-label="Expand context"
+          onClick={() => setCollapsed(false)}
+        >
+          <Icon name="back" size={14} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="context-panel">
       <div className="context-panel-head">
@@ -67,6 +84,15 @@ export function TopicContextPanel({ topicId }: { topicId: string | null }) {
           onClick={() => inputRef.current?.click()}
         >
           <Icon name="plus" size={14} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          title="Collapse context"
+          aria-label="Collapse context"
+          onClick={() => setCollapsed(true)}
+        >
+          <Icon name="back" size={14} />
         </button>
         <input
           ref={inputRef}

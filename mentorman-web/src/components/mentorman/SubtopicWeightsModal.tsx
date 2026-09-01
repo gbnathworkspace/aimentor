@@ -332,6 +332,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
   const runQuery = useCallback(async (
     pairwiseComparisons?: [string, string][],
     intent?: string,
+    forceRefresh?: boolean,
   ) => {
     if (!topicId) return;
     setPhase('loading');
@@ -344,6 +345,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
           goal: 'job_performance',
           goalIntent: intent,
           pairwiseComparisons,
+          forceRefresh,
         }),
       });
       const data: WeightsResponse & { detail?: string } = await res.json();
@@ -371,8 +373,8 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
   // Runs weight generation straight from scoped L1 memory — goalCards[0] is
   // classify_relevance's top-ranked focus area (or "Just revising" when
   // nothing qualifies) — no confirm-your-goal step in between.
-  const runFromScope = useCallback(() => {
-    runQuery(undefined, goalCards[0]?.intent);
+  const runFromScope = useCallback((forceRefresh?: boolean) => {
+    runQuery(undefined, goalCards[0]?.intent, forceRefresh);
   }, [runQuery, goalCards]);
 
   // Cache the result per topic — reopening the same topic's modal shows what
@@ -452,7 +454,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
         {phase === 'error' && (
           <div className="sw-status sw-status-error">
             {errorMsg}
-            <button className="btn btn-ghost sw-back" onClick={runFromScope}>Retry</button>
+            <button className="btn btn-ghost sw-back" onClick={() => runFromScope(true)}>Retry</button>
           </div>
         )}
 
@@ -524,9 +526,6 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
                         <span className="sw-bar-fill" style={{ width: `${display[s] ?? 0}%` }} />
                       </span>
                       <span className="sw-value">{(display[s] ?? 0).toFixed(1)}%</span>
-                      {proficiency && proficiency[s] != null && (
-                        <span className="sw-proficiency">{Math.round(proficiency[s])}% caught up</span>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -540,7 +539,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
             )}
 
             <div className="sw-actions">
-              <button className="btn btn-ghost" onClick={runFromScope}>Start over</button>
+              <button className="btn btn-ghost" onClick={() => runFromScope(true)}>Start over</button>
               {rankMode ? (
                 <button className="btn btn-accent" onClick={applyRanking}>Apply order</button>
               ) : (

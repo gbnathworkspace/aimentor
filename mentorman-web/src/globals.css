@@ -417,8 +417,11 @@ body {
   padding: 16px 14px; gap: 12px;
   overflow-y: auto;
 }
+.context-panel-collapsed {
+  width: 36px; padding: 16px 8px; align-items: center;
+}
 .context-panel-head {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: 4px; justify-content: space-between;
 }
 .context-panel-title {
   font-family: var(--mono); font-size: 11px; font-weight: 600;
@@ -1981,8 +1984,8 @@ body {
 }
 .sw-dialog {
   width: 640px; max-width: calc(100vw - 32px);
-  max-height: 80vh; overflow-y: auto;
-  padding: 22px 24px 26px;
+  max-height: 92vh; overflow-y: auto;
+  padding: 18px 24px 20px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -1991,7 +1994,7 @@ body {
 }
 .sw-head {
   display: flex; align-items: flex-start; justify-content: space-between;
-  margin-bottom: 18px; padding-bottom: 14px;
+  margin-bottom: 12px; padding-bottom: 10px;
   border-bottom: 1px solid var(--border-soft);
 }
 .sw-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
@@ -1999,7 +2002,7 @@ body {
 .sw-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); }
 .sw-row {
   display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px; margin-bottom: 8px;
+  padding: 8px 14px; margin-bottom: 6px;
   border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--card-2);
 }
@@ -2024,7 +2027,7 @@ body {
   flex: 0 0 44px; text-align: right;
   font-family: var(--mono); font-size: 11px; color: var(--muted-2);
 }
-.sw-hint { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+.sw-hint { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 .sw-temp-control {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 12px; padding: 10px 12px;
@@ -2034,7 +2037,7 @@ body {
 .sw-temp-control label { font-size: 11.5px; font-weight: 600; color: var(--accent); flex: 0 0 auto; min-width: 84px; }
 .sw-temp-slider { flex: 1 1 auto; accent-color: var(--accent); cursor: pointer; }
 .sw-temp-reset { height: 26px; font-size: 11px; min-width: 0; padding: 0 10px; }
-.sw-actions { display: flex; justify-content: space-between; margin-top: 16px; }
+.sw-actions { display: flex; justify-content: space-between; margin-top: 12px; }
 .sw-actions .btn { min-width: 100px; height: 34px; font-size: 12.5px; }
 .sw-actions .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -2046,11 +2049,11 @@ body {
 .sw-cols { display: flex; gap: 22px; align-items: flex-start; }
 .sw-bars { flex: 1 1 auto; min-width: 0; }
 .sw-radar-col {
-  flex: 0 0 560px; display: flex; flex-direction: column; align-items: center;
+  flex: 0 0 620px; display: flex; flex-direction: column; align-items: center;
   gap: 8px; padding-top: 2px;
 }
 .sw-radar-title { font-size: 12.5px; font-weight: 600; color: var(--muted); text-align: center; }
-.sw-radar-svg { max-width: 100%; height: auto; }
+.sw-radar-svg { max-width: 100%; max-height: 64vh; height: auto; }
 /* Legend distinguishes the two different percentages that can appear on a
    row — the existing bar (study-time weight) vs the new badge (proficiency) —
    so they don't read as the same number. */

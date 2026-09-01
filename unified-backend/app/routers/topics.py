@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.auth.dependencies import require_auth
-from app.config.database import weight_nudges_col
+from app.config.database import topics_col, weight_nudges_col
 from app.models.chat import MentorMode
 from app.services.extraction import process_topic_document
 from app.services.file_upload import store_file, validate_files
@@ -85,6 +85,10 @@ class SubtopicWeightsRequest(BaseModel):
     goal_intent: Optional[str] = Field(default=None, max_length=500)
     pairwise_comparisons: Optional[list[tuple[str, str]]] = None
     user_nudges: Optional[dict[str, float]] = None
+    # Bypasses the topic-doc cache below (see get_subtopic_weights) — set by
+    # the frontend's explicit "Start over"/retry actions, never the initial
+    # auto-open.
+    force_refresh: bool = False
 
 
 class WeightFlagResponse(BaseModel):
@@ -331,9 +335,36 @@ async def get_subtopic_weights(
     Caller supplies either work_evidence (commits, tickets, PR comments —
     counted by mention, since that evidence isn't web-searchable) or
     goal_intent (a stated goal — scored by relevance instead).
+
+    The goal_intent path (the modal's auto-open "focus" run — no pairwise
+    ranking or manual nudges involved) is cached on the topic doc under
+    `subtopicWeights`, keyed by that exact intent string, so reopening the
+    modal for a topic you've already weighted shows the stored result
+    instead of re-hitting the LLM. `force_refresh` (Start over/retry) or a
+    different goal_intent bypasses it.
     """
     topic = await _topic_service.get_topic(topic_id, user_id)
     subtopics = await get_subtopics(topic["title"])
+
+    cacheable = (
+        body.goal_intent is not None
+        and body.pairwise_comparisons is None
+        and body.user_nudges is None
+    )
+    cached = topic.get("subtopicWeights")
+    if (
+        cacheable
+        and not body.force_refresh
+        and cached
+        and cached.get("goalIntent") == body.goal_intent
+    ):
+        return SubtopicWeightsResponse(
+            subtopics=cached["subtopics"],
+            weights=cached["weights"],
+            flags=[],
+            needs_pairwise=False,
+            proficiency=cached.get("proficiency"),
+        )
 
     try:
         result = await derive_subtopic_weights(
@@ -347,6 +378,17 @@ async def get_subtopic_weights(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    if cacheable and not result.needs_pairwise:
+        await topics_col().update_one(
+            {"topicId": topic_id, "userId": user_id},
+            {"$set": {"subtopicWeights": {
+                "goalIntent": body.goal_intent,
+                "subtopics": result.subtopics,
+                "weights": result.weights,
+                "proficiency": result.proficiency,
+            }}},
+        )
 
     return SubtopicWeightsResponse(
         subtopics=result.subtopics,

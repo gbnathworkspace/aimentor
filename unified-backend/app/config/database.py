@@ -93,6 +93,10 @@ def document_upload_jobs_col():
     return get_db()["document_upload_jobs"]
 
 
+def llm_traces_col():
+    return get_db()["llm_traces"]
+
+
 @lru_cache
 def get_s3_client():
     """Return a cached boto3 S3 client (region only).
@@ -123,4 +127,11 @@ async def _ensure_indexes() -> None:
     await document_upload_jobs_col().create_index("user_id")
     await document_upload_jobs_col().create_index(
         "expires_at", expireAfterSeconds=0, name="idx_expires_at_ttl"
+    )
+    # LLM call traces (see app/services/llm_trace.py) — debugging aid, not a
+    # permanent audit log, so entries expire after 14 days on their own.
+    # Single-field index doubles as the sort index for the admin trace list
+    # (Mongo can use it in either direction).
+    await llm_traces_col().create_index(
+        "created_at", expireAfterSeconds=14 * 24 * 3600, name="idx_created_at_ttl"
     )

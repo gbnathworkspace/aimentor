@@ -301,6 +301,23 @@ async def test_validate_subtopic_updates_normalizes_casing():
     assert result[0].subtopic == "Loops"
 
 
+@pytest.mark.asyncio
+async def test_validate_subtopic_updates_skips_non_dict_entries():
+    """A malformed (non-dict) entry is dropped, not a crash — callers pass
+    raw LLM tool_use output straight through with no pre-filter of their own
+    (see compaction_service._validate_skill_updates and
+    topic_chat_service._apply_diagnostic_verdict)."""
+    with patch(
+        "app.services.subtopic_weights.get_subtopics",
+        AsyncMock(return_value=["Loops", "Recursion"]),
+    ):
+        result = await validate_subtopic_updates(
+            "Python", ["not a dict", 123, None, {"subtopic": "Loops", "mastery": 50}]
+        )
+    assert len(result) == 1
+    assert result[0].subtopic == "Loops"
+
+
 if __name__ == "__main__":
     import asyncio
 

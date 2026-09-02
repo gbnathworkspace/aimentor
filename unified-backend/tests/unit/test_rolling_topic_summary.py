@@ -86,9 +86,9 @@ class TestCallMergeSummarizationLlm:
         svc._call_summarization_llm = AsyncMock(return_value={"summary": "s", "skill_updates": None})
 
         selected = _make_pair(100, 100, 1)
-        result = await svc._call_merge_summarization_llm(None, selected)
+        result = await svc._call_merge_summarization_llm(None, selected, "Some Topic")
 
-        svc._call_summarization_llm.assert_called_once_with(selected)
+        svc._call_summarization_llm.assert_called_once_with(selected, "Some Topic")
         assert result["summary"] == "s"
 
     @pytest.mark.asyncio
@@ -100,11 +100,13 @@ class TestCallMergeSummarizationLlm:
         existing = _make_summary("sb-1", "prior text", datetime(2024, 1, 1), datetime(2024, 1, 2), ["u0"])
         selected = _make_pair(100, 100, 1)
 
-        result = await svc._call_merge_summarization_llm(existing, selected)
+        result = await svc._call_merge_summarization_llm(existing, selected, "Some Topic")
 
-        called_with = svc._call_summarization_llm.call_args[0][0]
+        call_args = svc._call_summarization_llm.call_args[0]
+        called_with = call_args[0]
         assert called_with[0] == {"role": "PRIOR SUMMARY", "content": "prior text"}
         assert called_with[1:] == selected
+        assert call_args[1] == "Some Topic"
         assert result["summary"] == "merged"
 
 

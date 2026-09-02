@@ -17,6 +17,8 @@ import anthropic
 
 from app.config.database import compaction_events_col, topics_col
 from app.config.settings import get_settings
+from app.models.skill import SubtopicMasteryUpdate
+from app.services.llm_trace import traced_messages_create
 from app.services.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
@@ -68,24 +70,17 @@ _COMPACTION_TOOL_SCHEMA = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "topic": {"type": "string"},
-                        "subtopic_updates": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "subtopic": {"type": "string"},
-                                    "mastery": {"type": "number", "minimum": 0, "maximum": 100},
-                                },
-                                "required": ["subtopic", "mastery"],
-                            },
-                            "description": "Mastery (0-100) for only the specific subtopics this excerpt gives real evidence about — do not guess at subtopics not discussed.",
-                        },
+                        "subtopic": {"type": "string"},
+                        "mastery": {"type": "number", "minimum": 0, "maximum": 100},
                     },
-                    "required": ["topic", "subtopic_updates"],
+                    "required": ["subtopic", "mastery"],
                 },
-                "description": "Skill updates detected from the conversation. Empty array if no progress detected.",
+                "description": (
+                    "Mastery (0-100) for only the specific subtopics OF THE CURRENT TOPIC "
+                    "(given above) this excerpt gives real evidence about — do not guess at "
+                    "subtopics not discussed, and never invent a subtopic name that isn't "
+                    "actually part of this topic. Empty array if no progress detected."
+                ),
             },
             "taught_concepts": {
                 "type": "array",
@@ -160,45 +155,22 @@ def _format_conversation_excerpt(messages: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-async def _validate_skill_updates(skill_updates: list) -> list[dict]:
-    """Validate and sanitize skill updates from LLM output.
-
-    Filters out any updates that don't match the expected schema, and
-    validates each entry's subtopic_updates against that topic's canonical
-    subtopic list (see subtopic_weights.validate_subtopic_updates).
-
-    Args:
-        skill_updates: Raw list of skill update dicts from LLM.
-
-    Returns:
-        List of validated skill update dicts. An entry with zero surviving
-        subtopic_updates after validation is dropped entirely.
+async def _validate_skill_updates(
+    topic_title: str, skill_updates: list
+) -> list[SubtopicMasteryUpdate]:
+    """Validate raw (subtopic, mastery) pairs from LLM output against
+    `topic_title`'s canonical subtopic list (see
+    subtopic_weights.validate_subtopic_updates) — the topic is always the
+    one this compaction/checkpoint call is already scoped to, never a
+    string the LLM invents itself (that was the bug behind duplicate
+    skill_graph topics: see topic_chat_service's diagnostic-verdict path,
+    which never let the LLM name a topic either).
     """
     from app.services.subtopic_weights import validate_subtopic_updates
 
-    validated = []
-    for update in skill_updates:
-        if not isinstance(update, dict):
-            continue
-
-        topic = update.get("topic")
-        raw_subtopic_updates = update.get("subtopic_updates")
-
-        if not isinstance(topic, str) or not topic.strip():
-            continue
-        if not isinstance(raw_subtopic_updates, list):
-            continue
-
-        subtopic_updates = await validate_subtopic_updates(topic.strip(), raw_subtopic_updates)
-        if not subtopic_updates:
-            continue
-
-        validated.append({
-            "topic": topic.strip(),
-            "subtopic_updates": subtopic_updates,
-        })
-
-    return validated
+    if not topic_title or not isinstance(skill_updates, list) or not skill_updates:
+        return []
+    return await validate_subtopic_updates(topic_title, skill_updates)
 
 
 def _get_compaction_threshold() -> int:
@@ -387,29 +359,36 @@ class CompactionService:
     # LLM summarization stub (mockable for testing)
     # ------------------------------------------------------------------
 
-    async def _call_summarization_llm(self, messages: list[dict]) -> dict:
+    async def _call_summarization_llm(self, messages: list[dict], topic_title: str) -> dict:
         """Call Claude to summarize compacted messages and extract skill updates.
 
         The LLM is given the conversation excerpt and asked to produce:
         1. A narrative summary (3-5 sentences) capturing the key learning points
-        2. Zero or more structured skill updates (topic, subtopic_updates)
+        2. Zero or more (subtopic, mastery) skill updates, scoped to `topic_title`
 
         Uses Anthropic's tool_use feature to get reliable JSON output.
 
         Args:
             messages: List of message dicts to summarize.
+            topic_title: The topic this conversation belongs to — told to the
+                LLM so it scopes subtopics correctly, and used (not anything
+                the LLM returns) as the skill_graph key when applying updates.
 
         Returns:
             Dict with:
             - "summary": str — the narrative summary
-            - "skill_updates": list[dict] | None — skill updates or None if none detected
+            - "skill_updates": list[SubtopicMasteryUpdate] | None
         """
         # Step 1: Format conversation excerpt
         conversation_excerpt = _format_conversation_excerpt(messages)
 
         # Step 2: Load and interpolate the prompt template
         prompt_template = _load_compaction_prompt()
-        prompt_text = prompt_template.replace("{{conversation}}", conversation_excerpt)
+        prompt_text = (
+            prompt_template
+            .replace("{{topic}}", topic_title or "General")
+            .replace("{{conversation}}", conversation_excerpt)
+        )
 
         # Step 3: Call Claude with tool_use for structured output
         settings = get_settings()
@@ -417,7 +396,8 @@ class CompactionService:
 
         try:
             response = await asyncio.wait_for(
-                client.messages.create(
+                traced_messages_create(
+                    client, call_site="compaction_service._call_summarization_llm",
                     model=_SUMMARIZATION_MODEL,
                     max_tokens=1024,
                     tools=[_COMPACTION_TOOL_SCHEMA],
@@ -439,10 +419,10 @@ class CompactionService:
             raise
 
         # Step 4: Parse the tool_use response
-        return await self._parse_tool_use_response(response)
+        return await self._parse_tool_use_response(response, topic_title)
 
     async def _call_merge_summarization_llm(
-        self, existing_summary: dict | None, selected_messages: list[dict]
+        self, existing_summary: dict | None, selected_messages: list[dict], topic_title: str
     ) -> dict:
         """Summarize newly-selected messages, folding in an existing rolling summary if present.
 
@@ -452,16 +432,18 @@ class CompactionService:
         into ONE updated summary) and the same tool schema/parsing path are reused as-is.
         """
         if existing_summary is None:
-            return await self._call_summarization_llm(selected_messages)
+            return await self._call_summarization_llm(selected_messages, topic_title)
 
         prior_entry = {"role": "PRIOR SUMMARY", "content": existing_summary["summary"]}
-        return await self._call_summarization_llm([prior_entry] + selected_messages)
+        return await self._call_summarization_llm([prior_entry] + selected_messages, topic_title)
 
-    async def _parse_tool_use_response(self, response) -> dict:
+    async def _parse_tool_use_response(self, response, topic_title: str) -> dict:
         """Parse the Anthropic tool_use response to extract summary and skill updates.
 
         Args:
             response: The Anthropic API response object.
+            topic_title: Passed straight through to _validate_skill_updates —
+                see _call_summarization_llm for why this is never LLM-supplied.
 
         Returns:
             Dict with "summary" and "skill_updates" keys.
@@ -491,8 +473,8 @@ class CompactionService:
         if not isinstance(raw_skill_updates, list):
             raw_skill_updates = []
 
-        # Validate each skill update
-        validated_updates = await _validate_skill_updates(raw_skill_updates)
+        # Validate each skill update against topic_title's canonical subtopic list
+        validated_updates = await _validate_skill_updates(topic_title, raw_skill_updates)
 
         raw_taught_concepts = tool_input.get("taught_concepts", [])
         if not isinstance(raw_taught_concepts, list):
@@ -536,14 +518,14 @@ class CompactionService:
             return
 
         try:
-            llm_result = await self._call_summarization_llm(recent)
+            llm_result = await self._call_summarization_llm(recent, topic.get("title", ""))
         except Exception as e:
             logger.error("Skill checkpoint LLM call failed for topic %s: %s", topic_id, str(e))
             return
 
         skill_updates = llm_result.get("skill_updates")
         if skill_updates:
-            await self._apply_skill_updates(user_id, skill_updates)
+            await self._apply_skill_updates(user_id, topic.get("title", ""), skill_updates)
 
         taught_concepts = llm_result.get("taught_concepts")
         if taught_concepts:
@@ -674,7 +656,7 @@ class CompactionService:
         # turn, oldest first, so the LLM folds them into one narrative.
         synthetic = [{"role": "PRIOR SUMMARY", "content": s["summary"]} for s in legacy]
         try:
-            llm_result = await self._call_summarization_llm(synthetic)
+            llm_result = await self._call_summarization_llm(synthetic, topic.get("title", ""))
         except Exception as e:
             logger.error("Legacy summary migration failed for topic %s: %s", topic_id, str(e))
             return None
@@ -786,7 +768,9 @@ class CompactionService:
 
         # Step 4: Call LLM for summarization, folding in the existing rolling
         # summary (if any) instead of producing an independent new block.
-        llm_result = await self._call_merge_summarization_llm(existing_summary, selected)
+        llm_result = await self._call_merge_summarization_llm(
+            existing_summary, selected, topic.get("title", "")
+        )
         summary_text = llm_result["summary"]
         skill_updates = llm_result.get("skill_updates")
         taught_concepts = llm_result.get("taught_concepts")
@@ -888,7 +872,9 @@ class CompactionService:
             "tokensAfterCompaction": new_token_estimate,
             "tokensReclaimed": tokens_reclaimed,
             "skillUpdateGenerated": skill_updates is not None and len(skill_updates) > 0,
-            "skillUpdate": skill_updates,
+            # Plain dicts for storage — skill_updates itself is a list of
+            # SubtopicMasteryUpdate Pydantic models, which Mongo can't encode.
+            "skillUpdate": [u.model_dump() for u in skill_updates] if skill_updates else None,
             "summaryBlockId": summary_block_id,
         }
         await compaction_events_col().insert_one(compaction_event)
@@ -898,7 +884,7 @@ class CompactionService:
         # never the merged summary text — so progress already applied by prior
         # compactions is never re-derived (Req 5.1, 5.2).
         if skill_updates:
-            await self._apply_skill_updates(user_id, skill_updates)
+            await self._apply_skill_updates(user_id, topic.get("title", ""), skill_updates)
 
         if taught_concepts:
             await self._apply_taught_concepts(topic_id, user_id, taught_concepts)
@@ -917,7 +903,9 @@ class CompactionService:
             "tokensReclaimed": tokens_reclaimed,
         }
 
-    async def _apply_skill_updates(self, user_id: str, skill_updates: list[dict]) -> None:
+    async def _apply_skill_updates(
+        self, user_id: str, topic_title: str, skill_updates: list[SubtopicMasteryUpdate]
+    ) -> None:
         """Apply extracted skill updates to the skill graph with retry logic.
 
         Retries up to MAX_SKILL_UPDATE_RETRIES (3) times on failure.
@@ -926,16 +914,15 @@ class CompactionService:
 
         Args:
             user_id: The user's ID.
-            skill_updates: List of skill update dicts from LLM response.
+            topic_title: The topic these updates belong to (see
+                _call_summarization_llm — never taken from the LLM response).
+            skill_updates: Validated (subtopic, mastery) pairs.
         """
         from app.services.skill_graph_repo import apply_update
 
         for attempt in range(MAX_SKILL_UPDATE_RETRIES):
             try:
-                for update_data in skill_updates:
-                    await apply_update(
-                        user_id, update_data["topic"], update_data["subtopic_updates"]
-                    )
+                await apply_update(user_id, topic_title, skill_updates)
                 return  # success
             except Exception as e:
                 logger.error(

@@ -33,6 +33,9 @@ class SkillNode(BaseModel):
     # flag, since that would just be a second field mirroring this one
     # (issue #50's cold-start gate reads `not subtopic_mastery` directly).
     subtopic_mastery: dict[str, float] = Field(default_factory=dict)
+    # ISO timestamp of the last mastery update per subtopic — set alongside
+    # subtopic_mastery in skill_graph_repo.apply_update, never independently.
+    subtopic_last_studied: dict[str, str] = Field(default_factory=dict)
 
 
 class SkillUpdate(BaseModel):

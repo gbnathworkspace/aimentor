@@ -15,6 +15,7 @@ import anthropic
 
 from app.config.database import topics_col
 from app.config.settings import get_settings
+from app.services.llm_trace import traced_messages_create
 from app.services.compaction_service import (
     CompactionService,
     _LLM_TIMEOUT_SECONDS,
@@ -67,7 +68,8 @@ async def _call_merge_two_blocks_llm(text_a: str, text_b: str) -> str:
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     response = await asyncio.wait_for(
-        client.messages.create(
+        traced_messages_create(
+            client, call_site="session_summarizer._call_merge_two_blocks_llm",
             model=_SUMMARIZATION_MODEL,
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
@@ -144,14 +146,16 @@ async def close_session(topic_id: str, user_id: str, upto_timestamp: datetime) -
         return
 
     try:
-        llm_result = await _compaction_service._call_summarization_llm(session_messages)
+        llm_result = await _compaction_service._call_summarization_llm(
+            session_messages, topic.get("title", "")
+        )
     except Exception as e:
         logger.error("Session summarization LLM call failed for topic %s: %s", topic_id, str(e))
         return
 
     skill_updates = llm_result.get("skill_updates")
     if skill_updates:
-        await _compaction_service._apply_skill_updates(user_id, skill_updates)
+        await _compaction_service._apply_skill_updates(user_id, topic.get("title", ""), skill_updates)
 
     taught_concepts = llm_result.get("taught_concepts")
     if taught_concepts:

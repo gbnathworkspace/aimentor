@@ -17,6 +17,7 @@ import anthropic
 from app.config.database import profiles_col
 from app.config.settings import get_settings
 from app.models.profile import StyleNoteCategory
+from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,8 @@ async def _call_llm(prompt: str) -> dict[str, Any] | None:
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     try:
-        response = await client.messages.create(
+        response = await traced_messages_create(
+            client, call_site="memory_editor._call_llm",
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],

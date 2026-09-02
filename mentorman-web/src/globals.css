@@ -2001,32 +2001,23 @@ body {
 .sw-title { margin: 0 0 4px; font-size: 15px; font-weight: 650; color: var(--fg); }
 .sw-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); }
 .sw-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 14px; margin-bottom: 6px;
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) 56px 62px; align-items: center; gap: 12px;
+  padding: 10px 14px; margin-bottom: 6px;
   border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--card-2);
 }
 .sw-row:last-child { margin-bottom: 0; }
 .sw-name {
-  flex: 1 1 auto; min-width: 0;
+  min-width: 0;
   font-size: 12.5px; font-weight: 550; color: var(--fg-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   display: flex; align-items: center; gap: 6px;
 }
-.sw-bar-track {
-  flex: 0 0 120px; height: 7px; border-radius: 999px;
-  background: var(--card-3); border: 1px solid var(--border-soft);
-  overflow: hidden; position: relative;
-}
-.sw-bar-fill {
-  display: block; height: 100%; border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 70%, #2bd), var(--accent));
-  box-shadow: 0 0 8px var(--accent-glow);
-}
 .sw-value {
-  flex: 0 0 44px; text-align: right;
-  font-family: var(--mono); font-size: 11px; color: var(--muted-2);
+  text-align: right;
+  font-family: var(--mono); font-size: 12px; color: var(--muted-2);
 }
+.sw-value--muted { font-size: 11px; color: var(--muted); }
 .sw-hint { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 .sw-temp-control {
   display: flex; align-items: center; gap: 10px;
@@ -2046,29 +2037,58 @@ body {
    plain bar list (no proficiency, or a manual-reorder result) keeps the
    original single-column width. */
 .sw-dialog--chart { width: 1300px; }
-.sw-cols { display: flex; gap: 22px; align-items: flex-start; }
-.sw-bars { flex: 1 1 auto; min-width: 0; }
+/* Grid, not flex — both tracks are allowed to shrink together as the dialog
+   is clamped to the viewport (see .sw-dialog's max-width), so the radar
+   panel can never push past the dialog edge the way a flex-basis:560px
+   rigid column did. */
+.sw-cols { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(260px, 38%); gap: 22px; align-items: start; }
+.sw-bars { min-width: 0; }
 .sw-radar-col {
-  flex: 0 0 620px; display: flex; flex-direction: column; align-items: center;
-  gap: 8px; padding-top: 2px;
+  min-width: 0; display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 16px 18px 12px;
+  border: 1px solid var(--hair); border-radius: var(--r-lg); background: var(--card);
 }
-.sw-radar-title { font-size: 12.5px; font-weight: 600; color: var(--muted); text-align: center; }
+.sw-radar-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .sw-radar-svg { max-width: 100%; max-height: 64vh; height: auto; }
-/* Legend distinguishes the two different percentages that can appear on a
-   row — the existing bar (study-time weight) vs the new badge (proficiency) —
-   so they don't read as the same number. */
-.sw-legend { display: flex; gap: 14px; margin-bottom: 8px; font-size: 10.5px; color: var(--muted); }
 .sw-legend-item { display: inline-flex; align-items: center; gap: 5px; }
 .sw-legend-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-.sw-legend-swatch--bar { background: var(--accent); }
 .sw-legend-swatch--radar { background: var(--accent-weak); border: 1.5px solid var(--accent); box-sizing: border-box; }
-.sw-proficiency {
-  flex: 0 0 auto; font-family: var(--mono); font-size: 10px; color: var(--muted);
-  white-space: nowrap;
+.sw-legend-swatch--ring { border: 1px solid var(--border); box-sizing: border-box; }
+
+/* Readiness summary sits beside the title — an at-a-glance band derived from
+   mean "caught up" proficiency (see readiness in SubtopicWeightsModal). */
+.sw-head-main { display: flex; align-items: flex-end; gap: 22px; min-width: 0; }
+.sw-readiness { display: flex; flex-direction: column; gap: 4px; padding-left: 20px; border-left: 1px solid var(--border-soft); }
+.sw-readiness-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.sw-readiness-row { display: flex; align-items: baseline; gap: 9px; }
+.sw-readiness-band { font-size: 15px; font-weight: 650; color: var(--accent); }
+.sw-readiness-segs { display: flex; gap: 3px; padding-bottom: 2px; }
+.sw-readiness-seg { width: 13px; height: 4px; border-radius: 3px; background: var(--card-3); }
+.sw-readiness-seg--on { background: var(--accent); }
+
+.sw-col-head {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) 56px 62px; gap: 12px; padding: 0 14px 8px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.sw-col-head-value { text-align: right; }
+.sw-row-num { font-family: var(--mono); font-size: 11px; color: var(--muted-2); }
+.sw-badge {
+  flex: none; font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 999px; border: 1px solid; line-height: 1.5;
+}
+.sw-badge--info { color: var(--info); background: var(--info-weak); border-color: var(--info-line); }
+.sw-badge--accent { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }
+.sw-value--max { color: var(--accent); font-weight: 600; }
+
+.sw-radar-col-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; }
+.sw-radar-legend { display: flex; align-items: center; gap: 12px; flex: none; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.sw-radar-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding-top: 8px; border-top: 1px solid var(--hair);
+  font-family: var(--mono); font-size: 10px; letter-spacing: .04em; color: var(--muted);
 }
 @media (max-width: 720px) {
-  .sw-cols { flex-wrap: wrap; }
-  .sw-radar-col { flex: 1 1 100%; }
+  .sw-cols { grid-template-columns: 1fr; }
 }
 
 /* L1MemoryModal — same section structure as Settings' Memory tab (Facts

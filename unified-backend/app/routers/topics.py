@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.auth.dependencies import require_auth
-from app.config.database import topics_col, weight_nudges_col
+from app.config.database import skill_graph_col, topics_col, weight_nudges_col
 from app.models.chat import MentorMode
 from app.services.extraction import process_topic_document
 from app.services.file_upload import store_file, validate_files
@@ -110,6 +110,10 @@ class SubtopicWeightsResponse(BaseModel):
     # 0-100 estimated mastery per subtopic — only set on the goal_intent path
     # (see derive_subtopic_weights); None elsewhere.
     proficiency: Optional[dict[str, float]] = None
+    # ISO timestamp per subtopic from skill_graph's real (non-LLM-estimated)
+    # mastery updates — see SkillNode.subtopic_last_studied. Present whenever
+    # any subtopic in this topic has ever been updated, regardless of path.
+    subtopic_last_studied: Optional[dict[str, str]] = None
 
 
 class NudgeFlagLogRequest(BaseModel):
@@ -346,6 +350,14 @@ async def get_subtopic_weights(
     topic = await _topic_service.get_topic(topic_id, user_id)
     subtopics = await get_subtopics(topic["title"])
 
+    # Real (non-LLM-estimated) per-subtopic history, independent of the
+    # goal_intent cache below — always current, so it's looked up fresh on
+    # every call rather than cached on the topic doc.
+    skill_node = await skill_graph_col().find_one(
+        {"user_id": user_id, "topic": topic["title"]}, {"subtopic_last_studied": 1}
+    )
+    subtopic_last_studied = (skill_node or {}).get("subtopic_last_studied") or None
+
     cacheable = (
         body.goal_intent is not None
         and body.pairwise_comparisons is None
@@ -364,6 +376,7 @@ async def get_subtopic_weights(
             flags=[],
             needs_pairwise=False,
             proficiency=cached.get("proficiency"),
+            subtopic_last_studied=subtopic_last_studied,
         )
 
     try:
@@ -399,6 +412,7 @@ async def get_subtopic_weights(
         ],
         needs_pairwise=result.needs_pairwise,
         proficiency=result.proficiency,
+        subtopic_last_studied=subtopic_last_studied,
     )
 
 

@@ -267,14 +267,12 @@ class TestSkillGraphRetry:
         tc = TokenCounter(total_budget=1000, fixed_overhead=0)
         svc = CompactionService(token_counter=tc)
 
-        skill_updates = [
-            {"topic": "BFS", "subtopic_updates": [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]}
-        ]
+        skill_updates = [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]
 
         with patch("app.services.skill_graph_repo.apply_update", new_callable=AsyncMock) as mock_apply:
             mock_apply.side_effect = [RuntimeError("Temporary DB error"), None]
 
-            await svc._apply_skill_updates("user-1", skill_updates)
+            await svc._apply_skill_updates("user-1", "BFS", skill_updates)
 
             # Should have been called twice (failed first, succeeded second)
             assert mock_apply.call_count == 2
@@ -285,15 +283,13 @@ class TestSkillGraphRetry:
         tc = TokenCounter(total_budget=1000, fixed_overhead=0)
         svc = CompactionService(token_counter=tc)
 
-        skill_updates = [
-            {"topic": "BFS", "subtopic_updates": [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]}
-        ]
+        skill_updates = [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]
 
         with patch("app.services.skill_graph_repo.apply_update", new_callable=AsyncMock) as mock_apply:
             mock_apply.side_effect = RuntimeError("Persistent DB error")
 
             # Should NOT raise — failure is handled internally
-            await svc._apply_skill_updates("user-1", skill_updates)
+            await svc._apply_skill_updates("user-1", "BFS", skill_updates)
 
             # Should have been called MAX_SKILL_UPDATE_RETRIES times
             assert mock_apply.call_count == MAX_SKILL_UPDATE_RETRIES
@@ -308,9 +304,7 @@ class TestSkillGraphRetry:
         messages = [*_make_pair(200, 200, 1), *_make_pair(200, 200, 2)]
         topic_doc = _build_topic_doc(messages)
 
-        skill_updates = [
-            {"topic": "BFS", "subtopic_updates": [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]}
-        ]
+        skill_updates = [SubtopicMasteryUpdate(subtopic="Queues", mastery=60)]
 
         svc._call_summarization_llm = AsyncMock(return_value={
             "summary": "Discussion of BFS traversal.",

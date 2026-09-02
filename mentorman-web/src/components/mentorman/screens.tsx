@@ -828,19 +828,6 @@ export function Settings({ profile, avatarUrl, onAvatarChanged, onReset, onSaved
                 </div>
               </div>
 
-              {/* ponytail: no session event log yet — needs a backend feed of
-                  per-session moments before this can show real entries. */}
-              <div className="settings-group">
-                <div className="set-header">
-                  <div className="set-label">Session Moments</div>
-                  <div className="set-header-line" />
-                  <div className="set-header-count">Not tracked</div>
-                </div>
-                <div className="memory-stub" style={{ marginTop: 12 }}>
-                  Session-by-session moments (stuck points, breakthroughs) aren&apos;t tracked yet.
-                </div>
-              </div>
-
               <div className="settings-group">
                 <div className="set-header">
                   <div className="set-label">Insights</div>
@@ -1053,6 +1040,108 @@ export function AdminUsers() {
               ))}
               {users.length === 0 && (
                 <div style={{ color: 'var(--muted)', fontSize: 13, padding: 12 }}>No users found.</div>
+              )}
+            </div>
+          )}
+
+          {!error && totalPages > 1 && (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', padding: '12px 0' }}>
+              <button className="btn btn-sm btn-ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>{page} / {totalPages}</span>
+              <button className="btn btn-sm btn-ghost" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Admin: LLM call trace log ---------------------------
+interface LlmTrace {
+  call_site: string;
+  model: string;
+  user_id: string | null;
+  prompt: string;
+  response: string | null;
+  error: string | null;
+  duration_ms: number;
+  created_at: string;
+}
+
+const TRACE_PAGE_SIZE = 20;
+
+export function TraceLog() {
+  const [traces, setTraces] = useState<LlmTrace[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`/api/admin/traces?page=${page}&page_size=${TRACE_PAGE_SIZE}`)
+      .then(r => {
+        if (r.status === 403) throw new Error('Admins only — you don’t have access to this page.');
+        if (!r.ok) throw new Error('Failed to load traces.');
+        return r.json();
+      })
+      .then(data => { setTraces(data.traces ?? []); setTotal(data.total ?? 0); })
+      .catch(e => setError(e.message || 'Failed to load traces.'))
+      .finally(() => setLoading(false));
+  }, [page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / TRACE_PAGE_SIZE));
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div className="ph-left"><div className="ph-title">LLM Traces</div><div className="ph-sub">{total} total · last 14 days</div></div>
+        <button className="btn btn-sm btn-ghost" onClick={load} disabled={loading}>Refresh</button>
+      </div>
+      <div className="set-body">
+        <div className="set-inner">
+          {error ? (
+            <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', background: 'rgba(248,113,113,0.08)', borderRadius: 6 }}>
+              {error}
+            </div>
+          ) : loading ? (
+            <div style={{ color: 'var(--muted)', fontSize: 13, padding: 12 }}>Loading traces…</div>
+          ) : (
+            <div className="set-section">
+              {traces.map((t, i) => (
+                <div key={i} className="set-row" style={{ flexDirection: 'column', alignItems: 'stretch', cursor: 'pointer' }} onClick={() => setExpanded(expanded === i ? null : i)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span className={`pill ${t.error ? 'warn' : 'ok'}`}><span className="ind" />{t.error ? 'error' : 'ok'}</span>
+                    <span className="v" style={{ flex: 1, minWidth: 0, fontFamily: 'var(--mono)', fontSize: 12 }}>{t.call_site}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>{t.model}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>{t.duration_ms}ms</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted-2)' }}>{new Date(t.created_at).toLocaleString()}</span>
+                  </div>
+                  {expanded === i && (
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Prompt</div>
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, color: 'var(--fg-dim)' }}>{t.prompt}</pre>
+                      </div>
+                      <div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>
+                          {t.error ? 'Error' : 'Response'}
+                        </div>
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, color: t.error ? '#f87171' : 'var(--fg-dim)' }}>
+                          {t.error || t.response}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {traces.length === 0 && (
+                <div style={{ color: 'var(--muted)', fontSize: 13, padding: 12 }}>No traces yet.</div>
               )}
             </div>
           )}

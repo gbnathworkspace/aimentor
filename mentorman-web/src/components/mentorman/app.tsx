@@ -6,11 +6,11 @@ import { TopicSidebar } from './TopicSidebar';
 import { ArchivedTopics } from './ArchivedTopics';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
-import { Onboarding, Settings, AdminUsers } from './screens';
+import { Onboarding, Settings, AdminUsers, TraceLog } from './screens';
 import { DEFAULT_TONE, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'onboarding';
+type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'analytics' | 'onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
@@ -30,9 +30,9 @@ export function MentorManApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Settings renders as a modal over whichever main view was active — remember it so
   // closing the modal returns there instead of always landing on chat.
-  const [lastMainView, setLastMainView] = useState<'chat' | 'dashboard' | 'admin'>('chat');
+  const [lastMainView, setLastMainView] = useState<'chat' | 'dashboard' | 'admin' | 'analytics'>('chat');
   useEffect(() => {
-    if (view === 'chat' || view === 'dashboard' || view === 'admin') setLastMainView(view);
+    if (view === 'chat' || view === 'dashboard' || view === 'admin' || view === 'analytics') setLastMainView(view);
   }, [view]);
 
   // Fetch user name via /api/me
@@ -179,6 +179,7 @@ export function MentorManApp() {
             <Dashboard onStartTopic={startTopic} profile={profile} />
           )}
           {lastMainView === 'admin' && <AdminUsers />}
+          {lastMainView === 'analytics' && <TraceLog />}
           {view === 'settings' && (
             <div className="settings-modal-overlay" onClick={() => setView(lastMainView)}>
               <div className="settings-modal" onClick={e => e.stopPropagation()}>

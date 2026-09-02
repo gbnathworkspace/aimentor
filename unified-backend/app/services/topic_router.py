@@ -23,6 +23,7 @@ import anthropic
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config.settings import get_settings
+from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,8 @@ async def route_topic(query: str, topics: list[dict]) -> TopicRouteResult:
 
     try:
         response = await asyncio.wait_for(
-            client.messages.create(
+            traced_messages_create(
+                client, call_site="topic_router.route_topic",
                 model=_ROUTER_MODEL,
                 max_tokens=_ROUTER_MAX_TOKENS,
                 system=_SYSTEM_PROMPT,

@@ -21,6 +21,7 @@ import anthropic
 from pydantic import BaseModel, ValidationError
 
 from app.config.settings import get_settings
+from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,8 @@ async def route_user_turn(
 
     try:
         response = await asyncio.wait_for(
-            client.messages.create(
+            traced_messages_create(
+                client, call_site="mode_router.route_user_turn",
                 model=_ROUTER_MODEL,
                 max_tokens=_ROUTER_MAX_TOKENS,
                 system=_ROUTER_SYSTEM_PROMPT,

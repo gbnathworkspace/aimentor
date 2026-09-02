@@ -21,6 +21,7 @@ from app.models.chat import (
     OnboardingSkipResponse,
 )
 from app.models.profile import LearningContextDetail, ProfileCreate
+from app.services.llm_trace import traced_messages_create
 from app.services.onboarding_bootstrap import bootstrap_skills
 from app.services.prompt_store import get_onboarding_prompt
 from app.services.response_parsing import extract_suggestions
@@ -86,7 +87,8 @@ async def onboarding_chat(
     try:
         client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-        response = await client.messages.create(
+        response = await traced_messages_create(
+            client, call_site="onboarding.onboarding_chat", user_id=user_id,
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
             system=system_prompt,

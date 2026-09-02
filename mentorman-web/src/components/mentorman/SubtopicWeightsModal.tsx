@@ -17,6 +17,9 @@ interface WeightsResponse {
   // 0-100 estimated "caught up" mastery per subtopic — only populated on the
   // goalIntent path (see subtopic_weights.py); null after a manual reorder.
   proficiency: Record<string, number> | null;
+  // ISO timestamp per subtopic from the real skill graph (SkillNode.subtopic_last_studied) —
+  // present whenever any subtopic in this topic has ever gotten a mastery update, on every path.
+  subtopicLastStudied: Record<string, string> | null;
 }
 
 type Phase = 'loading' | 'result' | 'error';
@@ -49,6 +52,23 @@ function applyTemperature(baseline: Record<string, number>, temperature: number)
     result[k] = total === 0 ? 100 / Object.keys(powered).length : (powered[k] / total) * 100;
   }
   return result;
+}
+
+// "2d ago" / "3w ago" style — coarse on purpose, this is a glance-value next
+// to a row, not a precise audit log.
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
 }
 
 function equalSplit(subtopics: string[]): Record<string, number> {
@@ -305,6 +325,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
 
   const [baseline, setBaseline] = useState<Record<string, number>>({});
   const [proficiency, setProficiency] = useState<Record<string, number> | null>(null);
+  const [lastStudied, setLastStudied] = useState<Record<string, string> | null>(null);
   const [temperature, setTemperature] = useState(TEMP_DEFAULT);
   const [editing, setEditing] = useState(false);
   // Manual reorder-to-rank, offered inside Edit as an alternative to the
@@ -324,6 +345,29 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
     [order, proficiency]
   );
   const showRadar = !rankMode && radarSubtopics.length >= 3;
+
+  const BANDS = ['Beginner', 'Building', 'Solid', 'Strong'];
+  // Readiness band from mean "caught up" proficiency — only meaningful once
+  // there's at least one scored subtopic, so it's absent on manual-reorder
+  // results (proficiency is null there, see WeightsResponse.proficiency).
+  const readiness = useMemo(() => {
+    if (!proficiency) return null;
+    const vals = order.map((s) => proficiency[s]).filter((v): v is number => v != null);
+    if (!vals.length) return null;
+    const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+    const band = avg < 25 ? 0 : avg < 50 ? 1 : avg < 75 ? 2 : 3;
+    return { avg, band };
+  }, [proficiency, order]);
+
+  // Mirrors the "lowest few" cutoff used to flag focus rows: the 3rd-lowest
+  // score (or the worst one, with fewer than 3 assessed) sets the bar.
+  const lowThreshold = useMemo(() => {
+    if (!proficiency) return null;
+    const sorted = order.map((s) => proficiency[s]).filter((v): v is number => v != null).sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.min(2, sorted.length - 1)] : null;
+  }, [proficiency, order]);
+
+  const maxDisplay = useMemo(() => Math.max(0, ...Object.values(display)), [display]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); }
@@ -359,6 +403,7 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
       const w = data.needsPairwise ? equalSplit(data.subtopics) : data.weights || {};
       setBaseline(w);
       setProficiency(data.proficiency ?? null);
+      setLastStudied(data.subtopicLastStudied ?? null);
       setTemperature(TEMP_DEFAULT);
       setEditing(false);
       setRankMode(false);
@@ -426,9 +471,24 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
         onKeyDown={handleKeyDown}
       >
         <div className="sw-head">
-          <div>
-            <h2 id="sw-title" className="sw-title">Where should you focus?</h2>
-            <div className="sw-sub">{topicTitle ? `for ${topicTitle}` : 'Adjust your study focus'}</div>
+          <div className="sw-head-main">
+            <div>
+              <h2 id="sw-title" className="sw-title">Where should you focus?</h2>
+              <div className="sw-sub">{topicTitle ? `for ${topicTitle}` : 'Adjust your study focus'}</div>
+            </div>
+            {readiness && phase === 'result' && !rankMode && (
+              <div className="sw-readiness">
+                <div className="sw-readiness-label">Readiness</div>
+                <div className="sw-readiness-row">
+                  <span className="sw-readiness-band">{BANDS[readiness.band]}</span>
+                  <span className="sw-readiness-segs">
+                    {BANDS.map((b, i) => (
+                      <span key={b} className={`sw-readiness-seg${i <= readiness.band ? ' sw-readiness-seg--on' : ''}`} />
+                    ))}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
           <div className="sw-head-actions">
             {onOpenL1Memory && (
@@ -513,26 +573,48 @@ export function SubtopicWeightsModal({ open, onClose, topicId, topicTitle, profi
             ) : (
               <div className="sw-cols">
                 <div className="sw-bars">
-                  {proficiency && (
-                    <div className="sw-legend">
-                      <span className="sw-legend-item"><span className="sw-legend-swatch sw-legend-swatch--bar" />Study time</span>
-                      <span className="sw-legend-item"><span className="sw-legend-swatch sw-legend-swatch--radar" />Caught up</span>
-                    </div>
-                  )}
-                  {order.map((s) => (
-                    <div key={s} className="sw-row">
-                      <span className="sw-name" title={s}>{s}</span>
-                      <span className="sw-bar-track">
-                        <span className="sw-bar-fill" style={{ width: `${display[s] ?? 0}%` }} />
-                      </span>
-                      <span className="sw-value">{(display[s] ?? 0).toFixed(1)}%</span>
-                    </div>
-                  ))}
+                  <div className="sw-col-head">
+                    <span className="sw-col-head-num" />
+                    <span>Subtopic</span>
+                    <span className="sw-col-head-value">Weight</span>
+                    <span className="sw-col-head-value">Reviewed</span>
+                  </div>
+                  {order.map((s, i) => {
+                    const isNew = proficiency ? proficiency[s] == null : false;
+                    const isFocus = !isNew && lowThreshold != null && (proficiency?.[s] ?? 0) <= lowThreshold;
+                    const isMax = (display[s] ?? 0) === maxDisplay;
+                    const studiedAt = lastStudied?.[s];
+                    return (
+                      <div key={s} className="sw-row">
+                        <span className="sw-row-num">{String(i + 1).padStart(2, '0')}</span>
+                        <span className="sw-name" title={s}>
+                          {s}
+                          {isNew && <span className="sw-badge sw-badge--info">New</span>}
+                          {isFocus && <span className="sw-badge sw-badge--accent">Focus</span>}
+                        </span>
+                        <span className={`sw-value${isMax ? ' sw-value--max' : ''}`}>{(display[s] ?? 0).toFixed(1)}%</span>
+                        <span className="sw-value sw-value--muted">{studiedAt ? relativeTime(studiedAt) : '—'}</span>
+                      </div>
+                    );
+                  })}
                 </div>
                 {showRadar && (
                   <div className="sw-radar-col">
-                    <div className="sw-radar-title">Caught up, by subtopic</div>
+                    <div className="sw-radar-col-head">
+                      <div className="sw-radar-title">Coverage by subtopic</div>
+                      <div className="sw-radar-legend">
+                        <span className="sw-legend-item"><span className="sw-legend-swatch sw-legend-swatch--radar" />Caught up</span>
+                        <span className="sw-legend-item"><span className="sw-legend-swatch sw-legend-swatch--ring" />100</span>
+                      </div>
+                    </div>
                     <RadarChart subtopics={radarSubtopics} proficiency={proficiency!} />
+                    {readiness && (
+                      <div className="sw-radar-foot">
+                        <span>AVG {readiness.avg} / 100</span>
+                        <span>{radarSubtopics.length} ASSESSED</span>
+                        <span>{order.length - radarSubtopics.length} NOT STARTED</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

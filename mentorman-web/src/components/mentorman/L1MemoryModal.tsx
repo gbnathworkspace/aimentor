@@ -155,15 +155,6 @@ export function L1MemoryModal({ open, topicTitle, entries, profile, onResolve, o
 
         <div className="l1-memory-section">
           <div className="set-header">
-            <span className="set-label">Session Moments</span>
-            <div className="set-header-line" />
-            <span className="set-header-count">Not tracked</span>
-          </div>
-          <p className="sw-goal-note">Session-by-session moments (stuck points, breakthroughs) aren&apos;t tracked yet.</p>
-        </div>
-
-        <div className="l1-memory-section">
-          <div className="set-header">
             <span className="set-label">Insights</span>
             <div className="set-header-line" />
             <span className="set-header-count">{(profile?.style_notes ?? []).length} inferred</span>

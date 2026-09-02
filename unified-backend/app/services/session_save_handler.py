@@ -30,6 +30,7 @@ from app.models.session import (
     SessionSkillUpdate,
     SessionStatus,
 )
+from app.services.llm_trace import traced_messages_create
 from app.services.message_store import MessageStore
 from app.services.profiling_agent import propose_changes as propose_profile_changes
 from app.services.session_manager import SessionManager
@@ -205,7 +206,8 @@ async def _call_llm(prompt: str) -> str | None:
 
     try:
         response = await asyncio.wait_for(
-            client.messages.create(
+            traced_messages_create(
+                client, call_site="session_save_handler._call_llm",
                 model="claude-haiku-4-5-20251001",
                 max_tokens=_MAX_OUTPUT_TOKENS,
                 messages=[

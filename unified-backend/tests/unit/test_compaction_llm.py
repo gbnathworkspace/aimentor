@@ -72,56 +72,49 @@ class TestFormatConversationExcerpt:
 
 
 class TestValidateSkillUpdates:
-    """Tests for _validate_skill_updates helper. Subtopic-level validation
-    itself is delegated to subtopic_weights.validate_subtopic_updates and
-    mocked here (tested separately in test_subtopic_weights.py)."""
+    """Tests for _validate_skill_updates helper. `topic_title` is always
+    supplied by the caller (never the LLM — see _call_summarization_llm),
+    and subtopic-level validation itself is delegated to
+    subtopic_weights.validate_subtopic_updates (mocked here, tested
+    separately in test_subtopic_weights.py)."""
 
     @pytest.mark.asyncio
     async def test_valid_update_passes(self):
         """A well-formed skill update passes validation."""
         from app.models.skill import SubtopicMasteryUpdate
 
-        updates = [{"topic": "Graph Algorithms", "subtopic_updates": [{"subtopic": "DFS", "mastery": 40}]}]
+        updates = [{"subtopic": "DFS", "mastery": 40}]
         with patch(
             "app.services.subtopic_weights.validate_subtopic_updates",
             AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="DFS", mastery=40)]),
         ):
-            result = await _validate_skill_updates(updates)
+            result = await _validate_skill_updates("Graph Algorithms", updates)
         assert len(result) == 1
-        assert result[0]["topic"] == "Graph Algorithms"
-        assert result[0]["subtopic_updates"][0].subtopic == "DFS"
+        assert result[0].subtopic == "DFS"
 
     @pytest.mark.asyncio
     async def test_all_subtopics_dropped_rejects_whole_entry(self):
-        """If subtopic validation drops every proposed subtopic, the entry
-        carries no information and is dropped entirely."""
-        updates = [{"topic": "Graphs", "subtopic_updates": [{"subtopic": "Nonsense", "mastery": 10}]}]
+        """If subtopic validation drops every proposed subtopic, nothing survives."""
+        updates = [{"subtopic": "Nonsense", "mastery": 10}]
         with patch(
             "app.services.subtopic_weights.validate_subtopic_updates",
             AsyncMock(return_value=[]),
         ):
-            result = await _validate_skill_updates(updates)
+            result = await _validate_skill_updates("Graphs", updates)
         assert len(result) == 0
 
     @pytest.mark.asyncio
     async def test_missing_topic_rejected(self):
-        """Skill update with empty topic is filtered out."""
-        updates = [{"topic": "", "subtopic_updates": [{"subtopic": "x", "mastery": 10}]}]
-        result = await _validate_skill_updates(updates)
-        assert len(result) == 0
-
-    @pytest.mark.asyncio
-    async def test_non_dict_items_filtered(self):
-        """Non-dict items in the list are filtered out."""
-        updates = ["not a dict", 123, None]
-        result = await _validate_skill_updates(updates)
+        """An empty topic_title short-circuits to no updates (never falls back
+        to a topic name the LLM proposed — there is none anymore)."""
+        updates = [{"subtopic": "x", "mastery": 10}]
+        result = await _validate_skill_updates("", updates)
         assert len(result) == 0
 
     @pytest.mark.asyncio
     async def test_non_list_subtopic_updates_rejected(self):
-        """A non-list subtopic_updates value is rejected outright (no default-empty)."""
-        updates = [{"topic": "Graphs", "subtopic_updates": "not a list"}]
-        result = await _validate_skill_updates(updates)
+        """A non-list skill_updates value is rejected outright (no default-empty)."""
+        result = await _validate_skill_updates("Graphs", "not a list")
         assert len(result) == 0
 
 
@@ -180,16 +173,17 @@ class TestCallSummarizationLLM:
         with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages)
+                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
         # Verify messages.create was called
         mock_client.messages.create.assert_called_once()
         call_kwargs = mock_client.messages.create.call_args[1]
 
-        # Verify the prompt contains conversation content
+        # Verify the prompt contains conversation content and the topic
         prompt_content = call_kwargs["messages"][0]["content"]
         assert "USER: Can you explain BFS?" in prompt_content
         assert "ASSISTANT: BFS is a graph traversal algorithm" in prompt_content
+        assert "Graph Algorithms" in prompt_content
 
         # Verify tool is passed
         assert call_kwargs["tools"] == [_get_tool_schema()]
@@ -200,9 +194,7 @@ class TestCallSummarizationLLM:
         """Valid tool_use response is parsed correctly with summary and skill updates."""
         from app.models.skill import SubtopicMasteryUpdate
 
-        skill_updates = [
-            {"topic": "Graph Algorithms", "subtopic_updates": [{"subtopic": "DFS backtracking", "mastery": 30}]}
-        ]
+        skill_updates = [{"subtopic": "DFS backtracking", "mastery": 30}]
         mock_response = self._make_tool_use_response(
             "Student explored BFS and DFS algorithms, showing good understanding of BFS queue-based traversal but struggling with DFS backtracking mechanics.",
             skill_updates,
@@ -217,13 +209,12 @@ class TestCallSummarizationLLM:
                  AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="DFS backtracking", mastery=30)]),
              ):
             mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-            result = await service._call_summarization_llm(sample_messages)
+            result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["summary"].startswith("Student explored BFS and DFS")
         assert result["skill_updates"] is not None
         assert len(result["skill_updates"]) == 1
-        assert result["skill_updates"][0]["topic"] == "Graph Algorithms"
-        assert result["skill_updates"][0]["subtopic_updates"][0].subtopic == "DFS backtracking"
+        assert result["skill_updates"][0].subtopic == "DFS backtracking"
 
     @pytest.mark.asyncio
     async def test_parses_taught_concepts(self, service, sample_messages):
@@ -239,7 +230,7 @@ class TestCallSummarizationLLM:
         with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages)
+                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["taught_concepts"] == ["BFS graph traversal", "DFS backtracking"]
 
@@ -253,7 +244,7 @@ class TestCallSummarizationLLM:
         with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages)
+                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["taught_concepts"] == []
 
@@ -270,7 +261,7 @@ class TestCallSummarizationLLM:
         with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages)
+                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["summary"] == "Brief casual conversation about study plans without deep learning content."
         assert result["skill_updates"] is None
@@ -293,7 +284,7 @@ class TestCallSummarizationLLM:
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(ValueError, match="LLM response missing compaction_result tool call"):
-                    await service._call_summarization_llm(sample_messages)
+                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
     @pytest.mark.asyncio
     async def test_empty_summary_raises(self, service, sample_messages):
@@ -307,7 +298,7 @@ class TestCallSummarizationLLM:
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(ValueError, match="LLM returned empty summary"):
-                    await service._call_summarization_llm(sample_messages)
+                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
     @pytest.mark.asyncio
     async def test_timeout_raises(self, service, sample_messages):
@@ -321,16 +312,16 @@ class TestCallSummarizationLLM:
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(asyncio.TimeoutError):
-                    await service._call_summarization_llm(sample_messages)
+                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
     @pytest.mark.asyncio
     async def test_invalid_skill_updates_filtered(self, service, sample_messages):
-        """An entry whose subtopics all fail canonical-list validation is filtered out; valid ones kept."""
+        """Subtopics that fail canonical-list validation are dropped; valid ones kept."""
         from app.models.skill import SubtopicMasteryUpdate
 
         skill_updates = [
-            {"topic": "Graphs", "subtopic_updates": [{"subtopic": "recursion", "mastery": 40}]},
-            {"topic": "Invalid", "subtopic_updates": [{"subtopic": "made up subtopic", "mastery": 50}]},
+            {"subtopic": "recursion", "mastery": 40},
+            {"subtopic": "made up subtopic", "mastery": 50},
         ]
         mock_response = self._make_tool_use_response(
             "Learning about graph algorithms.", skill_updates
@@ -338,21 +329,20 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        async def fake_validate(topic, raw):
-            if topic == "Graphs":
-                return [SubtopicMasteryUpdate(subtopic="recursion", mastery=40)]
-            return []  # "Invalid" topic's subtopic never matches the canonical list
+        async def fake_validate(topic_title, raw):
+            # Simulates the canonical list only recognizing "recursion".
+            return [SubtopicMasteryUpdate(subtopic="recursion", mastery=40)]
 
         with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client), \
              patch("app.services.compaction_service.get_settings") as mock_settings, \
              patch("app.services.subtopic_weights.validate_subtopic_updates", side_effect=fake_validate):
             mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-            result = await service._call_summarization_llm(sample_messages)
+            result = await service._call_summarization_llm(sample_messages, "Graphs")
 
         # Only the valid one should remain
         assert result["skill_updates"] is not None
         assert len(result["skill_updates"]) == 1
-        assert result["skill_updates"][0]["topic"] == "Graphs"
+        assert result["skill_updates"][0].subtopic == "recursion"
 
     @pytest.mark.asyncio
     async def test_wrong_tool_name_raises(self, service, sample_messages):
@@ -372,7 +362,7 @@ class TestCallSummarizationLLM:
             with patch("app.services.compaction_service.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(ValueError, match="LLM response missing compaction_result tool call"):
-                    await service._call_summarization_llm(sample_messages)
+                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
 
 
 def _get_tool_schema():

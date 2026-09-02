@@ -15,10 +15,12 @@ You are analyzing a segment of a learning conversation that is being compacted t
 - Do NOT introduce personal information not present in the conversation
 
 ## Rules for skill updates:
+- This conversation belongs to the topic: {{topic}}. Every skill update you produce is
+  implicitly about THIS topic — never invent or name a different topic.
 - Only produce skill updates if clear learning progress or assessment is evident
 - If the conversation is casual or off-topic, return an empty skill_updates array
-- Each skill update must have: topic, subtopic_updates
-- subtopic_updates is a list of {subtopic, mastery} pairs, mastery 0-100 — only include subtopics this excerpt gives real evidence about, do not guess at the rest
+- skill_updates is a list of {subtopic, mastery} pairs, mastery 0-100 — only include
+  subtopics of {{topic}} this excerpt gives real evidence about, do not guess at the rest
 
 ## Rules for profile signals:
 - Only include a signal with real, specific evidence in this excerpt — do not force one

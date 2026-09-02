@@ -18,6 +18,7 @@ import anthropic
 from app.config.database import subtopic_lists_col
 from app.config.settings import get_settings
 from app.models.skill import SubtopicMasteryUpdate
+from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,8 @@ async def validate_subtopic_updates(
 
     validated: list[SubtopicMasteryUpdate] = []
     for raw in raw_updates:
+        if not isinstance(raw, dict):
+            continue
         name = raw.get("subtopic")
         mastery = raw.get("mastery")
         if not isinstance(name, str):
@@ -121,7 +124,8 @@ async def _decompose_via_llm(topic: str) -> list[str]:
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    response = await client.messages.create(
+    response = await traced_messages_create(
+        client, call_site="subtopic_weights._decompose_via_llm",
         model=HAIKU_MODEL,
         max_tokens=300,
         messages=[{
@@ -175,7 +179,8 @@ async def _count_mentions_llm(evidence: str, subtopics: list[str]) -> dict[str, 
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     subtopic_list = "\n".join(f"- {s}" for s in subtopics)
 
-    response = await client.messages.create(
+    response = await traced_messages_create(
+        client, call_site="subtopic_weights._count_mentions_llm",
         model=HAIKU_MODEL,
         max_tokens=500,
         messages=[{
@@ -211,7 +216,8 @@ async def _score_relevance_llm(intent: str, topic: str, subtopics: list[str]) ->
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     subtopic_list = "\n".join(f"- {s}" for s in subtopics)
 
-    response = await client.messages.create(
+    response = await traced_messages_create(
+        client, call_site="subtopic_weights._score_relevance_llm",
         model=HAIKU_MODEL,
         max_tokens=500,
         messages=[{
@@ -244,7 +250,8 @@ async def _score_proficiency_llm(
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     subtopic_list = "\n".join(f"- {s}" for s in subtopics)
 
-    response = await client.messages.create(
+    response = await traced_messages_create(
+        client, call_site="subtopic_weights._score_proficiency_llm",
         model=HAIKU_MODEL,
         max_tokens=500,
         messages=[{

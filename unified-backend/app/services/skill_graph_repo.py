@@ -44,6 +44,9 @@ async def apply_update(
             f"subtopic_mastery.{u.subtopic}": u.mastery for u in subtopic_updates
         }
         set_fields.update({
+            f"subtopic_last_studied.{u.subtopic}": now for u in subtopic_updates
+        })
+        set_fields.update({
             "user_id": user_id,
             "topic": topic,
             "last_studied": now,

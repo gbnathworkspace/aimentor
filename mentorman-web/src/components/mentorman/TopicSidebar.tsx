@@ -359,6 +359,11 @@ export function TopicSidebar({
               <Icon name="users" />
             </button>
           )}
+          {onNav && !collapsed && isAdmin && (
+            <button className={`icon-btn ${view === 'analytics' ? 'on' : ''}`} title="LLM traces" aria-label="LLM traces" onClick={() => onNav('analytics')}>
+              <Icon name="chart" />
+            </button>
+          )}
           {onNav && !collapsed && (
             <button
               className={`icon-btn ${view === 'settings' ? 'on' : ''}`}

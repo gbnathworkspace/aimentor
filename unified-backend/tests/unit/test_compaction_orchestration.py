@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
+from app.models.skill import SubtopicMasteryUpdate
 from app.services.compaction_service import CompactionService
 from app.services.token_counter import TokenCounter
 
@@ -357,6 +358,7 @@ class TestCompactOrchestration:
         topic_doc = {
             "topicId": "topic-1",
             "userId": "user-1",
+            "title": "Graphs",
             "messages": messages,
             "version": 1,
             "compactionCount": 0,
@@ -365,7 +367,7 @@ class TestCompactOrchestration:
 
         svc._call_summarization_llm = AsyncMock(return_value={
             "summary": "A brief summary of the discussion.",
-            "skill_updates": [{"topic": "graphs", "new_level": "intermediate", "gap": 30, "weak_areas": [], "strong_areas": []}],
+            "skill_updates": [SubtopicMasteryUpdate(subtopic="BFS", mastery=60)],
         })
 
         with patch("app.services.compaction_service.topics_col") as mock_topics, \
@@ -435,15 +437,14 @@ class TestCompactOrchestration:
         topic_doc = {
             "topicId": "topic-1",
             "userId": "user-1",
+            "title": "Graph Algorithms",
             "messages": messages,
             "version": 0,
             "compactionCount": 0,
             "metadata": {"currentTokenEstimate": 800, "totalMessageCount": 4},
         }
 
-        skill_updates = [
-            {"topic": "BFS", "new_level": "intermediate", "gap": 40, "weak_areas": ["traversal"], "strong_areas": ["basics"]}
-        ]
+        skill_updates = [SubtopicMasteryUpdate(subtopic="BFS", mastery=40)]
 
         svc._call_summarization_llm = AsyncMock(return_value={
             "summary": "Discussion of BFS.",
@@ -469,7 +470,7 @@ class TestCompactOrchestration:
 
             assert result is not None
             assert result["skillUpdate"] == skill_updates
-            mock_apply.assert_called_once_with("user-1", skill_updates)
+            mock_apply.assert_called_once_with("user-1", "Graph Algorithms", skill_updates)
 
     @pytest.mark.asyncio
     async def test_compact_preserves_messages_on_llm_failure(self):

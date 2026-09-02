@@ -13,6 +13,7 @@ import anthropic
 
 from app.config.database import skill_graph_col
 from app.config.settings import get_settings
+from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,8 @@ async def _generate_topics_via_llm(goal: str) -> list[str]:
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    response = await client.messages.create(
+    response = await traced_messages_create(
+        client, call_site="onboarding_bootstrap._generate_topics_via_llm",
         model="claude-haiku-4-5-20251001",
         max_tokens=256,
         messages=[

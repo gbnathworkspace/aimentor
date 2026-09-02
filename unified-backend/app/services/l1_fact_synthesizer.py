@@ -22,6 +22,7 @@ from app.config.database import profiles_col
 from app.config.settings import get_settings
 from app.models.document_upload import L1SynthesisOutput, SynthesizedStyleNote
 from app.models.profile import ProposableField, StyleNoteCategory
+from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +419,8 @@ async def synthesize_l1_facts(
 
     for attempt in range(2):  # attempt 0 = first try, attempt 1 = retry
         try:
-            response = await client.messages.create(
+            response = await traced_messages_create(
+                client, call_site="l1_fact_synthesizer.synthesize_l1_facts",
                 model=_LLM_MODEL,
                 max_tokens=2000,
                 system=_SYSTEM_PROMPT,

@@ -52,7 +52,11 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "subtopics, call the record_diagnostic_verdict tool with a mastery "
         "estimate (0-100) for just those subtopics — leave out any subtopic "
         "you haven't actually tested — and tell them briefly what you found "
-        "before moving into teaching."
+        "before moving into teaching.\n"
+        "- Never call record_diagnostic_verdict as your only output. The tool "
+        "call is silent to the user — always write the reply text (what you "
+        "found, then either the next question or the start of teaching) in "
+        "the same turn as the call, not left for a later turn."
     ),
     "direct": (
         "You are in DIRECT mode. The user wants a direct, concise answer — "

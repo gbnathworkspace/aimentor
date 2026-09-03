@@ -362,6 +362,23 @@ class TopicChatService:
         # Strip the suggestions fence out of the visible text before
         # persisting, then flush whatever clean tail wasn't shown yet.
         clean_content, suggestions = extract_suggestions(full_text)
+
+        # The model can end a turn with only a tool call (e.g. calling
+        # record_diagnostic_verdict without any accompanying text) despite
+        # being instructed to always say something — tool_choice is "auto",
+        # so nothing enforces it. Left as-is, that turn streams zero visible
+        # bytes and persists an empty assistant message, which the client
+        # renders as nothing at all: no bubble, no error, no next question.
+        # Guard against that rather than let a turn go silently missing.
+        if not clean_content.strip():
+            logger.warning(
+                "Mentor turn produced no visible text for topic=%s user=%s mode=%s "
+                "(tool_calls=%s) — substituting fallback text",
+                topic_id, user_id, effective_mode,
+                [tc["name"] for tc in final_tool_calls],
+            )
+            clean_content = "Got it, noted — let's continue."
+
         already_shown_len = len(full_text) - len(pending)
         remaining = clean_content[already_shown_len:] if already_shown_len < len(clean_content) else ""
         if remaining:

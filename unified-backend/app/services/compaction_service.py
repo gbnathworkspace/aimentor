@@ -15,7 +15,7 @@ from pathlib import Path
 
 import anthropic
 
-from app.config.database import compaction_events_col, topics_col
+from app.config.database import compaction_events_col, skill_graph_col, topics_col
 from app.config.settings import get_settings
 from app.models.skill import SubtopicMasteryUpdate
 from app.services.llm_trace import traced_messages_create
@@ -126,8 +126,8 @@ _COMPACTION_TOOL_SCHEMA = {
 }
 
 MAX_TAUGHT_CONCEPTS = 30
-"""Cap on a topic's stored taughtConcepts list — oldest dropped past this,
-same bounded-growth intent as the rolling summary itself."""
+"""Cap on skill_graph's stored taught_concepts list — oldest dropped past
+this, same bounded-growth intent as the rolling summary itself."""
 
 
 def _load_compaction_prompt() -> str:
@@ -529,32 +529,36 @@ class CompactionService:
 
         taught_concepts = llm_result.get("taught_concepts")
         if taught_concepts:
-            await self._apply_taught_concepts(topic_id, user_id, taught_concepts)
+            await self._apply_taught_concepts(topic.get("title", ""), user_id, taught_concepts)
 
-    async def _apply_taught_concepts(self, topic_id: str, user_id: str, new_concepts: list[str]) -> None:
-        """Append newly-taught concepts onto the topic's `taughtConcepts` list —
-        an L3 (episodic memory) record, concept-grained instead of narrative-
-        grained (TS-1: episodic memory should say what was previously taught
-        in a topic, not just a vague session narrative). Deduplicated, capped at MAX_TAUGHT_CONCEPTS
-        (oldest dropped first). Best-effort: a failure here never blocks the
-        summary/skill-update write it rides alongside.
+    async def _apply_taught_concepts(self, topic_title: str, user_id: str, new_concepts: list[str]) -> None:
+        """Append newly-taught concepts onto the skill_graph node's
+        `taught_concepts` list — an L3 (episodic memory) record, concept-grained
+        instead of narrative-grained (TS-1: episodic memory should say what was
+        previously taught in a topic, not just a vague session narrative).
+        Lives on skill_graph (keyed by user_id+topic title) rather than the
+        topics collection, alongside the rest of "what does this user know
+        about this topic" — unlike SummaryBlocks, it isn't tied to one topic
+        thread's message history. Deduplicated, capped at MAX_TAUGHT_CONCEPTS
+        (oldest dropped first), upserted since a topic can reach this before
+        any skill_graph document exists for it. Best-effort: a failure here
+        never blocks the summary/skill-update write it rides alongside.
         """
         try:
-            topic = await topics_col().find_one(
-                {"topicId": topic_id, "userId": user_id}, {"_id": 0, "taughtConcepts": 1},
+            skill = await skill_graph_col().find_one(
+                {"user_id": user_id, "topic": topic_title}, {"_id": 0, "taught_concepts": 1},
             )
-            if topic is None:
-                return
-            existing = topic.get("taughtConcepts") or []
+            existing = (skill or {}).get("taught_concepts") or []
             merged = existing + [c for c in new_concepts if c not in existing]
             merged = merged[-MAX_TAUGHT_CONCEPTS:]
-            await topics_col().update_one(
-                {"topicId": topic_id, "userId": user_id},
-                {"$set": {"taughtConcepts": merged}},
+            await skill_graph_col().update_one(
+                {"user_id": user_id, "topic": topic_title},
+                {"$set": {"taught_concepts": merged}},
+                upsert=True,
             )
         except Exception as e:
             logger.warning(
-                "Failed to persist taught_concepts for topic=%s user=%s: %s", topic_id, user_id, e,
+                "Failed to persist taught_concepts for topic=%s user=%s: %s", topic_title, user_id, e,
             )
 
     async def compact(self, topic_id: str, user_id: str) -> dict | None:
@@ -887,7 +891,7 @@ class CompactionService:
             await self._apply_skill_updates(user_id, topic.get("title", ""), skill_updates)
 
         if taught_concepts:
-            await self._apply_taught_concepts(topic_id, user_id, taught_concepts)
+            await self._apply_taught_concepts(topic.get("title", ""), user_id, taught_concepts)
 
         logger.info(
             "Compaction completed — topic=%s, messages_compacted=%d, tokens_reclaimed=%d",

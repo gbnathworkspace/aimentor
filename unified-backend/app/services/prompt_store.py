@@ -52,7 +52,11 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "subtopics, call the record_diagnostic_verdict tool with a mastery "
         "estimate (0-100) for just those subtopics — leave out any subtopic "
         "you haven't actually tested — and tell them briefly what you found "
-        "before moving into teaching."
+        "before moving into teaching.\n"
+        "- Never call record_diagnostic_verdict as your only output. The tool "
+        "call is silent to the user — always write the reply text (what you "
+        "found, then either the next question or the start of teaching) in "
+        "the same turn as the call, not left for a later turn."
     ),
     "direct": (
         "You are in DIRECT mode. The user wants a direct, concise answer — "
@@ -178,7 +182,7 @@ def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | Non
 
 
 def _format_taught_concepts(taught_concepts: list[str] | None) -> str:
-    """Format the topic's accumulated taughtConcepts list (see
+    """Format the skill graph's accumulated taught_concepts list (see
     CompactionService._apply_taught_concepts, TS-1) — an L3 episodic memory
     record, scoped to this topic and concept-grained rather than narrative-
     grained. Specific things already taught in this topic, so the mentor

@@ -197,7 +197,7 @@ class TestHandleMessageHappyPath:
 
         mock_assembler.assemble.assert_called_once_with(
             "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
-            l1_scope=None, taught_concepts=None, summary_blocks=None,
+            l1_scope=None, summary_blocks=None,
         )
         mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
 
@@ -207,14 +207,15 @@ class TestHandleMessageHappyPath:
     async def test_threads_topic_l1_scope_into_assemble(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
-        """When get_topic() returns a topic carrying an l1_scope, it's
-        passed straight through to context_assembler.assemble()."""
+        """When get_topic() returns a topic carrying an l1_scope and
+        summaryBlocks, they're passed straight through to
+        context_assembler.assemble(). taught_concepts is no longer among
+        them — it now lives on skill_graph and assemble() reads it there."""
         scope = [{"situation": "preparing for interviews", "relevant": True, "reason": "x"}]
-        concepts = ["Signed URLs in CloudFront"]
         blocks = [{"blockId": "b1", "text": "did stuff"}]
         mock_topic_service.get_topic.return_value = {
             "topicId": "topic-abc", "userId": "user-123", "title": "Test Topic",
-            "status": "active", "messages": [], "l1_scope": scope, "taughtConcepts": concepts,
+            "status": "active", "messages": [], "l1_scope": scope,
             "summaryBlocks": blocks,
         }
         mock_assembler.assemble = AsyncMock(return_value={
@@ -233,7 +234,7 @@ class TestHandleMessageHappyPath:
 
         mock_assembler.assemble.assert_called_once_with(
             "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
-            l1_scope=scope, taught_concepts=concepts, summary_blocks=blocks,
+            l1_scope=scope, summary_blocks=blocks,
         )
 
     @pytest.mark.asyncio
@@ -686,6 +687,48 @@ class TestDiagnosticRouting:
         assert called_topic == "Test Topic"
         assert subtopic_updates[0].subtopic == "Loops"
         assert subtopic_updates[0].mastery == 15
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_tool_call_with_no_text_still_yields_and_persists_visible_reply(
+        self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
+    ):
+        """A turn that's only a tool call (no text blocks at all) used to
+        stream zero visible bytes and persist an empty assistant message —
+        the client then renders nothing, no bubble and no error, so the
+        mentor silently never responds. The stream must always carry
+        something visible, and the persisted message must not be empty."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        verdict_call = _tool_call(
+            "record_diagnostic_verdict",
+            {"subtopic_updates": [{"subtopic": "Loops", "mastery": 15}]},
+        )
+
+        from app.models.skill import SubtopicMasteryUpdate
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("", [verdict_call])]]),
+        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
+            "app.services.topic_chat_service.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
+        ):
+            mock_repo.apply_update = AsyncMock()
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "new thread spawned", mode="topic"
+            )
+            visible, meta = _split_meta(await _collect_stream(result))
+
+        assert visible.strip() != ""
+        assert meta is not None
+
+        persisted = mock_topic_service.append_message.call_args_list[-1][0][2]
+        assert persisted["content"].strip() != ""
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")

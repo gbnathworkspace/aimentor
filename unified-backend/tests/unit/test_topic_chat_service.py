@@ -78,17 +78,6 @@ def mock_tiktoken():
         yield
 
 
-@pytest.fixture(autouse=True)
-def mock_session_boundary_check():
-    """Session-boundary detection hits topics_col directly (not through the
-    mocked TopicService) — irrelevant to these handle_message tests, so
-    no-op it out, same treatment as mock_tiktoken above."""
-    with patch(
-        "app.services.topic_chat_service.check_and_close_on_new_message", new=AsyncMock()
-    ):
-        yield
-
-
 @pytest.fixture
 def mock_topic_service():
     service = AsyncMock()

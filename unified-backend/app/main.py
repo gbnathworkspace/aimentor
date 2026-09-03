@@ -30,7 +30,6 @@ from app.routers import (
     topics,
 )
 from app.services.file_cleanup import file_cleanup_loop
-from app.services.session_boundary import periodic_sweep_loop
 from app.services.session_manager import SessionManager
 from app.services.vector_search import ensure_vector_index
 
@@ -87,21 +86,15 @@ async def lifespan(app: FastAPI):
     await ensure_vector_index()
     sweep_task = asyncio.create_task(_timeout_sweep_loop())
     cleanup_task = asyncio.create_task(file_cleanup_loop())
-    session_sweep_task = asyncio.create_task(periodic_sweep_loop())
     yield
     sweep_task.cancel()
     cleanup_task.cancel()
-    session_sweep_task.cancel()
     try:
         await sweep_task
     except asyncio.CancelledError:
         pass
     try:
         await cleanup_task
-    except asyncio.CancelledError:
-        pass
-    try:
-        await session_sweep_task
     except asyncio.CancelledError:
         pass
     await disconnect_db()

@@ -204,6 +204,26 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   const bodyRef = useRef<HTMLDivElement>(null);
   const greetedRef = useRef(false);
 
+  // Sessions aren't idle-timed out — a topic window left open but quiet
+  // stays open. The backend only closes a topic's session when told the
+  // window is no longer open: here, on navigating away from it or on
+  // tab/browser close (`keepalive` lets the request outlive the unload).
+  const closeTopicSession = useCallback((id: string | null) => {
+    if (!id) return;
+    fetch(`/api/topic/${id}/close-session`, { method: 'POST', keepalive: true }).catch(() => {});
+  }, []);
+
+  // Close the session for the currently open topic on tab/browser close.
+  useEffect(() => {
+    const onHide = () => closeTopicSession(topicId);
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('beforeunload', onHide);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('beforeunload', onHide);
+    };
+  }, [topicId, closeTopicSession]);
+
   // Load messages when topicId changes
   useEffect(() => {
     if (!topicId) {
@@ -267,8 +287,14 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       .catch(() => { if (!cancelled) setMsgs([]); })
       .finally(() => { if (!cancelled) { setBusy(false); setLoadedFor(topicId); } });
 
-    return () => { cancelled = true; };
-  }, [topicId]);
+    // Close the session for the topic we're navigating away from (or that's
+    // unmounting) — not the one this effect is loading.
+    const prevTopicId = topicId;
+    return () => {
+      cancelled = true;
+      closeTopicSession(prevTopicId);
+    };
+  }, [topicId, closeTopicSession]);
 
   // Auto-scroll on new messages. Includes `suggestions` — the options card
   // takes up its own space below chat-body (not an overlay), so chat-body

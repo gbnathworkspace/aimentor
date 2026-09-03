@@ -29,7 +29,6 @@ from app.services import context_assembler, mode_router, skill_graph_repo
 from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
-from app.services.session_boundary import check_and_close_on_new_message
 from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
@@ -208,11 +207,6 @@ class TopicChatService:
             }
 
         now = datetime.now(timezone.utc)
-
-        # Step 0b: Close out the prior session if this message arrives after
-        # a >10min idle gap, before the new message is appended (session-
-        # narrative-summary spec, Requirement 1.1).
-        await check_and_close_on_new_message(topic_id, user_id, now)
 
         # Step 1: Create and append user message (Req 4.1)
         user_msg = {
@@ -573,8 +567,8 @@ class TopicChatService:
         skill updates as part of its flow. Skill-update/taught-concept extraction
         that used to ride on a fixed message-count checkpoint now happens on
         session-close instead (session-narrative-summary spec, Requirement 4.3),
-        triggered from check_and_close_on_new_message / idle_sweep / logout,
-        not from here.
+        triggered from close_session_for_topic (window close/navigate-away) or
+        logout, not from here.
         """
         try:
             should_compact = await self._compaction_service.should_compact(

@@ -26,10 +26,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.config.settings import get_settings
 from app.services import context_assembler, mode_router, skill_graph_repo
-from app.services.compaction_service import CompactionService
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
-from app.services.session_boundary import check_and_close_on_new_message
+from app.services.session_boundary import check_and_close_on_new_message, maybe_force_close_long_session
 from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
@@ -168,11 +167,9 @@ class TopicChatService:
     def __init__(
         self,
         topic_service: TopicService | None = None,
-        compaction_service: CompactionService | None = None,
         token_counter: TokenCounter | None = None,
     ):
         self._topic_service = topic_service or TopicService()
-        self._compaction_service = compaction_service or CompactionService()
         self._token_counter = token_counter or TokenCounter()
 
     async def handle_message(
@@ -566,22 +563,19 @@ class TopicChatService:
         return api_messages
 
     async def _post_turn_hook(self, topic_id: str, user_id: str) -> None:
-        """Post-turn compaction / skill-checkpoint check (Req 6.4, 14.1).
+        """Post-turn hard-ceiling check (Req 6.4, 14.1).
 
-        Runs asynchronously after the response is returned to the user. Checks if
-        compaction is needed and triggers it if so — compaction already extracts
-        skill updates as part of its flow. Skill-update/taught-concept extraction
-        that used to ride on a fixed message-count checkpoint now happens on
-        session-close instead (session-narrative-summary spec, Requirement 4.3),
-        triggered from check_and_close_on_new_message / idle_sweep / logout,
-        not from here.
+        Runs asynchronously after the response is returned to the user.
+        Compaction itself only ever runs at a session boundary now
+        (session_compactor, triggered from check_and_close_on_new_message /
+        idle_sweep / logout / checkpoint) — this hook exists only to catch
+        the one case a boundary-only compactor can't: a single sitting long
+        enough to blow the token budget before it ever goes idle.
         """
         try:
-            should_compact = await self._compaction_service.should_compact(
-                topic_id, user_id
+            await maybe_force_close_long_session(
+                topic_id, user_id, datetime.now(timezone.utc)
             )
-            if should_compact:
-                await self._compaction_service.compact(topic_id, user_id)
         except Exception as e:
             logger.error(
                 "Post-turn hook failed for topic %s: %s", topic_id, str(e)

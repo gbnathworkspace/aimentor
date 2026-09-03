@@ -120,14 +120,6 @@ def mock_topic_service():
 
 
 @pytest.fixture
-def mock_compaction_service():
-    service = AsyncMock()
-    service.should_compact = AsyncMock(return_value=False)
-    service.compact = AsyncMock(return_value=None)
-    return service
-
-
-@pytest.fixture
 def mock_token_counter():
     counter = MagicMock()
     counter.count_message.return_value = 5
@@ -136,10 +128,9 @@ def mock_token_counter():
 
 
 @pytest.fixture
-def chat_service(mock_topic_service, mock_compaction_service, mock_token_counter):
+def chat_service(mock_topic_service, mock_token_counter):
     return TopicChatService(
         topic_service=mock_topic_service,
-        compaction_service=mock_compaction_service,
         token_counter=mock_token_counter,
     )
 
@@ -407,13 +398,15 @@ class TestHandleMessageStreamFailure:
 
 
 class TestPostTurnHook:
-    """Tests for the post-turn compaction hook (Req 6.4, 14.1)."""
+    """Tests for the post-turn hard-ceiling check (Req 6.4, 14.1). Actual
+    compaction now only ever runs at a session boundary (session_compactor);
+    this hook only ever calls maybe_force_close_long_session."""
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_post_turn_hook_triggers_compaction_check(
-        self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
+    async def test_post_turn_hook_calls_force_close_check(
+        self, mock_get_prompt, mock_assembler, chat_service
     ):
         mock_assembler.assemble = AsyncMock(return_value={
             "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
@@ -423,106 +416,63 @@ class TestPostTurnHook:
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("LLM response")]]),
-        ):
+        ), patch(
+            "app.services.topic_chat_service.maybe_force_close_long_session", new=AsyncMock()
+        ) as mock_force_close:
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
             await _collect_stream(result)
 
-        await asyncio.sleep(0.05)
+            await asyncio.sleep(0.05)
 
-        mock_compaction_service.should_compact.assert_called_once_with(
-            "topic-abc", "user-123"
-        )
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_post_turn_hook_triggers_compaction_when_needed(
-        self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
-    ):
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
-        })
-        mock_get_prompt.return_value = "prompt"
-        mock_compaction_service.should_compact.return_value = True
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([[_chunk("response")]]),
-        ):
-            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
-            await _collect_stream(result)
-
-        await asyncio.sleep(0.05)
-
-        mock_compaction_service.compact.assert_called_once_with("topic-abc", "user-123")
-
-    @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
-    async def test_post_turn_hook_skips_compaction_when_not_needed(
-        self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
-    ):
-        mock_assembler.assemble = AsyncMock(return_value={
-            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
-        })
-        mock_get_prompt.return_value = "prompt"
-        mock_compaction_service.should_compact.return_value = False
-
-        with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
-            _mock_chat_anthropic([[_chunk("response")]]),
-        ):
-            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
-            await _collect_stream(result)
-
-        await asyncio.sleep(0.05)
-
-        mock_compaction_service.compact.assert_not_called()
+            mock_force_close.assert_called_once()
+            assert mock_force_close.call_args.args[0] == "topic-abc"
+            assert mock_force_close.call_args.args[1] == "user-123"
 
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
     async def test_post_turn_hook_failure_does_not_crash_service(
-        self, mock_get_prompt, mock_assembler, chat_service, mock_compaction_service
+        self, mock_get_prompt, mock_assembler, chat_service
     ):
         mock_assembler.assemble = AsyncMock(return_value={
             "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
         })
         mock_get_prompt.return_value = "prompt"
-        mock_compaction_service.should_compact.side_effect = Exception("DB down")
 
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("All good")]]),
+        ), patch(
+            "app.services.topic_chat_service.maybe_force_close_long_session",
+            new=AsyncMock(side_effect=Exception("DB down")),
         ):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
             full = await _collect_stream(result)
 
-        await asyncio.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         visible, meta = _split_meta(full)
         assert visible == "All good"
         assert meta == {"mode": "diagnostic", "suggestions": []}
 
     @pytest.mark.asyncio
-    async def test_post_turn_hook_direct_call_logs_error(
-        self, chat_service, mock_compaction_service
-    ):
-        mock_compaction_service.should_compact.side_effect = RuntimeError("connection lost")
+    async def test_post_turn_hook_direct_call_logs_error(self, chat_service):
+        with patch(
+            "app.services.topic_chat_service.maybe_force_close_long_session",
+            new=AsyncMock(side_effect=RuntimeError("connection lost")),
+        ) as mock_force_close:
+            await chat_service._post_turn_hook("topic-abc", "user-123")
 
-        await chat_service._post_turn_hook("topic-abc", "user-123")
-
-        mock_compaction_service.should_compact.assert_called_once()
+            mock_force_close.assert_called_once()
 
 
 class TestFormatMessagesForApi:
     """Tests for _format_messages_for_api conversion logic (unchanged)."""
 
     @pytest.fixture
-    def service(self, mock_topic_service, mock_compaction_service, mock_token_counter):
+    def service(self, mock_topic_service, mock_token_counter):
         return TopicChatService(
             topic_service=mock_topic_service,
-            compaction_service=mock_compaction_service,
             token_counter=mock_token_counter,
         )
 
@@ -597,10 +547,9 @@ class TestBuildSystemBlocks:
     """_build_system_blocks splits on the static/L1 boundary markers for caching (issue #23)."""
 
     @pytest.fixture
-    def service(self, mock_topic_service, mock_compaction_service, mock_token_counter):
+    def service(self, mock_topic_service, mock_token_counter):
         return TopicChatService(
             topic_service=mock_topic_service,
-            compaction_service=mock_compaction_service,
             token_counter=mock_token_counter,
         )
 

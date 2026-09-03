@@ -24,8 +24,8 @@ from app.auth.schemas import (
 from app.auth.token_manager import TokenManager
 from app.config.database import get_db, topics_col
 from app.config.settings import get_settings
-from app.services.compaction_service import CompactionService
 from app.services.session_boundary import close_all_sessions_for_user
+from app.services.session_compactor import close_session
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,6 @@ _token_manager = TokenManager()
 _password_service = PasswordService()
 _otp_service = OTPService()
 _oauth_handler = OAuthHandler()
-_compaction_service = CompactionService()
 _login_limiter = RateLimiter(max_attempts=5, window_minutes=15)
 _otp_request_limiter = RateLimiter(max_attempts=5, window_minutes=15)
 _otp_verify_limiter = RateLimiter(max_attempts=5, window_minutes=15)
@@ -414,13 +413,17 @@ async def _user_id_from_refresh_cookie(token_value: str) -> str | None:
 
 
 async def _skill_checkpoint_for_user(user_id: str) -> None:
-    """Fire-and-forget: catch any active topics' progress the periodic
-    per-message checkpoint hasn't reached yet before the session ends."""
+    """Fire-and-forget: catch any active topics' progress a session close
+    hasn't reached yet, before the browser tab closes. Reuses close_session
+    directly rather than a separate lightweight checkpoint path — it's
+    already a no-op when there's nothing new to cover, so calling it on
+    every pagehide beacon costs nothing extra when there's no new content."""
     try:
         topics = await topics_col().find(
             {"userId": user_id, "status": "active"}, {"topicId": 1, "_id": 0}
         ).to_list(length=None)
+        now = datetime.now(timezone.utc)
         for t in topics:
-            await _compaction_service.extract_skill_updates_only(t["topicId"], user_id)
+            await close_session(t["topicId"], user_id, upto_timestamp=now)
     except Exception as e:
         logger.error("Skill checkpoint failed for user %s: %s", user_id, str(e))

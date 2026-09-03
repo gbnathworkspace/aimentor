@@ -1,4 +1,4 @@
-"""Unit tests for CompactionService._call_summarization_llm.
+"""Unit tests for session_compactor._call_summarization_llm.
 
 Tests:
 - Message formatting for the prompt
@@ -18,8 +18,8 @@ os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
 os.environ.setdefault("VOYAGE_API_KEY", "voy-test")
 
-from app.services.compaction_service import (
-    CompactionService,
+from app.services.session_compactor import (
+    _call_summarization_llm,
     _format_conversation_excerpt,
     _validate_skill_updates,
 )
@@ -119,12 +119,7 @@ class TestValidateSkillUpdates:
 
 
 class TestCallSummarizationLLM:
-    """Tests for CompactionService._call_summarization_llm."""
-
-    @pytest.fixture
-    def service(self):
-        """Create a CompactionService instance."""
-        return CompactionService()
+    """Tests for session_compactor._call_summarization_llm."""
 
     @pytest.fixture
     def sample_messages(self):
@@ -161,7 +156,7 @@ class TestCallSummarizationLLM:
         return response
 
     @pytest.mark.asyncio
-    async def test_formats_messages_into_prompt(self, service, sample_messages):
+    async def test_formats_messages_into_prompt(self, sample_messages):
         """Messages are formatted and included in the LLM prompt."""
         mock_client = AsyncMock()
         mock_response = self._make_tool_use_response(
@@ -170,10 +165,10 @@ class TestCallSummarizationLLM:
         )
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                result = await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
         # Verify messages.create was called
         mock_client.messages.create.assert_called_once()
@@ -190,7 +185,7 @@ class TestCallSummarizationLLM:
         assert call_kwargs["tool_choice"] == {"type": "tool", "name": "compaction_result"}
 
     @pytest.mark.asyncio
-    async def test_parses_valid_tool_use_response(self, service, sample_messages):
+    async def test_parses_valid_tool_use_response(self, sample_messages):
         """Valid tool_use response is parsed correctly with summary and skill updates."""
         from app.models.skill import SubtopicMasteryUpdate
 
@@ -202,14 +197,14 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client), \
-             patch("app.services.compaction_service.get_settings") as mock_settings, \
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client), \
+             patch("app.services.session_compactor.get_settings") as mock_settings, \
              patch(
                  "app.services.subtopic_weights.validate_subtopic_updates",
                  AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="DFS backtracking", mastery=30)]),
              ):
             mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-            result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+            result = await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["summary"].startswith("Student explored BFS and DFS")
         assert result["skill_updates"] is not None
@@ -217,7 +212,7 @@ class TestCallSummarizationLLM:
         assert result["skill_updates"][0].subtopic == "DFS backtracking"
 
     @pytest.mark.asyncio
-    async def test_parses_taught_concepts(self, service, sample_messages):
+    async def test_parses_taught_concepts(self, sample_messages):
         """taught_concepts entries are extracted, stripped, and non-strings dropped."""
         mock_response = self._make_tool_use_response(
             "Student learned BFS.",
@@ -227,29 +222,29 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                result = await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["taught_concepts"] == ["BFS graph traversal", "DFS backtracking"]
 
     @pytest.mark.asyncio
-    async def test_missing_taught_concepts_defaults_empty(self, service, sample_messages):
+    async def test_missing_taught_concepts_defaults_empty(self, sample_messages):
         """Backward-compat: a response with no taught_concepts key parses to []."""
         mock_response = self._make_tool_use_response("Student learned BFS.", [])
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                result = await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["taught_concepts"] == []
 
     @pytest.mark.asyncio
-    async def test_no_skill_updates_returns_none(self, service, sample_messages):
+    async def test_no_skill_updates_returns_none(self, sample_messages):
         """When LLM returns empty skill_updates array, result has None."""
         mock_response = self._make_tool_use_response(
             "Brief casual conversation about study plans without deep learning content.",
@@ -258,16 +253,16 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-                result = await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                result = await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
         assert result["summary"] == "Brief casual conversation about study plans without deep learning content."
         assert result["skill_updates"] is None
 
     @pytest.mark.asyncio
-    async def test_malformed_response_no_tool_use_block_raises(self, service, sample_messages):
+    async def test_malformed_response_no_tool_use_block_raises(self, sample_messages):
         """If LLM response has no tool_use block, raises ValueError."""
         # Response with only a text block, no tool_use
         text_block = MagicMock()
@@ -280,42 +275,42 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(ValueError, match="LLM response missing compaction_result tool call"):
-                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                    await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
     @pytest.mark.asyncio
-    async def test_empty_summary_raises(self, service, sample_messages):
+    async def test_empty_summary_raises(self, sample_messages):
         """If LLM returns empty summary string, raises ValueError."""
         mock_response = self._make_tool_use_response("", [])
 
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(ValueError, match="LLM returned empty summary"):
-                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                    await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
     @pytest.mark.asyncio
-    async def test_timeout_raises(self, service, sample_messages):
+    async def test_timeout_raises(self, sample_messages):
         """LLM timeout raises asyncio.TimeoutError which propagates."""
         import asyncio
 
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(side_effect=asyncio.TimeoutError())
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(asyncio.TimeoutError):
-                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                    await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
     @pytest.mark.asyncio
-    async def test_invalid_skill_updates_filtered(self, service, sample_messages):
+    async def test_invalid_skill_updates_filtered(self, sample_messages):
         """Subtopics that fail canonical-list validation are dropped; valid ones kept."""
         from app.models.skill import SubtopicMasteryUpdate
 
@@ -333,11 +328,11 @@ class TestCallSummarizationLLM:
             # Simulates the canonical list only recognizing "recursion".
             return [SubtopicMasteryUpdate(subtopic="recursion", mastery=40)]
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client), \
-             patch("app.services.compaction_service.get_settings") as mock_settings, \
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client), \
+             patch("app.services.session_compactor.get_settings") as mock_settings, \
              patch("app.services.subtopic_weights.validate_subtopic_updates", side_effect=fake_validate):
             mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
-            result = await service._call_summarization_llm(sample_messages, "Graphs")
+            result = await _call_summarization_llm(sample_messages, "Graphs")
 
         # Only the valid one should remain
         assert result["skill_updates"] is not None
@@ -345,7 +340,7 @@ class TestCallSummarizationLLM:
         assert result["skill_updates"][0].subtopic == "recursion"
 
     @pytest.mark.asyncio
-    async def test_wrong_tool_name_raises(self, service, sample_messages):
+    async def test_wrong_tool_name_raises(self, sample_messages):
         """If tool_use block has wrong name, raises ValueError."""
         tool_block = MagicMock()
         tool_block.type = "tool_use"
@@ -358,14 +353,14 @@ class TestCallSummarizationLLM:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.compaction_service.anthropic.AsyncAnthropic", return_value=mock_client):
-            with patch("app.services.compaction_service.get_settings") as mock_settings:
+        with patch("app.services.session_compactor.anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("app.services.session_compactor.get_settings") as mock_settings:
                 mock_settings.return_value = MagicMock(ANTHROPIC_API_KEY="sk-ant-test")
                 with pytest.raises(ValueError, match="LLM response missing compaction_result tool call"):
-                    await service._call_summarization_llm(sample_messages, "Graph Algorithms")
+                    await _call_summarization_llm(sample_messages, "Graph Algorithms")
 
 
 def _get_tool_schema():
     """Helper to get the tool schema for assertions."""
-    from app.services.compaction_service import _COMPACTION_TOOL_SCHEMA
+    from app.services.session_compactor import _COMPACTION_TOOL_SCHEMA
     return _COMPACTION_TOOL_SCHEMA

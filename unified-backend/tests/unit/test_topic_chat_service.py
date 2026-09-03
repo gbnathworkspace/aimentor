@@ -690,6 +690,48 @@ class TestDiagnosticRouting:
     @pytest.mark.asyncio
     @patch("app.services.topic_chat_service.context_assembler")
     @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_tool_call_with_no_text_still_yields_and_persists_visible_reply(
+        self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
+    ):
+        """A turn that's only a tool call (no text blocks at all) used to
+        stream zero visible bytes and persist an empty assistant message —
+        the client then renders nothing, no bubble and no error, so the
+        mentor silently never responds. The stream must always carry
+        something visible, and the persisted message must not be empty."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "episodes": [], "documents": [], "skill_graph": [],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        verdict_call = _tool_call(
+            "record_diagnostic_verdict",
+            {"subtopic_updates": [{"subtopic": "Loops", "mastery": 15}]},
+        )
+
+        from app.models.skill import SubtopicMasteryUpdate
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([[_chunk("", [verdict_call])]]),
+        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
+            "app.services.topic_chat_service.validate_subtopic_updates",
+            AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
+        ):
+            mock_repo.apply_update = AsyncMock()
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "new thread spawned", mode="topic"
+            )
+            visible, meta = _split_meta(await _collect_stream(result))
+
+        assert visible.strip() != ""
+        assert meta is not None
+
+        persisted = mock_topic_service.append_message.call_args_list[-1][0][2]
+        assert persisted["content"].strip() != ""
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
     async def test_no_verdict_tool_call_skips_skill_graph_write(
         self, mock_get_prompt, mock_assembler, chat_service
     ):

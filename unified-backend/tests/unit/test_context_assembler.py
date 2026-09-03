@@ -93,6 +93,52 @@ class TestAssemble:
 
         assert result["skill"] == {}
 
+    @pytest.mark.asyncio
+    async def test_taught_concepts_read_from_skill_graph_node(self):
+        """taught_concepts lives on the skill_graph document (moved off the
+        topic itself) — assemble() reads it from the same L2 fetch as skill."""
+        mock_profile = {"user_id": "u1", "goal": "Learn ML"}
+        mock_skill = {
+            "user_id": "u1", "topic": "topic",
+            "taught_concepts": ["Signed URLs in CloudFront"],
+        }
+
+        with (
+            patch(
+                "app.services.context_assembler.profiles_col"
+            ) as mock_profiles,
+            patch(
+                "app.services.context_assembler.skill_graph_col"
+            ) as mock_skills,
+        ):
+            mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)
+            mock_skills.return_value.find_one = AsyncMock(return_value=mock_skill)
+            mock_skills.return_value.find.return_value.to_list = AsyncMock(return_value=[])
+
+            result = await assemble("u1", "topic", "query")
+
+        assert result["taught_concepts"] == ["Signed URLs in CloudFront"]
+
+    @pytest.mark.asyncio
+    async def test_no_skill_graph_node_gives_none_taught_concepts(self):
+        mock_profile = {"user_id": "u1", "goal": "Learn ML"}
+
+        with (
+            patch(
+                "app.services.context_assembler.profiles_col"
+            ) as mock_profiles,
+            patch(
+                "app.services.context_assembler.skill_graph_col"
+            ) as mock_skills,
+        ):
+            mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)
+            mock_skills.return_value.find_one = AsyncMock(return_value=None)
+            mock_skills.return_value.find.return_value.to_list = AsyncMock(return_value=[])
+
+            result = await assemble("u1", "topic", "query")
+
+        assert result["taught_concepts"] is None
+
 
 class TestFetchDocuments:
     """Topic-scoped documents take priority; the rest of the budget is

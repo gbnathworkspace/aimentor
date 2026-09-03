@@ -37,7 +37,7 @@ _MAX_DOCUMENT_CHUNKS = 12
 async def assemble(
     user_id: str, topic: str, query: str,
     topic_id: str | None = None,
-    l1_scope: list[dict] | None = None, taught_concepts: list[str] | None = None,
+    l1_scope: list[dict] | None = None,
     summary_blocks: list[dict] | None = None,
 ) -> dict:
     """Gather L1 profile, L2 skill, and L3 memory for the given user/topic.
@@ -55,14 +55,10 @@ async def assemble(
             document to read one from. Passed straight through to the
             returned dict — not fetched here, since assemble() only knows
             a topic title, not a topic id.
-        taught_concepts: The topic's accumulated `taughtConcepts` list (see
-            CompactionService._apply_taught_concepts, TS-1) — an L3 episodic
-            record, topic-scoped and concept-grained. Same pass-through-only
-            treatment as l1_scope, for the same reason.
         summary_blocks: The topic's own `topic.summaryBlocks` (see
             session-narrative-summary spec) — one entry per closed session,
             this topic's sole narrative L3 source. Same pass-through-only
-            treatment as l1_scope/taught_concepts.
+            treatment as l1_scope.
 
     Returns:
         A dict with keys: profile, skill, documents,
@@ -79,7 +75,11 @@ async def assemble(
             detail="No profile found. Please complete onboarding first.",
         )
 
-    # L2 — Skill node (optional, degrade gracefully)
+    # L2 — Skill node (optional, degrade gracefully). `taught_concepts` (see
+    # CompactionService._apply_taught_concepts, TS-1) lives on this same
+    # document — an L3 episodic record, topic-scoped and concept-grained —
+    # rather than on the topic itself, since it's "what this user knows
+    # about this topic" state, not part of any one topic thread's history.
     try:
         skill = await skill_graph_col().find_one(
             {"user_id": user_id, "topic": topic}, {"_id": 0}
@@ -98,7 +98,7 @@ async def assemble(
         "skill": skill or {},
         "documents": documents,
         "l1_scope": l1_scope,
-        "taught_concepts": taught_concepts,
+        "taught_concepts": (skill or {}).get("taught_concepts"),
         "summary_blocks": summary_blocks,
     }
 

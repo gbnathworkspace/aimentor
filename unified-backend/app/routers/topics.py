@@ -26,6 +26,7 @@ from app.services.vector_search import delete_topic_document, list_topic_documen
 from app.services.topic_service import TopicService
 from app.services.topic_chat_service import TopicChatService
 from app.services.topic_router import route_topic
+from app.services.session_boundary import close_session_for_topic
 from app.services.subtopic_weights import derive_subtopic_weights, get_subtopics
 
 router = APIRouter(prefix="/api", tags=["Topics"])
@@ -312,6 +313,16 @@ async def send_message(
     """
     result = await _chat_service.handle_message(topic_id, user_id, body.content, body.mode)
     return result
+
+
+@router.post("/topic/{topic_id}/close-session")
+async def close_session(topic_id: str, user_id: str = Depends(require_auth)):
+    """Close the topic's current session, called by the client when the topic
+    window is no longer open (navigated away from, or the tab/browser is
+    closing). Sessions are otherwise not time-boxed — a topic left open but
+    idle stays open (session-narrative-summary spec, Requirement 1)."""
+    await close_session_for_topic(topic_id, user_id)
+    return {"ok": True}
 
 
 @router.post("/topic/{topic_id}/l1-scope/resolve")

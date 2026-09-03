@@ -28,7 +28,7 @@ from app.config.settings import get_settings
 from app.services import context_assembler, mode_router, skill_graph_repo
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
-from app.services.session_boundary import check_and_close_on_new_message, maybe_force_close_long_session
+from app.services.session_boundary import maybe_force_close_long_session
 from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
@@ -206,11 +206,6 @@ class TopicChatService:
 
         now = datetime.now(timezone.utc)
 
-        # Step 0b: Close out the prior session if this message arrives after
-        # a >10min idle gap, before the new message is appended (session-
-        # narrative-summary spec, Requirement 1.1).
-        await check_and_close_on_new_message(topic_id, user_id, now)
-
         # Step 1: Create and append user message (Req 4.1)
         user_msg = {
             "type": "message",
@@ -231,7 +226,7 @@ class TopicChatService:
         # nothing has streamed yet.
         context = await context_assembler.assemble(
             user_id, topic_title, content, topic_id=topic_id,
-            l1_scope=topic.get("l1_scope"), taught_concepts=topic.get("taughtConcepts"),
+            l1_scope=topic.get("l1_scope"),
             summary_blocks=topic.get("summaryBlocks"),
         )
 
@@ -365,6 +360,23 @@ class TopicChatService:
         # Strip the suggestions fence out of the visible text before
         # persisting, then flush whatever clean tail wasn't shown yet.
         clean_content, suggestions = extract_suggestions(full_text)
+
+        # The model can end a turn with only a tool call (e.g. calling
+        # record_diagnostic_verdict without any accompanying text) despite
+        # being instructed to always say something — tool_choice is "auto",
+        # so nothing enforces it. Left as-is, that turn streams zero visible
+        # bytes and persists an empty assistant message, which the client
+        # renders as nothing at all: no bubble, no error, no next question.
+        # Guard against that rather than let a turn go silently missing.
+        if not clean_content.strip():
+            logger.warning(
+                "Mentor turn produced no visible text for topic=%s user=%s mode=%s "
+                "(tool_calls=%s) — substituting fallback text",
+                topic_id, user_id, effective_mode,
+                [tc["name"] for tc in final_tool_calls],
+            )
+            clean_content = "Got it, noted — let's continue."
+
         already_shown_len = len(full_text) - len(pending)
         remaining = clean_content[already_shown_len:] if already_shown_len < len(clean_content) else ""
         if remaining:
@@ -567,10 +579,11 @@ class TopicChatService:
 
         Runs asynchronously after the response is returned to the user.
         Compaction itself only ever runs at a session boundary now
-        (session_compactor, triggered from check_and_close_on_new_message /
-        idle_sweep / logout / checkpoint) — this hook exists only to catch
-        the one case a boundary-only compactor can't: a single sitting long
-        enough to blow the token budget before it ever goes idle.
+        (session_compactor, triggered from close_session_for_topic
+        (window close/navigate-away), logout, or checkpoint) — this hook
+        exists only to catch the one case a boundary-only compactor can't:
+        a single sitting long enough to blow the token budget before the
+        frontend ever signals the window closed.
         """
         try:
             await maybe_force_close_long_session(

@@ -1,4 +1,4 @@
-"""Unit tests for session_compactor._apply_taught_concepts — the in-topic
+"""Unit tests for session_compactor._apply_taught_concepts — the skill_graph
 record of specific things taught (TS-1: episodic memory should say what was
 previously taught in a topic).
 """
@@ -18,69 +18,76 @@ from app.services.session_compactor import MAX_TAUGHT_CONCEPTS, _apply_taught_co
 class TestApplyTaughtConcepts:
     @pytest.mark.asyncio
     async def test_appends_new_concepts_to_empty_list(self):
-        with patch("app.services.session_compactor.topics_col") as mock_topics:
+        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
             mock_col = MagicMock()
-            mock_topics.return_value = mock_col
-            mock_col.find_one = AsyncMock(return_value={"taughtConcepts": []})
+            mock_skill_graph.return_value = mock_col
+            mock_col.find_one = AsyncMock(return_value={"taught_concepts": []})
             mock_col.update_one = AsyncMock()
 
-            await _apply_taught_concepts("topic-1", "user-1", ["Signed URLs in CloudFront"])
+            await _apply_taught_concepts("Topic 1", "user-1", ["Signed URLs in CloudFront"])
 
         mock_col.update_one.assert_called_once_with(
-            {"topicId": "topic-1", "userId": "user-1"},
-            {"$set": {"taughtConcepts": ["Signed URLs in CloudFront"]}},
+            {"user_id": "user-1", "topic": "Topic 1"},
+            {"$set": {"taught_concepts": ["Signed URLs in CloudFront"]}},
+            upsert=True,
         )
 
     @pytest.mark.asyncio
     async def test_deduplicates_against_existing(self):
-        with patch("app.services.session_compactor.topics_col") as mock_topics:
+        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
             mock_col = MagicMock()
-            mock_topics.return_value = mock_col
-            mock_col.find_one = AsyncMock(return_value={"taughtConcepts": ["Signed URLs in CloudFront"]})
+            mock_skill_graph.return_value = mock_col
+            mock_col.find_one = AsyncMock(return_value={"taught_concepts": ["Signed URLs in CloudFront"]})
             mock_col.update_one = AsyncMock()
 
             await _apply_taught_concepts(
-                "topic-1", "user-1", ["Signed URLs in CloudFront", "Signed Cookies in CloudFront"],
+                "Topic 1", "user-1", ["Signed URLs in CloudFront", "Signed Cookies in CloudFront"],
             )
 
         set_call = mock_col.update_one.call_args[0][1]["$set"]
-        assert set_call["taughtConcepts"] == ["Signed URLs in CloudFront", "Signed Cookies in CloudFront"]
+        assert set_call["taught_concepts"] == ["Signed URLs in CloudFront", "Signed Cookies in CloudFront"]
 
     @pytest.mark.asyncio
     async def test_caps_at_max_dropping_oldest(self):
         existing = [f"concept-{i}" for i in range(MAX_TAUGHT_CONCEPTS)]
-        with patch("app.services.session_compactor.topics_col") as mock_topics:
+        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
             mock_col = MagicMock()
-            mock_topics.return_value = mock_col
-            mock_col.find_one = AsyncMock(return_value={"taughtConcepts": existing})
+            mock_skill_graph.return_value = mock_col
+            mock_col.find_one = AsyncMock(return_value={"taught_concepts": existing})
             mock_col.update_one = AsyncMock()
 
-            await _apply_taught_concepts("topic-1", "user-1", ["newest-concept"])
+            await _apply_taught_concepts("Topic 1", "user-1", ["newest-concept"])
 
         set_call = mock_col.update_one.call_args[0][1]["$set"]
-        result = set_call["taughtConcepts"]
+        result = set_call["taught_concepts"]
         assert len(result) == MAX_TAUGHT_CONCEPTS
         assert result[-1] == "newest-concept"
         assert "concept-0" not in result  # oldest dropped
 
     @pytest.mark.asyncio
-    async def test_missing_topic_is_a_noop(self):
-        with patch("app.services.session_compactor.topics_col") as mock_topics:
+    async def test_no_existing_skill_graph_doc_upserts(self):
+        """No skill_graph node exists yet for this (user, topic) — the write
+        still lands, creating one, rather than being skipped."""
+        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
             mock_col = MagicMock()
-            mock_topics.return_value = mock_col
+            mock_skill_graph.return_value = mock_col
             mock_col.find_one = AsyncMock(return_value=None)
             mock_col.update_one = AsyncMock()
 
-            await _apply_taught_concepts("topic-1", "user-1", ["x"])
+            await _apply_taught_concepts("Topic 1", "user-1", ["x"])
 
-        mock_col.update_one.assert_not_called()
+        mock_col.update_one.assert_called_once_with(
+            {"user_id": "user-1", "topic": "Topic 1"},
+            {"$set": {"taught_concepts": ["x"]}},
+            upsert=True,
+        )
 
     @pytest.mark.asyncio
     async def test_db_failure_is_swallowed(self):
         """Best-effort — never raises out of the post-turn hook."""
-        with patch("app.services.session_compactor.topics_col") as mock_topics:
+        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
             mock_col = MagicMock()
-            mock_topics.return_value = mock_col
+            mock_skill_graph.return_value = mock_col
             mock_col.find_one = AsyncMock(side_effect=RuntimeError("db down"))
 
-            await _apply_taught_concepts("topic-1", "user-1", ["x"])  # must not raise
+            await _apply_taught_concepts("Topic 1", "user-1", ["x"])  # must not raise

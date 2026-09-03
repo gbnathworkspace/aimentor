@@ -228,7 +228,7 @@ class TopicChatService:
         # nothing has streamed yet.
         context = await context_assembler.assemble(
             user_id, topic_title, content, topic_id=topic_id,
-            l1_scope=topic.get("l1_scope"), taught_concepts=topic.get("taughtConcepts"),
+            l1_scope=topic.get("l1_scope"),
             summary_blocks=topic.get("summaryBlocks"),
         )
 

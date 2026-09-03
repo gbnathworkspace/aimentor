@@ -197,7 +197,7 @@ class TestHandleMessageHappyPath:
 
         mock_assembler.assemble.assert_called_once_with(
             "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
-            l1_scope=None, taught_concepts=None, summary_blocks=None,
+            l1_scope=None, summary_blocks=None,
         )
         mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
 
@@ -207,14 +207,15 @@ class TestHandleMessageHappyPath:
     async def test_threads_topic_l1_scope_into_assemble(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
-        """When get_topic() returns a topic carrying an l1_scope, it's
-        passed straight through to context_assembler.assemble()."""
+        """When get_topic() returns a topic carrying an l1_scope and
+        summaryBlocks, they're passed straight through to
+        context_assembler.assemble(). taught_concepts is no longer among
+        them — it now lives on skill_graph and assemble() reads it there."""
         scope = [{"situation": "preparing for interviews", "relevant": True, "reason": "x"}]
-        concepts = ["Signed URLs in CloudFront"]
         blocks = [{"blockId": "b1", "text": "did stuff"}]
         mock_topic_service.get_topic.return_value = {
             "topicId": "topic-abc", "userId": "user-123", "title": "Test Topic",
-            "status": "active", "messages": [], "l1_scope": scope, "taughtConcepts": concepts,
+            "status": "active", "messages": [], "l1_scope": scope,
             "summaryBlocks": blocks,
         }
         mock_assembler.assemble = AsyncMock(return_value={
@@ -233,7 +234,7 @@ class TestHandleMessageHappyPath:
 
         mock_assembler.assemble.assert_called_once_with(
             "user-123", "Test Topic", "What is DFS?", topic_id="topic-abc",
-            l1_scope=scope, taught_concepts=concepts, summary_blocks=blocks,
+            l1_scope=scope, summary_blocks=blocks,
         )
 
     @pytest.mark.asyncio

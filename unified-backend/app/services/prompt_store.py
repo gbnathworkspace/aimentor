@@ -182,7 +182,7 @@ def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | Non
 
 
 def _format_taught_concepts(taught_concepts: list[str] | None) -> str:
-    """Format the topic's accumulated taughtConcepts list (see
+    """Format the skill graph's accumulated taught_concepts list (see
     CompactionService._apply_taught_concepts, TS-1) — an L3 episodic memory
     record, scoped to this topic and concept-grained rather than narrative-
     grained. Specific things already taught in this topic, so the mentor

@@ -624,7 +624,15 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
             m.who === 'summary'
               ? <SummaryBlockIndicator key={m._id || i} summaryBlock={m.summaryBlock!} />
               : m.who === 'mentor' && !m.text
-              ? null
+              // Empty mentor text is only ever legitimate for the in-flight
+              // streaming placeholder (last message, still busy) — the
+              // Typing indicator covers that case below. A *settled* empty
+              // mentor message (historical bad data, or any future bug that
+              // appends one) must still show something instead of silently
+              // vanishing with no bubble, no error, no trace.
+              ? (busy && i === msgs.length - 1
+                  ? null
+                  : <Bubble key={m._id || i} who="mentor" item={{ ...m, text: '(no reply recorded)' }} />)
               : m.who === 'verdict'
               ? <VerdictMsg key={m._id || i} item={m as any} />
               : m.who === 'system'

@@ -25,7 +25,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config.settings import get_settings
-from app.services import context_assembler, mode_router, skill_graph_repo
+from app.services import context_assembler, mode_router, prompt_store, skill_graph_repo
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
 from app.services.session_boundary import maybe_force_close_long_session
@@ -102,17 +102,18 @@ _SEARCH_DOCUMENTS_TOOL = {
     },
 }
 
-# Cross-topic only — this topic's own history is already fully injected via
-# SummaryBlocks every turn, so searching it again would be redundant. This
-# is the deliberate, agentic replacement for the old always-on cross-topic
-# backfill: the model must choose to look, nothing crosses topics silently.
+# Cross-topic only — this topic's own history is reached via
+# get_past_sessions instead. This is the deliberate, agentic replacement for
+# the old always-on cross-topic backfill: the model must choose to look,
+# nothing crosses topics silently.
 _SEARCH_OTHER_TOPICS_TOOL = {
     "name": "search_other_topics",
     "description": (
         "Semantically search the user's session history in OTHER topics "
         "for a specific query. Use this only when the user references "
         "something from a different topic that isn't already in your "
-        "context — not for anything about the current topic."
+        "context — not for anything about the current topic (use "
+        "get_past_sessions for that)."
     ),
     "input_schema": {
         "type": "object",
@@ -121,9 +122,48 @@ _SEARCH_OTHER_TOPICS_TOOL = {
     },
 }
 
+# --- Context tools: L1/L2/L3 on demand instead of injected into every system
+# prompt whether the turn needs them or not (see mentor_v1.md's "Context
+# tools" section). No input — each just formats what context_assembler
+# already fetched for this turn (see TopicChatService._execute_loop_tool),
+# no extra DB round trip.
+_GET_USER_PROFILE_TOOL = {
+    "name": "get_user_profile",
+    "description": (
+        "Get the user's learning-context facts (background, goals, "
+        "experience) and observed teaching-style notes. Call this if you "
+        "need to tailor an explanation or example to who the user is or "
+        "how they like to learn."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+_GET_SKILL_STATE_TOOL = {
+    "name": "get_skill_state",
+    "description": (
+        "Get this topic's per-subtopic mastery levels and the specific "
+        "concepts already taught in this topic. Call this before deciding "
+        "how much to re-explain or how to calibrate difficulty."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+_GET_PAST_SESSIONS_TOOL = {
+    "name": "get_past_sessions",
+    "description": (
+        "Get narrative summaries of this topic's own prior closed sessions. "
+        "Call this if the user references something discussed before in "
+        "this topic, or you need continuity with earlier sessions here."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
 _LOOP_TOOL_NAMES = {
     _SEARCH_DOCUMENTS_TOOL["name"],
     _SEARCH_OTHER_TOPICS_TOOL["name"],
+    _GET_USER_PROFILE_TOOL["name"],
+    _GET_SKILL_STATE_TOOL["name"],
+    _GET_PAST_SESSIONS_TOOL["name"],
 }
 
 # One tool-decision round, then one forced-final-answer round. Keeps worst
@@ -297,7 +337,10 @@ class TopicChatService:
 
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages, summary_blocks)
-            tools = [_WEB_SEARCH_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL]
+            tools = [
+                _WEB_SEARCH_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL,
+                _GET_USER_PROFILE_TOOL, _GET_SKILL_STATE_TOOL, _GET_PAST_SESSIONS_TOOL,
+            ]
             if include_diagnostic_tool:
                 tools.append(_DIAGNOSTIC_VERDICT_TOOL)
 
@@ -342,7 +385,7 @@ class TopicChatService:
                 lc_messages.append(accumulated)
                 for tc in loop_calls:
                     result_text = await self._execute_loop_tool(
-                        tc["name"], tc.get("args") or {}, user_id
+                        tc["name"], tc.get("args") or {}, user_id, context
                     )
                     lc_messages.append(ToolMessage(content=result_text, tool_call_id=tc["id"]))
 
@@ -452,11 +495,16 @@ class TopicChatService:
         ]
 
     async def _execute_loop_tool(
-        self, name: str, tool_input: dict, user_id: str
+        self, name: str, tool_input: dict, user_id: str, context: dict
     ) -> str:
         """Run a loop tool locally and return its result as plain text for
         the model. Fail-open on any error — matches context_assembler.py's
-        pattern, a lookup miss shouldn't break the turn."""
+        pattern, a lookup miss shouldn't break the turn.
+
+        The three get_* tools don't hit the DB here — context_assembler
+        already fetched everything for this turn; they just format the
+        relevant slice of it on demand instead of it being injected into
+        every system prompt unconditionally (see mentor_v1.md)."""
         try:
             if name == "search_documents":
                 results = await vector_search(
@@ -468,6 +516,18 @@ class TopicChatService:
                     tool_input.get("query", ""), user_id, source="summary_block", limit=5
                 )
                 return self._format_search_results(results, empty_msg="No matching past sessions found.")
+            if name == "get_user_profile":
+                profile = context.get("profile", {})
+                learning_context = prompt_store._format_learning_context(profile, context.get("l1_scope"))
+                style_notes = prompt_store._format_style_notes(profile.get("style_notes") or [])
+                return f"Learning Context: {learning_context}\n\nTeaching style notes:\n{style_notes}"
+            if name == "get_skill_state":
+                skill = context.get("skill", {})
+                mastery = prompt_store._format_subtopic_mastery(skill.get("subtopic_mastery"))
+                taught = prompt_store._format_taught_concepts(context.get("taught_concepts"))
+                return f"Subtopic Mastery:\n{mastery}\n\nAlready Taught In This Topic:\n{taught}"
+            if name == "get_past_sessions":
+                return prompt_store._format_summary_blocks(context.get("summary_blocks"))
             return f"Unknown tool: {name}"
         except Exception as e:
             logger.warning("Loop tool %s failed for user=%s: %s", name, user_id, e)

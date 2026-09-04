@@ -802,3 +802,50 @@ class TestToolLoop:
         visible, _ = _split_meta(full)
         assert visible == "Got it."
         mock_repo.apply_update.assert_called_once()
+
+
+class TestContextTools:
+    """get_user_profile/get_skill_state/get_past_sessions: L1/L2/L3 served on
+    demand from the already-assembled context dict, no extra DB round trip,
+    no static injection into the system prompt (see mentor_v1.md)."""
+
+    @pytest.mark.asyncio
+    async def test_get_user_profile_formats_learning_context_and_style_notes(self, chat_service):
+        context = {
+            "profile": {
+                "learning_context_detail": {"situations": ["Backend engineer"]},
+                "style_notes": [{"category": "communication", "note": "Use analogies"}],
+            },
+        }
+        result = await chat_service._execute_loop_tool("get_user_profile", {}, "user-123", context)
+        assert "Backend engineer" in result
+        assert "Use analogies" in result
+
+    @pytest.mark.asyncio
+    async def test_get_skill_state_formats_mastery_and_taught_concepts(self, chat_service):
+        context = {
+            "skill": {"subtopic_mastery": {"Loops": 40}},
+            "taught_concepts": ["for vs while"],
+        }
+        result = await chat_service._execute_loop_tool("get_skill_state", {}, "user-123", context)
+        assert "Loops: 40%" in result
+        assert "for vs while" in result
+
+    @pytest.mark.asyncio
+    async def test_get_past_sessions_formats_summary_blocks(self, chat_service):
+        context = {
+            "summary_blocks": [
+                {"text": "Covered recursion basics", "createdAt": "2025-01-01"},
+            ],
+        }
+        result = await chat_service._execute_loop_tool("get_past_sessions", {}, "user-123", context)
+        assert "Covered recursion basics" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_context_falls_back_to_placeholders(self, chat_service):
+        """No profile/skill/summary_blocks yet (e.g. brand-new topic) —
+        fail-open with the same placeholders the old static injection used,
+        not an error."""
+        result = await chat_service._execute_loop_tool("get_skill_state", {}, "user-123", {})
+        assert "not assessed yet" in result
+        assert "nothing recorded yet" in result

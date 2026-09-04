@@ -39,13 +39,13 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "You are running a brief DIAGNOSTIC before teaching this topic.\n"
         "- Ask 1-2 targeted questions to gauge the student's actual mastery of "
         "specific subtopics within this topic. Do NOT teach content yet, do "
-        "NOT give the full picture up front. This holds even if the user's "
-        "profile below says they prefer answer-first explanations — that "
-        "preference shapes how you teach once diagnosis is done, it does not "
-        "skip diagnosis.\n"
-        "- If Relevant Past Sessions below show related experience, let it "
-        "inform your first question's difficulty, but still verify — don't "
-        "skip diagnosis on assumption.\n"
+        "NOT give the full picture up front. This holds even if get_user_profile "
+        "shows the user prefers answer-first explanations — that preference "
+        "shapes how you teach once diagnosis is done, it does not skip "
+        "diagnosis.\n"
+        "- Call get_past_sessions or get_skill_state first if related prior "
+        "experience would inform your first question's difficulty, but still "
+        "verify — don't skip diagnosis on assumption.\n"
         "- Use the quick-reply option format for questions with discrete "
         "plausible answers.\n"
         "- Once the user's answer gives you enough signal on one or more "
@@ -141,19 +141,6 @@ def _interpolate(template: str, variables: dict[str, str]) -> str:
     return re.sub(r"\{\{(\w+)\}\}", replacer, template)
 
 
-def _format_documents(documents: list[dict[str, Any]]) -> str:
-    """Format ingested file chunks into a readable block for the prompt."""
-    if not documents:
-        return "(no uploaded documents)"
-
-    lines = []
-    for doc in documents:
-        filename = (doc.get("metadata") or {}).get("filename", "uploaded file")
-        text = doc.get("text", "")
-        lines.append(f"[{filename}] {text}")
-    return "\n\n".join(lines)
-
-
 def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | None = None) -> str:
     """Format the user's Facts About You, filtered to what's relevant to the
     current topic when a scope is available.
@@ -226,29 +213,20 @@ def _format_subtopic_mastery(subtopic_mastery: dict[str, float] | None) -> str:
 def _build_context_variables(
     context: dict[str, Any], mode: str, tone: ToneId
 ) -> dict[str, str]:
-    """Extract template variables from the assembled context dict."""
-    profile = context.get("profile", {})
+    """Extract template variables from the assembled context dict.
+
+    L1/L2/L3 (profile, skill state, past sessions) are deliberately NOT
+    injected here anymore — they're served on demand via the
+    get_user_profile / get_skill_state / get_past_sessions tools (see
+    topic_chat_service._execute_loop_tool, which reuses the _format_* helpers
+    below directly) instead of being stuffed into every system prompt
+    whether the turn needs them or not."""
     skill = context.get("skill", {})
 
-    mode_instructions = _MODE_INSTRUCTIONS.get(mode, "")
-
     return {
-        # L1 Profile fields
-        "learning_context": _format_learning_context(profile, context.get("l1_scope")),
-        # Observed teaching-style notes, grounded per-session (issue #14 evolution)
-        "style_notes": _format_style_notes(profile.get("style_notes") or []),
-        # L2 Skill fields
         "topic": skill.get("topic", context.get("topic", "General")),
-        "subtopic_mastery": _format_subtopic_mastery(skill.get("subtopic_mastery")),
-        # L3 Episodic memory
-        "taught_concepts": _format_taught_concepts(context.get("taught_concepts")),
-        "session_summaries": _format_summary_blocks(context.get("summary_blocks")),
-        # Uploaded documents (ingested files)
-        "documents": _format_documents(context.get("documents", [])),
-        # Mode
         "mode": mode,
-        "mode_instructions": mode_instructions,
-        # Tone
+        "mode_instructions": _MODE_INSTRUCTIONS.get(mode, ""),
         "tone_instructions": _TONE_INSTRUCTIONS.get(tone, _TONE_INSTRUCTIONS[DEFAULT_TONE]),
     }
 

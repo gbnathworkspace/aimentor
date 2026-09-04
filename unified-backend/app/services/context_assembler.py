@@ -21,17 +21,11 @@ from fastapi import HTTPException, status
 from app.services.token_budget import count_tokens
 
 from app.config.database import (
-    embeddings_col,
     profiles_col,
     skill_graph_col,
 )
 
 logger = logging.getLogger(__name__)
-
-# ponytail: dump-all (capped), no vector search — onboarding uploads are a few
-# chunks (résumé, problem list) tied to one user. Add vector ranking + the #5
-# Atlas index only if uploads grow large/many.
-_MAX_DOCUMENT_CHUNKS = 12
 
 
 async def assemble(
@@ -61,8 +55,8 @@ async def assemble(
             treatment as l1_scope.
 
     Returns:
-        A dict with keys: profile, skill, documents,
-        l1_scope, taught_concepts, summary_blocks.
+        A dict with keys: profile, skill, l1_scope, taught_concepts,
+        summary_blocks.
 
     Raises:
         HTTPException(400): If no profile exists for the user.
@@ -88,47 +82,13 @@ async def assemble(
         logger.warning("Skill graph fetch failed for user=%s topic=%s: %s", user_id, topic, e)
         skill = None
 
-    # Uploaded documents (résumé / LeetCode etc. ingested at onboarding),
-    # plus this topic's own documents (see /topic/{id}/document), if any.
-    # Without this read the ingest pipeline is orphaned — files embedded, never used (issue #4).
-    documents = await _fetch_documents(user_id, topic_id)
-
     return {
         "profile": profile,
         "skill": skill or {},
-        "documents": documents,
         "l1_scope": l1_scope,
         "taught_concepts": (skill or {}).get("taught_concepts"),
         "summary_blocks": summary_blocks,
     }
-
-
-async def _fetch_documents(
-    user_id: str, topic_id: str | None = None, limit: int = _MAX_DOCUMENT_CHUNKS
-) -> list:
-    """Fetch this topic's own documents first, then fill the rest of the
-    budget with the user's user-wide ingested chunks. Empty list on failure."""
-    try:
-        topic_chunks: list = []
-        if topic_id:
-            topic_chunks = await embeddings_col().find(
-                {"user_id": user_id, "metadata.source": "topic_document", "metadata.topic_id": topic_id},
-                {"_id": 0, "text": 1, "metadata.filename": 1},
-            ).to_list(length=limit)
-
-        remaining = limit - len(topic_chunks)
-        general_chunks: list = []
-        if remaining > 0:
-            cursor = embeddings_col().find(
-                {"user_id": user_id, "metadata.source": "ingestion"},
-                {"_id": 0, "text": 1, "metadata.filename": 1},
-            ).limit(remaining)
-            general_chunks = await cursor.to_list(length=remaining)
-
-        return topic_chunks + general_chunks
-    except Exception as e:
-        logger.warning("Document fetch failed for user=%s: %s. Returning no documents.", user_id, e)
-        return []
 
 
 # ---------------------------------------------------------------------------

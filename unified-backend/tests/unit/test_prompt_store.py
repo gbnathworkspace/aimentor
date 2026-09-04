@@ -9,6 +9,8 @@ from app.services.prompt_store import (
     get_onboarding_prompt,
     get_system_prompt,
     _format_learning_context,
+    _format_style_notes,
+    _format_subtopic_mastery,
     _format_summary_blocks,
     _format_taught_concepts,
     _interpolate,
@@ -35,54 +37,6 @@ class TestGetSystemPrompt:
         result = get_system_prompt("socratic", context)
         assert isinstance(result, str)
         assert len(result) > 0
-
-    def test_interpolates_profile_fields(self):
-        context = {
-            "profile": {
-                "learning_context_detail": {
-                    "label": "Crack FAANG",
-                    "situations": ["System Design", "DSA"],
-                },
-            },
-            "skill": {},
-            "episodes": [],
-        }
-        result = get_system_prompt("socratic", context)
-        assert "Crack FAANG" in result
-        assert "System Design" in result
-        assert "DSA" in result
-
-    def test_injects_every_situation(self):
-        """No entry is "active" — all of them reach the prompt."""
-        context = {
-            "profile": {
-                "learning_context_detail": {
-                    "label": "interviewing for staff roles",
-                    "situations": [
-                        "interviewing for staff roles",
-                        "leading the backend rewrite",
-                    ],
-                },
-            },
-            "skill": {},
-            "episodes": [],
-        }
-        result = get_system_prompt("socratic", context)
-        assert "leading the backend rewrite" in result
-        # `label` duplicates situations[0] — injected once, not twice
-        assert result.count("interviewing for staff roles") == 1
-
-    def test_interpolates_skill_fields(self):
-        context = {
-            "profile": {},
-            "skill": {
-                "topic": "System Design",
-                "subtopic_mastery": {"CAP theorem": 55},
-            },
-        }
-        result = get_system_prompt("socratic", context)
-        assert "System Design" in result
-        assert "CAP theorem: 55%" in result
 
     def test_includes_mode_instructions_socratic(self):
         context = {"profile": {}, "skill": {}, "episodes": []}
@@ -117,25 +71,6 @@ class TestGetSystemPrompt:
         context = {"profile": {}, "skill": {}, "episodes": []}
         with pytest.raises(ValueError, match="Unknown mode"):
             get_system_prompt("unknown_mode", context)
-
-    def test_handles_missing_profile_gracefully(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("socratic", context)
-        assert "Not specified" in result
-
-    def test_includes_summary_blocks_in_prompt(self):
-        context = {
-            "profile": {},
-            "skill": {},
-            "summary_blocks": [
-                {
-                    "text": "Covered array basics and two-pointer technique",
-                    "createdAt": "2025-01-15",
-                }
-            ],
-        }
-        result = get_system_prompt("socratic", context)
-        assert "two-pointer" in result
 
     def test_uses_topic_from_context_when_skill_missing(self):
         context = {
@@ -231,44 +166,33 @@ class TestFormatTaughtConcepts:
         result = _format_taught_concepts(["Signed URLs in CloudFront", "Signed Cookies in CloudFront"])
         assert result == "- Signed URLs in CloudFront\n- Signed Cookies in CloudFront"
 
-    def test_injected_into_prompt(self):
-        context = {
-            "profile": {}, "skill": {}, "episodes": [],
-            "taught_concepts": ["Signed URLs in CloudFront"],
-        }
-        result = get_system_prompt("socratic", context)
-        assert "Already Taught In This Topic" in result
-        assert "Signed URLs in CloudFront" in result
 
-    def test_no_taught_concepts_placeholder_in_prompt(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("socratic", context)
-        assert "(nothing recorded yet)" in result
-        assert "{{taught_concepts}}" not in result
+class TestFormatStyleNotes:
+    """Issue #14: the user's 'how to teach me' note, served via the
+    get_user_profile tool (topic_chat_service._execute_loop_tool) rather
+    than injected into every system prompt."""
+
+    def test_formats_as_bullet_list(self):
+        result = _format_style_notes(
+            [{"category": "communication", "note": "Use code examples, be concise"}]
+        )
+        assert result == "- [communication] Use code examples, be concise"
+
+    def test_empty_shows_placeholder(self):
+        assert _format_style_notes([]) == "(none observed yet)"
 
 
-class TestStyleNotes:
-    """Issue #14: the user's 'how to teach me' note reaches the prompt."""
+class TestFormatSubtopicMastery:
+    """Per-subtopic mastery, served via the get_skill_state tool rather than
+    injected into every system prompt."""
 
-    def test_style_notes_injected(self):
-        context = {
-            "profile": {
-                "style_notes": [
-                    {"category": "communication", "note": "Use code examples, be concise"}
-                ]
-            },
-            "skill": {},
-            "episodes": [],
-        }
-        result = get_system_prompt("socratic", context)
-        assert "How to Teach This User" in result
-        assert "Use code examples, be concise" in result
+    def test_formats_sorted_weakest_first(self):
+        result = _format_subtopic_mastery({"CAP theorem": 55, "Sharding": 20})
+        assert result == "- Sharding: 20%\n- CAP theorem: 55%"
 
-    def test_no_style_notes_placeholder(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("socratic", context)
-        assert "(none observed yet)" in result
-        assert "{{style_notes}}" not in result
+    def test_empty_or_none_shows_placeholder(self):
+        assert _format_subtopic_mastery(None) == "(not assessed yet)"
+        assert _format_subtopic_mastery({}) == "(not assessed yet)"
 
 
 class TestAttemptFirstTeaching:
@@ -291,34 +215,14 @@ class TestAttemptFirstTeaching:
         assert "answer immediately" in result.lower()
         assert "no leading question" in result.lower()
 
-    def test_socratic_hint_guided_show_current_level(self):
+    def test_socratic_hint_guided_reference_skill_state_tool(self):
+        """No mastery level is injected directly anymore — the mentor calls
+        get_skill_state on demand instead (see mentor_v1.md)."""
         context = {"profile": {}, "skill": {}, "episodes": []}
         for mode in ("socratic", "hint", "guided"):
             result = get_system_prompt(mode, context)
-            assert "Current Level" in result, mode
+            assert "get_skill_state" in result, mode
         assert "leading question" in get_system_prompt("socratic", context).lower()
-
-class TestUploadedDocuments:
-    """Issue #4: ingested file chunks must reach the mentor prompt."""
-
-    def test_documents_injected(self):
-        context = {
-            "profile": {},
-            "skill": {},
-            "episodes": [],
-            "documents": [
-                {"text": "5 years Python at Acme", "metadata": {"filename": "resume.pdf"}},
-            ],
-        }
-        result = get_system_prompt("socratic", context)
-        assert "resume.pdf" in result
-        assert "5 years Python at Acme" in result
-        assert "{{documents}}" not in result
-
-    def test_no_documents_placeholder(self):
-        context = {"profile": {}, "skill": {}, "episodes": []}
-        result = get_system_prompt("socratic", context)
-        assert "(no uploaded documents)" in result
 
 
 class TestGetOnboardingPrompt:

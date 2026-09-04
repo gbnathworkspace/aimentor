@@ -1,12 +1,14 @@
 """SessionCompactor — turns a closed (or forcibly-closed) session's messages
-into a SummaryBlock, prunes the raw messages it just covered, and keeps a
-topic's SummaryBlocks bounded via oldest-pair merging.
+into a SummaryBlock and keeps a topic's SummaryBlocks bounded via
+oldest-pair merging. Raw messages are never deleted from topic.messages —
+they remain permanent history; the messages a SummaryBlock covers are
+excluded from LLM context at read time instead (see
+topic_chat_service._format_messages_for_api), via summaryBlocks[].sourceSessionIds.
 
 Replaces the old compaction_service.py + session_summarizer.py split: those
 two ran on different triggers (mid-turn token-budget crossing vs. session
 close) but wrote overlapping, uncoordinated state (an inline rolling summary
-inside topic.messages vs. a separate topic.summaryBlocks array), and only
-compaction_service ever reclaimed tokens by removing raw messages.
+inside topic.messages vs. a separate topic.summaryBlocks array).
 
 session_compactor runs at session boundaries only (session_boundary.py):
 idle-gap close, idle sweep, logout/checkpoint, or a hard-ceiling force-close
@@ -358,11 +360,11 @@ async def _apply_taught_concepts(topic_title: str, user_id: str, new_concepts: l
 async def close_session(topic_id: str, user_id: str, upto_timestamp: datetime) -> None:
     """Summarize the run of not-yet-covered messages up to `upto_timestamp`
     into a fresh SummaryBlock, apply skill_updates/taught_concepts/profile
-    signals, enforce the word cap, and prune the raw messages just covered
-    out of topic.messages so they stop counting against the topic's token
-    budget. No-op if no uncovered messages exist — safe to call repeatedly
-    (idle sweep, logout, browser-close checkpoint, and a hard-ceiling force
-    close can all reach the same topic).
+    signals, and enforce the word cap. Raw messages are left in
+    topic.messages untouched — covered messages are filtered out of LLM
+    context at read time instead. No-op if no uncovered messages exist —
+    safe to call repeatedly (idle sweep, logout, browser-close checkpoint,
+    and a hard-ceiling force close can all reach the same topic).
     """
     if topic_id in _in_progress:
         return
@@ -423,26 +425,19 @@ async def _close_session(topic_id: str, user_id: str, upto_timestamp: datetime) 
 
     new_blocks = await enforce_word_cap(existing_blocks + [new_block])
 
-    # Prune the raw messages just covered — this is the token-reclamation
-    # step the old session_summarizer never did. Anything not of type
-    # "message" (e.g. a legacy inline rolling-summary block from before this
-    # merge) is left untouched; it's read as a historical fallback only.
-    pruned_messages = [
-        m for m in all_messages
-        if not (m.get("type") == "message" and m.get("id") in covered_message_ids)
-    ]
-
-    tokens_before = _token_counter.count_window(all_messages)
-    new_token_estimate = _token_counter.count_window(pruned_messages)
-
+    # Raw messages are never deleted from topic.messages — they stay as
+    # permanent history. Covered messages are excluded from LLM context at
+    # read time instead (see topic_chat_service._format_messages_for_api),
+    # using summaryBlocks[].sourceSessionIds as the exclusion set. Since
+    # topic.messages isn't touched here, metadata.currentTokenEstimate
+    # (maintained incrementally by TopicService.append_message) doesn't need
+    # updating either.
     current_version = topic.get("version", 0)
     result = await topics_col().update_one(
         {"topicId": topic_id, "userId": user_id, "version": current_version},
         {
             "$set": {
-                "messages": pruned_messages,
                 "summaryBlocks": new_blocks,
-                "metadata.currentTokenEstimate": new_token_estimate,
                 "version": current_version + 1,
             },
         },
@@ -450,6 +445,13 @@ async def _close_session(topic_id: str, user_id: str, upto_timestamp: datetime) 
     if result.modified_count != 1:
         logger.error("Session close failed: concurrent write conflict for topic %s", topic_id)
         return
+
+    # Tokens "reclaimed" here means from the LLM context window, not the DB —
+    # the raw messages stay in topic.messages permanently; this is how many
+    # fewer tokens get sent to the model now that they're replaced by the
+    # narrated summary instead.
+    tokens_before = _token_counter.count_window(session_messages)
+    tokens_after = _token_counter.count_message({"role": "assistant", "content": summary_text})
 
     event_id = str(uuid.uuid4())
     await compaction_events_col().insert_one({
@@ -459,8 +461,8 @@ async def _close_session(topic_id: str, user_id: str, upto_timestamp: datetime) 
         "timestamp": datetime.now(timezone.utc),
         "messagesCompacted": len(session_messages),
         "tokensBeforeCompaction": tokens_before,
-        "tokensAfterCompaction": new_token_estimate,
-        "tokensReclaimed": tokens_before - new_token_estimate,
+        "tokensAfterCompaction": tokens_after,
+        "tokensReclaimed": tokens_before - tokens_after,
         "skillUpdateGenerated": bool(skill_updates),
         "skillUpdate": [u.model_dump() for u in skill_updates] if skill_updates else None,
         "summaryBlockId": new_block["blockId"],

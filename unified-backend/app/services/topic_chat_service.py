@@ -260,6 +260,7 @@ class TopicChatService:
                 topic_title=topic_title,
                 system_prompt=system_prompt,
                 messages=messages,
+                summary_blocks=topic.get("summaryBlocks"),
                 include_diagnostic_tool=include_diagnostic_tool,
                 effective_mode=effective_mode,
                 context=context,
@@ -274,6 +275,7 @@ class TopicChatService:
         topic_title: str,
         system_prompt: str,
         messages: list[dict],
+        summary_blocks: list[dict] | None,
         include_diagnostic_tool: bool,
         effective_mode: str,
         context: dict,
@@ -294,7 +296,7 @@ class TopicChatService:
         start = time.monotonic()
 
         try:
-            lc_messages = self._to_langchain_messages(system_prompt, messages)
+            lc_messages = self._to_langchain_messages(system_prompt, messages, summary_blocks)
             tools = [_WEB_SEARCH_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL]
             if include_diagnostic_tool:
                 tools.append(_DIAGNOSTIC_VERDICT_TOOL)
@@ -477,11 +479,13 @@ class TopicChatService:
             return empty_msg
         return "\n\n".join(r.get("text", "") for r in results)
 
-    def _to_langchain_messages(self, system_prompt: str, messages: list[dict]) -> list:
+    def _to_langchain_messages(
+        self, system_prompt: str, messages: list[dict], summary_blocks: list[dict] | None = None
+    ) -> list:
         """Convert the assembled system prompt + topic messages into LangChain
         message objects, reusing the existing cache-block and role-mapping
         logic unchanged."""
-        api_messages = self._format_messages_for_api(messages)
+        api_messages = self._format_messages_for_api(messages, summary_blocks)
         lc_messages: list = [SystemMessage(content=self._build_system_blocks(system_prompt))]
         for m in api_messages:
             msg_cls = HumanMessage if m["role"] == "user" else AIMessage
@@ -552,13 +556,29 @@ class TopicChatService:
             for text in blocks
         ]
 
-    def _format_messages_for_api(self, messages: list[dict]) -> list[dict]:
+    def _format_messages_for_api(
+        self, messages: list[dict], summary_blocks: list[dict] | None = None
+    ) -> list[dict]:
         """Convert topic messages (including SummaryBlocks) to Anthropic API format.
 
         SummaryBlocks are converted to "assistant" messages with a system note prefix.
         Regular messages are passed through with role and content.
         The result must start with a "user" message (Anthropic requirement).
+
+        `summary_blocks` (topic.summaryBlocks) are narrated separately in the
+        system prompt via context_assembler — any raw message already covered
+        by one (per sourceSessionIds) is filtered out here before windowing,
+        so the model never sees the same content twice and the last-20 window
+        isn't spent on messages that would just get discarded. Raw messages
+        are never deleted from the DB (session_compactor.py); this filter is
+        the only place duplication with a summary is actually prevented.
         """
+        if summary_blocks:
+            covered_ids = {
+                mid for blk in summary_blocks for mid in blk.get("sourceSessionIds", [])
+            }
+            messages = [m for m in messages if m.get("id") not in covered_ids]
+
         api_messages = []
 
         for msg in messages:

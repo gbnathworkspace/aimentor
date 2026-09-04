@@ -58,8 +58,8 @@ async def maybe_force_close_long_session(topic_id: str, user_id: str, now: datet
     single sitting long enough to blow the token budget before the frontend
     ever signals the window closed. Closing here doesn't end the literal
     chat session for the frontend's purposes; it just wraps up what's
-    accumulated so far into its own narrative block and prunes it, same as
-    any other close_session call."""
+    accumulated so far into its own narrative block, same as any other
+    close_session call."""
     topic = await topics_col().find_one(
         {"topicId": topic_id, "userId": user_id}, {"_id": 0, "messages": 1, "summaryBlocks": 1},
     )

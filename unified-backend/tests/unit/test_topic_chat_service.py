@@ -532,6 +532,25 @@ class TestFormatMessagesForApi:
         result = service._format_messages_for_api([])
         assert result == []
 
+    def test_summary_covered_messages_filtered_out(self, service):
+        """Raw messages already covered by a summaryBlock (sourceSessionIds)
+        must be excluded from the LLM context window — they're narrated via
+        the summary block instead, never deleted from the DB."""
+        messages = [
+            {"type": "message", "id": "m1", "role": "user", "content": "old msg"},
+            {"type": "message", "id": "m2", "role": "assistant", "content": "old reply"},
+            {"type": "message", "id": "m3", "role": "user", "content": "new msg"},
+        ]
+        summary_blocks = [{"sourceSessionIds": ["m1", "m2"]}]
+        result = service._format_messages_for_api(messages, summary_blocks)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        assert result[0]["content"] == [{
+            "type": "text",
+            "text": "new msg",
+            "cache_control": {"type": "ephemeral"},
+        }]
+
 
 class TestBuildSystemBlocks:
     """_build_system_blocks splits on the static/L1 boundary markers for caching (issue #23)."""

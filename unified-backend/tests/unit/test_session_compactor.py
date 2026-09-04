@@ -1,5 +1,5 @@
-"""Unit tests for session_compactor.py — close_session (including the
-message-pruning step) and enforce_word_cap.
+"""Unit tests for session_compactor.py — close_session (SummaryBlock
+creation; raw messages are left untouched) and enforce_word_cap.
 """
 
 from datetime import datetime, timezone
@@ -48,7 +48,7 @@ class TestCloseSession:
             mock_col.update_one.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_fresh_block_created_and_covered_messages_pruned(self):
+    async def test_fresh_block_created_and_raw_messages_kept(self):
         ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         topic_doc = {
             "topicId": "t1", "userId": "u1", "version": 0,
@@ -85,9 +85,10 @@ class TestCloseSession:
             assert new_blocks[0]["mergeDepth"] == 0
             assert new_blocks[0]["text"] == "did stuff"
 
-            # The covered raw message is pruned out of messages, reclaiming
-            # its tokens — the behavior the old session_summarizer never had.
-            assert set_fields["messages"] == []
+            # Raw messages are never deleted — only summaryBlocks/version are
+            # written back. The covered message stays in topic.messages
+            # permanently; it's filtered from LLM context at read time instead.
+            assert "messages" not in set_fields
             mock_events_col.insert_one.assert_awaited_once()
 
     @pytest.mark.asyncio

@@ -317,10 +317,12 @@ async def send_message(
 
 @router.post("/topic/{topic_id}/close-session")
 async def close_session(topic_id: str, user_id: str = Depends(require_auth)):
-    """Close the topic's current session, called by the client when the topic
-    window is no longer open (navigated away from, or the tab/browser is
-    closing). Sessions are otherwise not time-boxed — a topic left open but
-    idle stays open (session-narrative-summary spec, Requirement 1)."""
+    """Close the topic's current session, called by the client only on true
+    tab/browser close (pagehide/beforeunload) — not on in-app topic
+    switching. Sessions are otherwise not time-boxed — a topic left open but
+    idle stays open (session-narrative-summary spec, Requirement 1). The
+    backend may also force-close a session server-side when it exceeds its
+    token budget, independent of this endpoint."""
     await close_session_for_topic(topic_id, user_id)
     return {"ok": True}
 

@@ -1,13 +1,16 @@
 // MentorMan — data, types, constants
 
 export type MessageItem = {
-  who: 'mentor' | 'user' | 'verdict' | 'system' | 'summary';
+  who: 'mentor' | 'user' | 'verdict' | 'system' | 'summary' | 'session-end';
   text: string;
   label?: string;
   nudge?: string;
   code?: string;
   tone?: 'strong' | 'partial' | 'weak';
   _id?: string;
+  // ISO timestamp from the backend — carried through only to place session-end
+  // dividers relative to surrounding messages (see insertSessionDividers).
+  timestamp?: string;
   suggestions?: { title: string; description: string }[];
   attachments?: { name: string; size: number }[];
   summaryBlock?: {

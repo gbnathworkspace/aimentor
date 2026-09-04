@@ -76,7 +76,10 @@ function ToneBar({ tone, onTone }: { tone: ToneId; onTone: (t: ToneId) => void }
 
 function Composer({ tone, onSend, busy, disabled }: {
   tone: ToneId;
-  onSend: (text: string) => void;
+  // Resolves false when the message was rejected before it ever reached the
+  // backend (e.g. topic at capacity) — the composer restores the text so
+  // nothing typed is silently lost.
+  onSend: (text: string) => Promise<boolean>;
   busy: boolean;
   disabled?: boolean;
 }) {
@@ -91,12 +94,13 @@ function Composer({ tone, onSend, busy, disabled }: {
 
   const canSubmit = !!val.trim();
 
-  const submit = () => {
+  const submit = async () => {
     if (busy || disabled || !canSubmit) return;
     const text = val.trim();
     setVal('');
     if (ref.current) ref.current.style.height = 'auto';
-    onSend(text);
+    const ok = await onSend(text);
+    if (!ok) setVal(text);
   };
 
   return (
@@ -123,6 +127,60 @@ function Composer({ tone, onSend, busy, disabled }: {
       </div>
     </div>
   );
+}
+
+// Interleaves a "session ended" divider into the message list at each closed
+// session's boundary. dividerTimes are ISO timestamps (topic.summaryBlocks[].
+// lastMergedAt — when that sitting's messages were compacted on close); ISO
+// strings sort lexically, so no Date parsing is needed to order them against
+// message.timestamp. Messages without a timestamp (e.g. the in-flight
+// streaming placeholder) just never trigger a divider — no crash.
+//
+// close-session only fires on a true end-of-sitting signal now (see
+// closeTopicSession above), but pagehide+beforeunload can still both fire
+// for the same tab close, and the backend force-closes on token-budget
+// overflow independently — so back-to-back closes are still possible. Each
+// of those is a genuine (if tiny) summaryBlock, but its messages get pruned
+// from topic.messages once summarized, so nothing renders between the
+// resulting dividers — back-to-back boundaries that read as duplicates
+// (and, if compacted within the same minute, literally *look* identical
+// once formatSessionEndLabel truncates to minute precision). Collapse any
+// run of adjacent dividers into one (keeping the latest time) rather than
+// stacking near-meaningless repeats.
+function insertSessionDividers(msgs: MessageItem[], dividerTimes: string[]): MessageItem[] {
+  if (!dividerTimes.length) return msgs;
+  const sorted = [...dividerTimes].sort();
+  const out: MessageItem[] = [];
+  const pushDivider = (t: string) => {
+    const last = out[out.length - 1];
+    if (last?.who === 'session-end') {
+      last.text = t;
+      last._id = `sdiv-${t}`;
+      return;
+    }
+    out.push({ who: 'session-end', text: t, _id: `sdiv-${t}` });
+  };
+  let di = 0;
+  for (const m of msgs) {
+    while (di < sorted.length && m.timestamp && sorted[di] <= m.timestamp) {
+      pushDivider(sorted[di]);
+      di++;
+    }
+    out.push(m);
+  }
+  while (di < sorted.length) {
+    pushDivider(sorted[di]);
+    di++;
+  }
+  return out;
+}
+
+function formatSessionEndLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Session ended';
+  const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d);
+  const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(d);
+  return `Session ended · ${date}, ${time}`;
 }
 
 type Alert = { id: string; kind: 'warn' | 'good'; type: string; text: string; cta?: string };
@@ -197,6 +255,11 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   // resolved yet — surfaced via UncertainRelevanceModal on topic open.
   const [uncertainItems, setUncertainItems] = useState<UncertainL1ScopeItem[]>([]);
   const [showUncertainModal, setShowUncertainModal] = useState(false);
+  // One entry per closed-and-compacted session (topic.summaryBlocks,
+  // lastMergedAt — the moment that sitting's messages were summarized on
+  // close). Used only to place a subtle "session ended" divider among the
+  // loaded messages; see insertSessionDividers.
+  const [sessionEndTimes, setSessionEndTimes] = useState<string[]>([]);
   // Same modal, reused to gate opening the weights picker specifically on
   // uncertain situations/context that its goal cards would otherwise use.
   const [weightsGateItems, setWeightsGateItems] = useState<UncertainL1ScopeItem[]>([]);
@@ -204,10 +267,12 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   const bodyRef = useRef<HTMLDivElement>(null);
   const greetedRef = useRef(false);
 
-  // Sessions aren't idle-timed out — a topic window left open but quiet
-  // stays open. The backend only closes a topic's session when told the
-  // window is no longer open: here, on navigating away from it or on
-  // tab/browser close (`keepalive` lets the request outlive the unload).
+  // Sessions aren't idle-timed out, and switching topics in-app does NOT
+  // close a session either — a topic window left open (including one you've
+  // navigated away from to view another topic) stays open server-side. The
+  // backend only closes a topic's session on a true end-of-sitting signal:
+  // tab/browser close, here (`keepalive` lets the request outlive the
+  // unload), or its own force-close on token-budget overflow.
   const closeTopicSession = useCallback((id: string | null) => {
     if (!id) return;
     fetch(`/api/topic/${id}/close-session`, { method: 'POST', keepalive: true }).catch(() => {});
@@ -229,6 +294,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     if (!topicId) {
       setMsgs([]);
       setTopicTitle('New Topic');
+      setSessionEndTimes([]);
       setLoadedFor(null);
       greetedRef.current = false;
       return;
@@ -245,6 +311,8 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       .then(data => {
         if (cancelled) return;
         if (data?.title) setTopicTitle(data.title);
+        const blocks: { lastMergedAt?: string }[] = data?.summaryBlocks || [];
+        setSessionEndTimes(blocks.map(b => b.lastMergedAt).filter((t): t is string => !!t));
         const scope: L1ScopeEntry[] = data?.l1_scope || [];
         setL1Scope(scope);
         const uncertain = scope.filter(e => e.verdict === 'uncertain' && !e.userResolved);
@@ -259,7 +327,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       .then(data => {
         if (cancelled) return;
         const messages = data.messages || [];
-        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; mode?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number }, i: number) => {
+        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; mode?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number; timestamp?: string }, i: number) => {
           if (m.type === 'summary') {
             return {
               who: 'summary' as const,
@@ -280,6 +348,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
             text: m.content || '',
             label: m.mode ? m.mode.toUpperCase() : undefined,
             _id: m.id || `loaded${i}`,
+            timestamp: m.timestamp,
           };
         });
         setMsgs(loaded);
@@ -287,14 +356,15 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       .catch(() => { if (!cancelled) setMsgs([]); })
       .finally(() => { if (!cancelled) { setBusy(false); setLoadedFor(topicId); } });
 
-    // Close the session for the topic we're navigating away from (or that's
-    // unmounting) — not the one this effect is loading.
-    const prevTopicId = topicId;
     return () => {
       cancelled = true;
-      closeTopicSession(prevTopicId);
     };
-  }, [topicId, closeTopicSession]);
+  }, [topicId]);
+
+  const displayMsgs = useMemo(
+    () => insertSessionDividers(msgs, sessionEndTimes),
+    [msgs, sessionEndTimes]
+  );
 
   // Auto-scroll on new messages. Includes `suggestions` — the options card
   // takes up its own space below chat-body (not an overlay), so chat-body
@@ -314,9 +384,10 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   const send = useCallback(async (
     text: string,
     opts?: { attachments?: { name: string; size: number }[]; backendContent?: string },
-  ) => {
-    if (!topicId) return;
-    const userMsg: MessageItem = { who: 'user', text, _id: 'u' + Date.now(), attachments: opts?.attachments };
+  ): Promise<boolean> => {
+    if (!topicId) return false;
+    const userId = 'u' + Date.now();
+    const userMsg: MessageItem = { who: 'user', text, _id: userId, attachments: opts?.attachments, timestamp: new Date().toISOString() };
     setMsgs(prev => [...prev, userMsg]);
     setSuggestions([]);
     setBusy(true);
@@ -328,16 +399,22 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
         body: JSON.stringify({ content: opts?.backendContent ?? text, mode: 'topic' }),
       });
 
-      // Pre-flight rejections (e.g. topic at capacity) come back as plain
-      // JSON before any streaming starts — everything else is a stream.
+      // Pre-flight rejections (e.g. topic at capacity, chronological-order
+      // conflict, context-assembly failure) come back as plain JSON before
+      // any streaming starts — everything else is a stream. The message was
+      // never persisted server-side, so drop the optimistic bubble rather
+      // than leave it looking sent (the caller restores it into the input).
       if (res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
-        setMsgs(prev => [...prev, { who: 'mentor', text: data.error || "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() }]);
-        return;
+        setMsgs(prev => [
+          ...prev.filter(m => m._id !== userId),
+          { who: 'mentor', text: data.error ?? data.detail ?? "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() },
+        ]);
+        return false;
       }
       if (!res.body) throw new Error('No response body');
 
-      setMsgs(prev => [...prev, { who: 'mentor', text: '', _id: mentorId }]);
+      setMsgs(prev => [...prev, { who: 'mentor', text: '', _id: mentorId, timestamp: new Date().toISOString() }]);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let full = '';
@@ -358,8 +435,16 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       }
       setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
       setSuggestions(Array.isArray(meta?.suggestions) ? meta.suggestions : []);
+      return true;
     } catch {
-      setMsgs(prev => [...prev, { who: 'mentor', text: "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() }]);
+      // Network error or an empty stream body — same "never confirmed
+      // persisted" situation as the pre-flight rejection above, so drop the
+      // optimistic bubble here too rather than leaving a phantom sent message.
+      setMsgs(prev => [
+        ...prev.filter(m => m._id !== userId && m._id !== mentorId),
+        { who: 'mentor', text: "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() },
+      ]);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -620,8 +705,12 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
 
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-inner">
-          {msgs.map((m, i) =>
-            m.who === 'summary'
+          {displayMsgs.map((m, i) =>
+            m.who === 'session-end'
+              ? <div key={m._id || i} className="session-divider" role="separator">
+                  <span className="session-divider-label">{formatSessionEndLabel(m.text)}</span>
+                </div>
+              : m.who === 'summary'
               ? <SummaryBlockIndicator key={m._id || i} summaryBlock={m.summaryBlock!} />
               : m.who === 'mentor' && !m.text
               // Empty mentor text is only ever legitimate for the in-flight
@@ -630,7 +719,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
               // mentor message (historical bad data, or any future bug that
               // appends one) must still show something instead of silently
               // vanishing with no bubble, no error, no trace.
-              ? (busy && i === msgs.length - 1
+              ? (busy && i === displayMsgs.length - 1
                   ? null
                   : <Bubble key={m._id || i} who="mentor" item={{ ...m, text: '(no reply recorded)' }} />)
               : m.who === 'verdict'
@@ -640,7 +729,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
                   <span className="system-msg-text">{m.text}</span>
                 </div>
               : m.who === 'mentor' && looksLikeQuestion(m.text)
-              ? <MentorQuestionCard key={m._id || i} text={m.text} label={m.label} />
+              ? <MentorQuestionCard key={m._id || i} text={m.text} label={m.label} timestamp={m.timestamp} />
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
           {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && (

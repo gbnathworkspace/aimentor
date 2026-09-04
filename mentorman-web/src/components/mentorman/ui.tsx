@@ -317,33 +317,46 @@ export function ModeBadge({ label, inline }: { label: string; inline?: boolean }
   );
 }
 
+export function formatBubbleTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(d);
+}
+
 export function Bubble({ who, item, delay }: {
   who: 'mentor' | 'user';
-  item: { text: string; label?: string; code?: string; nudge?: string; attachments?: { name: string; size: number }[] };
+  item: { text: string; label?: string; code?: string; nudge?: string; timestamp?: string; attachments?: { name: string; size: number }[] };
   delay?: number;
 }) {
+  const time = item.timestamp && formatBubbleTime(item.timestamp);
   return (
     <Msg who={who} delay={delay} modeLabel={item.label}>
-      <div className="bubble">
-        {item.attachments && item.attachments.length > 0 && (
-          <div className="chat-document-preview-area" role="list" aria-label="Attached files">
-            {item.attachments.map((a, i) => (
-              <div key={`${a.name}-${i}`} className="chat-document-chip" role="listitem">
-                <Icon name="doc" size={13} />
-                <span className="chat-document-chip-name" title={a.name}>{truncateFilename(a.name)}</span>
-                <span className="chat-document-chip-size">{formatFileSize(a.size)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {fmt(item.text)}
-        {item.nudge && (
-          <div className="nudge">
-            <div className="label">Nudge</div>
-            {fmt(item.nudge)}
-          </div>
-        )}
-        {who === 'mentor' && item.text && <SpeakButton text={item.text} className="bubble-speak" />}
+      {/* tabIndex makes the timestamp reachable via keyboard/touch focus, not
+          just mouse hover — :focus-visible below mirrors the hover reveal.
+          Left un-hidden from AT so focusing/reading the row exposes the time. */}
+      <div className="bubble-row" tabIndex={time ? 0 : undefined}>
+        {time && <span className="bubble-time">{time}</span>}
+        <div className="bubble">
+          {item.attachments && item.attachments.length > 0 && (
+            <div className="chat-document-preview-area" role="list" aria-label="Attached files">
+              {item.attachments.map((a, i) => (
+                <div key={`${a.name}-${i}`} className="chat-document-chip" role="listitem">
+                  <Icon name="doc" size={13} />
+                  <span className="chat-document-chip-name" title={a.name}>{truncateFilename(a.name)}</span>
+                  <span className="chat-document-chip-size">{formatFileSize(a.size)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {fmt(item.text)}
+          {item.nudge && (
+            <div className="nudge">
+              <div className="label">Nudge</div>
+              {fmt(item.nudge)}
+            </div>
+          )}
+          {who === 'mentor' && item.text && <SpeakButton text={item.text} className="bubble-speak" />}
+        </div>
       </div>
     </Msg>
   );

@@ -51,6 +51,51 @@ class TestRule1ColdStart:
         assert decision.selected_mode == MentorMode.DIAGNOSTIC
         mock_client_cls.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_stalled_diagnostic_falls_through_to_router(self):
+        """last_studied never lands (verdict tool never called) — after the
+        stall cap, Rule 1 stops re-firing and the normal router runs instead
+        of trapping every future turn in DIAGNOSTIC forever."""
+        stalled_history = [
+            {"type": "message", "role": "assistant", "mode": "diagnostic", "content": "..."},
+            {"type": "message", "role": "assistant", "mode": "diagnostic", "content": "..."},
+            {"type": "message", "role": "assistant", "mode": "diagnostic", "content": "..."},
+        ]
+        fake_client = MagicMock()
+        fake_client.messages.create = AsyncMock(
+            return_value=_tool_use_response(
+                matched_rule="RULE_2_URGENCY_DIRECT",
+                selected_mode="DIRECT",
+                reasoning="Plain factual lookup.",
+            )
+        )
+
+        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+            decision = await route_user_turn(
+                query="what are data types",
+                skill={},
+                recent_messages=stalled_history,
+            )
+
+        fake_client.messages.create.assert_called_once()
+        assert decision.matched_rule == MatchedRule.RULE_2_URGENCY_DIRECT
+        assert decision.selected_mode == MentorMode.DIRECT
+
+    @pytest.mark.asyncio
+    async def test_diagnostic_under_stall_cap_still_short_circuits(self):
+        """Fewer prior DIAGNOSTIC turns than the cap — Rule 1 still fires."""
+        with patch("app.services.mode_router.anthropic.AsyncAnthropic") as mock_client_cls:
+            decision = await route_user_turn(
+                query="what are data types",
+                skill={},
+                recent_messages=[
+                    {"type": "message", "role": "assistant", "mode": "diagnostic", "content": "..."},
+                ],
+            )
+
+        assert decision.matched_rule == MatchedRule.RULE_1_COLD_START
+        mock_client_cls.assert_not_called()
+
 
 class TestRoutedRules:
     @pytest.mark.asyncio

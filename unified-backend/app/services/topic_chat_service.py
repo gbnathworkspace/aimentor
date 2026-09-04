@@ -391,7 +391,41 @@ class TopicChatService:
             "systemPrompt": system_prompt,
             "mode": effective_mode,
         }
-        await self._topic_service.append_message(topic_id, user_id, assistant_msg)
+        # The reply is already streamed to the client above (line ~385), so a
+        # persist failure here would otherwise be invisible: the user sees a
+        # reply that silently never made it into topic.messages, and the next
+        # turn's context assembly (and the post-turn hook below) would run on
+        # a doc that's missing it. Surface it instead of losing it silently.
+        #
+        # asyncio.shield matters here specifically: Starlette's
+        # StreamingResponse races this generator against a disconnect
+        # listener in the same task group (see starlette.responses.
+        # StreamingResponse.__call__) — whichever finishes first cancels the
+        # other. If the client disconnects (e.g. a page reload) right after
+        # the reply text has already streamed but before this await
+        # completes, an unshielded call gets torn down mid-write by
+        # asyncio.CancelledError — a BaseException, so it isn't even caught
+        # by `except Exception` below. Shielding keeps the write running to
+        # completion server-side regardless of what the client does.
+        try:
+            await asyncio.shield(
+                self._topic_service.append_message(topic_id, user_id, assistant_msg)
+            )
+        except asyncio.CancelledError:
+            logger.warning(
+                "Client disconnected while persisting assistant message for "
+                "topic=%s user=%s — write continues in the background",
+                topic_id, user_id,
+            )
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to persist assistant message for topic=%s user=%s — "
+                "reply was shown to the user but not saved",
+                topic_id, user_id,
+            )
+            yield "\n\n[warning: this reply may not have been saved — refresh to check]"
+            return
 
         asyncio.create_task(self._post_turn_hook(topic_id, user_id))
 

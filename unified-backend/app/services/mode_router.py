@@ -31,6 +31,17 @@ _ROUTER_MAX_TOKENS = 300
 _RECENT_MESSAGE_WINDOW = 6
 """How many recent turns the router reads to judge frustration/attempts."""
 
+_DIAGNOSTIC_STALL_CAP = 3
+"""Rule 1 forces DIAGNOSTIC every turn while skill.last_studied is unset —
+and that field only gets set once the model successfully calls
+record_diagnostic_verdict (see skill_graph_repo.apply_update). If that tool
+call never lands (model never satisfied, validation rejects the subtopic,
+etc.), Rule 1 would otherwise re-fire forever, trapping every future turn in
+diagnosis regardless of what the user actually asks. Once this many assistant
+turns in the topic have already been forced into DIAGNOSTIC without ever
+landing a verdict, stop forcing it and fall through to the normal
+query-aware router (rules 2-6) instead."""
+
 
 class MentorMode(str, Enum):
     DIAGNOSTIC = "DIAGNOSTIC"
@@ -151,10 +162,23 @@ async def route_user_turn(
     fail-open pattern used throughout context_assembler.py.
     """
     if not skill.get("last_studied"):
-        return RouterDecision(
-            matched_rule=MatchedRule.RULE_1_COLD_START,
-            selected_mode=MentorMode.DIAGNOSTIC,
-            reasoning="Topic has no verified skill assessment yet.",
+        prior_diagnostic_turns = sum(
+            1 for m in recent_messages
+            if m.get("type") == "message"
+            and m.get("role") == "assistant"
+            and m.get("mode") == "diagnostic"
+        )
+        if prior_diagnostic_turns < _DIAGNOSTIC_STALL_CAP:
+            return RouterDecision(
+                matched_rule=MatchedRule.RULE_1_COLD_START,
+                selected_mode=MentorMode.DIAGNOSTIC,
+                reasoning="Topic has no verified skill assessment yet.",
+            )
+        logger.warning(
+            "Cold-start gate stalled after %d DIAGNOSTIC turns with no verdict "
+            "ever recorded — falling through to the normal router instead of "
+            "forcing DIAGNOSTIC again.",
+            prior_diagnostic_turns,
         )
 
     user_payload = (

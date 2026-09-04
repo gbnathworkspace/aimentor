@@ -23,6 +23,7 @@ from app.services.topic_chat_service import (
     TopicChatService,
     LLM_TIMEOUT_SECONDS,
     _META_MARKER,
+    _TOOL_MARKER,
     _MAX_LOOP_ROUNDS,
 )
 
@@ -802,6 +803,42 @@ class TestToolLoop:
         visible, _ = _split_meta(full)
         assert visible == "Got it."
         mock_repo.apply_update.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_loop_tool_call_emits_start_and_end_markers(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        """Each loop-tool call (get_past_sessions here, but the mechanism is
+        identical for search_documents/search_other_topics/get_user_profile/
+        get_skill_state) brackets its execution with _TOOL_MARKER start/end
+        events in the stream, in order, before the final round's text — this
+        is what lets the client show a live "calling X" indicator instead of
+        the lookup happening invisibly between two rounds of text."""
+        mock_assembler.assemble = AsyncMock(return_value={
+            "profile": {}, "skill": {}, "summary_blocks": [{"text": "prior session", "createdAt": "2025-01-01"}],
+        })
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        tool_call = _tool_call("get_past_sessions", {})
+        round0 = [_chunk("", [tool_call])]
+        round1 = [_chunk("Final answer.")]
+
+        with patch(
+            "app.services.topic_chat_service.ChatAnthropic",
+            _mock_chat_anthropic([round0, round1]),
+        ):
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "what did we cover before?", mode="topic"
+            )
+            full = await _collect_stream(result)
+
+        start_marker = _TOOL_MARKER + json.dumps({"phase": "start", "name": "get_past_sessions"}) + "\n"
+        end_marker = _TOOL_MARKER + json.dumps({"phase": "end", "name": "get_past_sessions"}) + "\n"
+        assert start_marker in full
+        assert end_marker in full
+        assert full.index(start_marker) < full.index(end_marker) < full.index("Final answer.")
 
 
 class TestContextTools:

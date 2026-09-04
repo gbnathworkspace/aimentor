@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from './icons';
-import { Bubble, VerdictMsg, Typing } from './ui';
+import { Bubble, VerdictMsg, Typing, ToolActivity } from './ui';
 import { TONES, type MessageItem, type ToneId, type Topic } from './data';
 import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -16,6 +16,45 @@ import type { CoreProfile } from '@/lib/mentorman-api';
 
 // Must match _META_MARKER in unified-backend/app/services/topic_chat_service.py
 const META_MARKER = '\x00META\x00';
+
+// Must match _TOOL_MARKER in unified-backend/app/services/topic_chat_service.py.
+// Zero or more of these can appear anywhere in the stream, interleaved with
+// visible reply text, before the trailing META marker: each occurrence is
+// `\x00TOOL\x00{"phase": "start"|"end", "name": "<tool>"}\n`.
+const TOOL_MARKER = '\x00TOOL\x00';
+const TOOL_MARKER_RE = /\x00TOOL\x00(\{.*?\})\n/g;
+
+// This mentor's voice is direct/no-fluff — keep these short and in-character.
+const TOOL_LABELS: Record<string, string> = {
+  get_user_profile: 'Checking your profile',
+  get_skill_state: 'Checking your progress',
+  get_past_sessions: 'Recalling past sessions',
+  search_documents: 'Searching your documents',
+  search_other_topics: 'Searching other topics',
+};
+
+// Strips TOOL_MARKER occurrences out of the raw accumulated stream buffer and
+// returns the cleaned text plus which tool(s) are currently mid-call (a
+// "start" with no matching "end" yet) at this point in the buffer. Re-derived
+// from the full buffer on every read, same as META_MARKER handling below —
+// a marker split across two chunk boundaries just doesn't match yet and gets
+// picked up once the rest has arrived. The model can call more than one tool
+// per turn (sequentially) and can loop back for a second round, so this walks
+// the ordered event list rather than tracking a single active/inactive flag.
+function parseToolMarkers(full: string): { visible: string; activeTools: string[] } {
+  const active: string[] = [];
+  for (const m of full.matchAll(TOOL_MARKER_RE)) {
+    try {
+      const { phase, name } = JSON.parse(m[1]);
+      if (phase === 'start') active.push(name);
+      else if (phase === 'end') {
+        const idx = active.indexOf(name);
+        if (idx !== -1) active.splice(idx, 1);
+      }
+    } catch { /* malformed marker — ignore rather than leak it into the bubble */ }
+  }
+  return { visible: full.replace(TOOL_MARKER_RE, ''), activeTools: active };
+}
 
 // One entry from a topic's l1_scope (facts about you, judged against the
 // topic — see .kiro/specs/topic-scoping).
@@ -422,18 +461,20 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        const metaIdx = full.indexOf(META_MARKER);
-        const visible = metaIdx === -1 ? full : full.slice(0, metaIdx);
-        setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visible } : m));
+        const { visible: deToolMarked, activeTools } = parseToolMarkers(full);
+        const metaIdx = deToolMarked.indexOf(META_MARKER);
+        const visible = metaIdx === -1 ? deToolMarked : deToolMarked.slice(0, metaIdx);
+        setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visible, activeTools } : m));
       }
 
-      const metaIdx = full.indexOf(META_MARKER);
-      const visibleFinal = metaIdx === -1 ? full : full.slice(0, metaIdx);
+      const { visible: deToolMarkedFinal } = parseToolMarkers(full);
+      const metaIdx = deToolMarkedFinal.indexOf(META_MARKER);
+      const visibleFinal = metaIdx === -1 ? deToolMarkedFinal : deToolMarkedFinal.slice(0, metaIdx);
       let meta: { mode?: string; suggestions?: QuickReplyOption[] } | null = null;
       if (metaIdx !== -1) {
-        try { meta = JSON.parse(full.slice(metaIdx + META_MARKER.length)); } catch { /* malformed trailer — show text as-is */ }
+        try { meta = JSON.parse(full.slice(full.indexOf(META_MARKER) + META_MARKER.length)); } catch { /* malformed trailer — show text as-is */ }
       }
-      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
+      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, activeTools: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
       setSuggestions(Array.isArray(meta?.suggestions) ? meta.suggestions : []);
       return true;
     } catch {
@@ -732,9 +773,18 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
               ? <MentorQuestionCard key={m._id || i} text={m.text} label={m.label} timestamp={m.timestamp} />
               : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
           )}
-          {busy && !(msgs[msgs.length - 1]?.who === 'mentor' && msgs[msgs.length - 1]?.text) && (
-            <Typing label="Thinking, may check the web for current info…" />
-          )}
+          {busy && (() => {
+            const last = msgs[msgs.length - 1];
+            const activeTools = last?.who === 'mentor' ? last.activeTools : undefined;
+            if (activeTools && activeTools.length > 0) {
+              const label = activeTools.map(t => TOOL_LABELS[t] ?? t).join(' · ');
+              return <ToolActivity label={label} />;
+            }
+            if (!(last?.who === 'mentor' && last?.text)) {
+              return <Typing label="Thinking, may check the web for current info…" />;
+            }
+            return null;
+          })()}
 
           {!busy && suggestions.length > 0 && (
             <div className="chat-options">

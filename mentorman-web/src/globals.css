@@ -12,6 +12,19 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* None of the app's decorative loading loops (spinner rotation, typing-dot
+   blink, live-pill pulse) previously respected prefers-reduced-motion — fix
+   it once here for all of them rather than per call site. Freezes each on
+   its "on" frame so the still-loading state stays visually legible. */
+@media (prefers-reduced-motion: reduce) {
+  .upload-status-spinner,
+  .typing span,
+  .pill.ok .ind {
+    animation: none !important;
+  }
+  .typing span { opacity: 1; }
+}
+
 :root {
   --bg:        #08080a;
   --bg-2:      #0b0b0e;

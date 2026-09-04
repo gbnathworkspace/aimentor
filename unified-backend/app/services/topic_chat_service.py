@@ -189,6 +189,18 @@ _FENCE_START = "```json suggestions"
 # structured data instead of an error string.
 _META_MARKER = "\x00META\x00"
 
+# Same in-band trick, mid-stream: lets the client show a live "calling
+# get_skill_state" indicator instead of a tool call happening invisibly
+# inside the gap between two rounds of text. Emitted as its own chunk
+# around each loop-tool execution in _stream_turn — always
+# f"{_TOOL_MARKER}{json.dumps({'phase': 'start'|'end', 'name': ...})}\n" —
+# newline-terminated (unlike _META_MARKER, which only ever appears once, at
+# the very end) so the client can regex-extract every complete occurrence
+# out of the accumulated buffer even if network chunking splits one
+# mid-marker; an incomplete tail just won't match yet and gets picked up
+# once the rest arrives.
+_TOOL_MARKER = "\x00TOOL\x00"
+
 
 class TopicChatService:
     """Orchestrates per-turn LLM calls within topic threads.
@@ -384,9 +396,23 @@ class TopicChatService:
                 # and continue to the next round for the real answer.
                 lc_messages.append(accumulated)
                 for tc in loop_calls:
+                    yield _TOOL_MARKER + json.dumps({"phase": "start", "name": tc["name"]}) + "\n"
+                    # Confirmed by direct wire measurement: for search_documents/
+                    # search_other_topics (real vector_search I/O), start and end
+                    # land ~400-500ms apart — a real window the client can render
+                    # a live indicator in. get_user_profile/get_skill_state/
+                    # get_past_sessions do no I/O at all, so start and end arrive
+                    # in the same chunk with no gap; a synthetic asyncio.sleep()
+                    # here was tried and measured to NOT fix that (still
+                    # coalesced client-side — 50ms isn't a reliable win over
+                    # whatever's buffering it), so it isn't worth adding latency
+                    # to every context-tool call for an indicator that still
+                    # wouldn't show. Left as-is: those three just won't show a
+                    # live indicator, only a result.
                     result_text = await self._execute_loop_tool(
                         tc["name"], tc.get("args") or {}, user_id, context
                     )
+                    yield _TOOL_MARKER + json.dumps({"phase": "end", "name": tc["name"]}) + "\n"
                     lc_messages.append(ToolMessage(content=result_text, tool_call_id=tc["id"]))
 
         except Exception:

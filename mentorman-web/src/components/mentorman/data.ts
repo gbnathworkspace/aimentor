@@ -11,6 +11,10 @@ export type MessageItem = {
   // ISO timestamp from the backend — carried through only to place session-end
   // dividers relative to surrounding messages (see insertSessionDividers).
   timestamp?: string;
+  // Tool name(s) currently mid-call (a "start" with no matching "end" yet) for
+  // an in-flight streaming mentor reply — see TOOL_MARKER parsing in chat.tsx.
+  // Always empty/undefined once the turn settles.
+  activeTools?: string[];
   suggestions?: { title: string; description: string }[];
   attachments?: { name: string; size: number }[];
   summaryBlock?: {

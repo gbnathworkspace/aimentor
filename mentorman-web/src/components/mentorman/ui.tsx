@@ -392,6 +392,21 @@ export function Typing({ label }: { label?: string }) {
   );
 }
 
+// Live "the mentor is calling a tool" indicator for an in-flight streaming
+// reply. Reuses the spinner/label styling already established by
+// UploadStatusIndicator (chat/UploadStatusIndicator.tsx) rather than adding
+// new CSS for the same visual idea.
+export function ToolActivity({ label }: { label: string }) {
+  return (
+    <Msg who="mentor">
+      <div className="upload-status-indicator" role="status" aria-live="polite" aria-label={label}>
+        <span className="upload-status-spinner" aria-hidden="true" />
+        <span className="upload-status-label">{label}</span>
+      </div>
+    </Msg>
+  );
+}
+
 export function GapBar({ cur, req, animate }: { cur: number; req: number; animate?: boolean }) {
   const [w, setW] = React.useState(animate ? 0 : cur);
   React.useEffect(() => {

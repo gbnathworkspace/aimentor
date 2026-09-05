@@ -457,15 +457,71 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let full = '';
+
+      // The 3 non-search tools do their work (formatting an in-memory dict)
+      // with no `await` in between start/end server-side, so their start and
+      // end markers routinely land in the very same read() chunk — the
+      // marker-derived "active" set never has a non-empty moment for the UI
+      // to observe. Enforce a floor on how long each tool's activity shows,
+      // measured from when its start marker is first seen, independent of
+      // whether the matching end has already arrived. Ordered queue (not a
+      // single flag) so a second tool call — same turn or a looped-back
+      // round — gets its own window instead of one instant call clobbering
+      // another's still-pending display.
+      const MIN_TOOL_DISPLAY_MS = 550;
+      const toolQueue: { name: string; firstSeen: number; ended: boolean }[] = [];
+      let processedEventCount = 0;
+      let lastVisible = '';
+      let toolTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const updateDisplay = () => {
+        if (toolTimer) { clearTimeout(toolTimer); toolTimer = null; }
+        const now = Date.now();
+        while (toolQueue.length && toolQueue[0].ended && now - toolQueue[0].firstSeen >= MIN_TOOL_DISPLAY_MS) {
+          toolQueue.shift();
+        }
+        // Real reply text arriving is a stronger "turn is progressing" signal
+        // than the artificial timer — don't let a finished tool's minimum
+        // window keep blocking content that's already on screen.
+        const current = lastVisible.trim() ? undefined : toolQueue[0];
+        setMsgs(prev => prev.map(m => m._id === mentorId
+          ? { ...m, text: lastVisible, activeTools: current ? [current.name] : [] }
+          : m));
+        if (current) {
+          const remain = Math.max(MIN_TOOL_DISPLAY_MS - (now - current.firstSeen), 50);
+          toolTimer = setTimeout(updateDisplay, remain);
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        const { visible: deToolMarked, activeTools } = parseToolMarkers(full);
+
+        const events: { phase: 'start' | 'end'; name: string }[] = [];
+        for (const m of full.matchAll(TOOL_MARKER_RE)) {
+          try { events.push(JSON.parse(m[1])); } catch { /* malformed marker — ignore */ }
+        }
+        if (events.length > processedEventCount) {
+          const now = Date.now();
+          for (let idx = processedEventCount; idx < events.length; idx++) {
+            const ev = events[idx];
+            if (ev.phase === 'start') {
+              toolQueue.push({ name: ev.name, firstSeen: now, ended: false });
+            } else {
+              const entry = toolQueue.find(t => t.name === ev.name && !t.ended);
+              if (entry) entry.ended = true;
+            }
+          }
+          processedEventCount = events.length;
+        }
+
+        const { visible: deToolMarked } = parseToolMarkers(full);
         const metaIdx = deToolMarked.indexOf(META_MARKER);
-        const visible = metaIdx === -1 ? deToolMarked : deToolMarked.slice(0, metaIdx);
-        setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visible, activeTools } : m));
+        lastVisible = metaIdx === -1 ? deToolMarked : deToolMarked.slice(0, metaIdx);
+        updateDisplay();
       }
+      if (toolTimer) clearTimeout(toolTimer);
 
       const { visible: deToolMarkedFinal } = parseToolMarkers(full);
       const metaIdx = deToolMarkedFinal.indexOf(META_MARKER);

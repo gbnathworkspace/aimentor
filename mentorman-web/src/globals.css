@@ -423,22 +423,56 @@ body {
 
 /* ---- Topic context panel (right sidebar) ---- */
 .context-panel {
-  width: 260px; flex-shrink: 0;
+  width: 320px; flex-shrink: 0;
   background: linear-gradient(180deg, #1a1a1e, #131316);
   border-left: 1px solid var(--border-soft);
   display: flex; flex-direction: column;
-  padding: 16px 14px; gap: 12px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .context-panel-collapsed {
   width: 36px; padding: 16px 8px; align-items: center;
 }
+/* CONTEXT and WORKING ON THIS REPLY each get one of these — the working
+   section flexes to fill remaining height below the (capped-height, own
+   scroll) context section, separated by a border instead of a draggable
+   divider. A drag-to-resize handle (per the mockup) was cut here — it's a
+   real feature, but a fixed split reads fine at this panel width and costs
+   a lot less than mouse-drag-with-clamping state for the value it adds. */
+.context-panel-section {
+  display: flex; flex-direction: column;
+  padding: 14px 14px; gap: 10px;
+  min-height: 0;
+}
+/* Cap the context section's height only when the working-on-this-reply
+   section is actually present below it (:not(:last-child)) — otherwise,
+   with no reply in flight, this is the only section and should just use
+   the full panel height instead of leaving blank space under a 45% cap. */
+.context-panel-section:first-child:not(:last-child) {
+  max-height: 45%;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border-soft);
+}
+.context-panel-section:only-child {
+  flex: 1;
+  overflow-y: auto;
+}
+.working-section {
+  flex: 1;
+  overflow-y: auto;
+}
 .context-panel-head {
-  display: flex; align-items: center; gap: 4px; justify-content: space-between;
+  display: flex; align-items: center; gap: 4px;
+}
+.context-panel-title-group {
+  display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
 }
 .context-panel-title {
   font-family: var(--mono); font-size: 11px; font-weight: 600;
-  letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-dim);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+}
+.context-panel-count {
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted-2);
+  background: var(--card-2); border-radius: 999px; padding: 1px 7px;
 }
 .context-panel-empty {
   font-size: 12px; line-height: 1.5; color: var(--muted);
@@ -466,6 +500,57 @@ body {
   transition: background .14s, color .14s;
 }
 .context-doc-remove:hover { background: var(--danger-weak); color: var(--danger); }
+.context-panel-dropzone {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  border: 1px dashed var(--border); border-radius: var(--r-sm);
+  background: transparent; padding: 10px; text-align: center;
+  cursor: pointer; transition: border-color .14s, color .14s;
+}
+.context-panel-dropzone:hover:not(:disabled) { border-color: var(--accent-line); color: var(--fg-dim); }
+.context-panel-dropzone:disabled { cursor: default; opacity: 0.6; }
+
+/* ---- Working-on-this-reply timeline (WorkingOnReply, TopicContextPanel.tsx) ---- */
+.working-summary {
+  font-size: 12px; color: var(--muted-2);
+}
+.working-timeline {
+  display: flex; flex-direction: column;
+}
+.working-step {
+  display: grid; grid-template-columns: 16px 1fr; column-gap: 10px;
+}
+.working-step-rail {
+  display: flex; flex-direction: column; align-items: center; padding-top: 10px;
+}
+.working-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+}
+.working-dot.running {
+  background: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak);
+  animation: pulse 1.3s ease-in-out infinite;
+}
+.working-dot.done { background: var(--card-3); border: 1.5px solid var(--muted); }
+.working-step-line {
+  flex: 1; width: 1px; min-height: 14px; margin-top: 6px;
+  background: var(--border-soft);
+}
+.working-step-card {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-sm);
+  padding: 8px 10px; margin-bottom: 8px;
+}
+.working-step-body { flex: 1; min-width: 0; }
+.working-step-title { font-size: 12.5px; color: var(--fg-dim); font-weight: 550; }
+.working-step-detail {
+  font-size: 11.5px; color: var(--muted); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.working-step-duration {
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted); flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .working-dot.running { animation: none; }
+}
 .panel-head {
   min-height: 60px; flex-shrink: 0;
   padding: 12px 22px; border-bottom: 1px solid var(--border-soft);

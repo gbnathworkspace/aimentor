@@ -15,6 +15,11 @@ export type MessageItem = {
   // an in-flight streaming mentor reply — see TOOL_MARKER parsing in chat.tsx.
   // Always empty/undefined once the turn settles.
   activeTools?: string[];
+  // Full ordered history of tool calls made so far for this in-flight
+  // streaming reply (see TOOL_MARKER parsing in chat.tsx) — feeds the
+  // "working on this reply" timeline in TopicContextPanel. Cleared once the
+  // turn settles, same lifecycle as activeTools.
+  toolEvents?: ToolEvent[];
   suggestions?: { title: string; description: string }[];
   attachments?: { name: string; size: number }[];
   summaryBlock?: {
@@ -25,6 +30,35 @@ export type MessageItem = {
     messageCount: number;
     tokenCount: number;
   };
+};
+
+export type ToolEvent = {
+  name: string;
+  startedAt: number;
+  // Set once the matching "end" marker arrives; still undefined means
+  // "running" (elapsed time keeps ticking against startedAt).
+  endedAt?: number;
+};
+
+// This mentor's voice is direct/no-fluff — keep these short and in-character.
+// Shared between chat.tsx (inline "thinking" indicator) and
+// TopicContextPanel.tsx (the working-on-this-reply timeline).
+export const TOOL_LABELS: Record<string, string> = {
+  get_user_profile: 'Checking your profile',
+  get_skill_state: 'Checking your progress',
+  get_past_sessions: 'Recalling past sessions',
+  search_documents: 'Searching your documents',
+  search_other_topics: 'Searching other topics',
+};
+
+// One-line "what this tool call is for" — only used by the timeline, where
+// there's room for a bit more than the inline indicator's short label.
+export const TOOL_DETAILS: Record<string, string> = {
+  get_user_profile: 'Reading your saved profile facts',
+  get_skill_state: 'Reading your skill graph for this topic',
+  get_past_sessions: 'Reviewing earlier sessions in this topic',
+  search_documents: "Searching this topic's attached documents",
+  search_other_topics: 'Searching your other topics for relevant context',
 };
 
 export type Session = {

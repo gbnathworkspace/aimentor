@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from './icons';
 import { Bubble, VerdictMsg, Typing, ToolActivity } from './ui';
-import { TONES, type MessageItem, type ToneId, type Topic } from './data';
+import { TONES, TOOL_LABELS, type MessageItem, type ToneId, type Topic, type ToolEvent } from './data';
 import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
@@ -23,15 +23,6 @@ const META_MARKER = '\x00META\x00';
 // `\x00TOOL\x00{"phase": "start"|"end", "name": "<tool>"}\n`.
 const TOOL_MARKER = '\x00TOOL\x00';
 const TOOL_MARKER_RE = /\x00TOOL\x00(\{.*?\})\n/g;
-
-// This mentor's voice is direct/no-fluff — keep these short and in-character.
-const TOOL_LABELS: Record<string, string> = {
-  get_user_profile: 'Checking your profile',
-  get_skill_state: 'Checking your progress',
-  get_past_sessions: 'Recalling past sessions',
-  search_documents: 'Searching your documents',
-  search_other_topics: 'Searching other topics',
-};
 
 // Strips TOOL_MARKER occurrences out of the raw accumulated stream buffer and
 // returns the cleaned text plus which tool(s) are currently mid-call (a
@@ -470,6 +461,11 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       // another's still-pending display.
       const MIN_TOOL_DISPLAY_MS = 550;
       const toolQueue: { name: string; firstSeen: number; ended: boolean }[] = [];
+      // Full ordered history (not trimmed like toolQueue above) — feeds the
+      // "working on this reply" timeline in the context panel, which wants
+      // every call made so far, not just the one currently being displayed
+      // inline.
+      const toolEvents: ToolEvent[] = [];
       let processedEventCount = 0;
       let lastVisible = '';
       let toolTimer: ReturnType<typeof setTimeout> | null = null;
@@ -485,7 +481,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
         // window keep blocking content that's already on screen.
         const current = lastVisible.trim() ? undefined : toolQueue[0];
         setMsgs(prev => prev.map(m => m._id === mentorId
-          ? { ...m, text: lastVisible, activeTools: current ? [current.name] : [] }
+          ? { ...m, text: lastVisible, activeTools: current ? [current.name] : [], toolEvents: [...toolEvents] }
           : m));
         if (current) {
           const remain = Math.max(MIN_TOOL_DISPLAY_MS - (now - current.firstSeen), 50);
@@ -508,9 +504,12 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
             const ev = events[idx];
             if (ev.phase === 'start') {
               toolQueue.push({ name: ev.name, firstSeen: now, ended: false });
+              toolEvents.push({ name: ev.name, startedAt: now });
             } else {
               const entry = toolQueue.find(t => t.name === ev.name && !t.ended);
               if (entry) entry.ended = true;
+              const te = [...toolEvents].reverse().find(t => t.name === ev.name && t.endedAt === undefined);
+              if (te) te.endedAt = now;
             }
           }
           processedEventCount = events.length;
@@ -530,7 +529,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       if (metaIdx !== -1) {
         try { meta = JSON.parse(full.slice(full.indexOf(META_MARKER) + META_MARKER.length)); } catch { /* malformed trailer — show text as-is */ }
       }
-      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, activeTools: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
+      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, activeTools: [], toolEvents: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
       setSuggestions(Array.isArray(meta?.suggestions) ? meta.suggestions : []);
       return true;
     } catch {
@@ -861,7 +860,10 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
         busy={busy}
       />
     </div>
-    <TopicContextPanel topicId={topicId} />
+    <TopicContextPanel
+      topicId={topicId}
+      toolEvents={busy ? msgs[msgs.length - 1]?.toolEvents : undefined}
+    />
     </>
   );
 }

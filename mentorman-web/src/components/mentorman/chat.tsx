@@ -14,10 +14,10 @@ import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickRep
 import { TopicContextPanel } from './TopicContextPanel';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-// Must match _META_MARKER in unified-backend/app/services/topic_chat_service.py
+// Must match _META_MARKER in unified-backend/app/services/mentor_agent.py
 const META_MARKER = '\x00META\x00';
 
-// Must match _TOOL_MARKER in unified-backend/app/services/topic_chat_service.py.
+// Must match _TOOL_MARKER in unified-backend/app/services/mentor_agent.py.
 // Zero or more of these can appear anywhere in the stream, interleaved with
 // visible reply text, before the trailing META marker: each occurrence is
 // `\x00TOOL\x00{"phase": "start"|"end", "name": "<tool>"}\n`.

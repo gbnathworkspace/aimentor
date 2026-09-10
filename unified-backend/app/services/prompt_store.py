@@ -218,7 +218,7 @@ def _build_context_variables(
     L1/L2/L3 (profile, skill state, past sessions) are deliberately NOT
     injected here anymore — they're served on demand via the
     get_user_profile / get_skill_state / get_past_sessions tools (see
-    topic_chat_service._execute_loop_tool, which reuses the _format_* helpers
+    mentor_agent._execute_loop_tool, which reuses the _format_* helpers
     below directly) instead of being stuffed into every system prompt
     whether the turn needs them or not."""
     skill = context.get("skill", {})

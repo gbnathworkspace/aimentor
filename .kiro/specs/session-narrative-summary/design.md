@@ -72,7 +72,7 @@ graph TD
 SESSION_IDLE_GAP_MINUTES = 10
 
 async def check_and_close_on_new_message(topic_id: str, user_id: str, new_message_ts: datetime) -> None:
-    """Called from topic_chat_service before appending a new message.
+    """Called from mentor_agent before appending a new message.
     Compares new_message_ts to the topic's last message timestamp; if the
     gap exceeds SESSION_IDLE_GAP_MINUTES, closes the session up to the last
     message before returning (does not block the new message's own turn)."""
@@ -88,7 +88,7 @@ async def close_all_sessions_for_user(user_id: str) -> None:
 ```
 
 **Wiring**:
-- `check_and_close_on_new_message` is called from `topic_chat_service.py`'s message-handling
+- `check_and_close_on_new_message` is called from `mentor_agent.py`'s message-handling
   path, replacing the `elif total_messages % SKILL_CHECK_EVERY_N_MESSAGES == 0` branch
   in `_post_turn_hook` (Requirement 4.3 retires that branch)
 - `idle_sweep` needs a scheduler — this codebase has no existing cron/job runner found
@@ -235,7 +235,7 @@ document, same as any other concurrent-write case already handled by the existin
 - **Integration**: a topic that never goes idle still receives its RollingSummary
   merge via the existing unmodified `CompactionService` path (Requirement 4.4)
 - **Regression**: existing `test_topic_service_l1_scope.py`,
-  `test_topic_chat_service.py` suites pass with `SKILL_CHECK_EVERY_N_MESSAGES`
+  `test_mentor_agent.py` suites pass with `SKILL_CHECK_EVERY_N_MESSAGES`
   branch removed
 
 ## Performance Considerations

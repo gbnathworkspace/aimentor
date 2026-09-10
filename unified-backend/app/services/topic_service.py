@@ -117,7 +117,7 @@ class TopicService:
         """Lazily (re)compute and cache l1_scope on the topic doc.
 
         Single choke point for every read path (GET /topic/{id} and the
-        pre-turn fetch in TopicChatService.handle_message both call
+        pre-turn fetch in MentorAgent.handle_message both call
         get_topic()) — see .kiro/specs/topic-scoping/design.md. A stamp
         mismatch or missing l1_scope triggers a recompute; a failed
         classify_relevance call is logged and the topic is returned

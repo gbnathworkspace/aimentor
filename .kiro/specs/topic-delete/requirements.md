@@ -30,7 +30,7 @@ Established by tracing every collection that stores a topic reference:
 | `immediate_contexts` | `session_id` (`session_upload.py:58`) | **Yes** — the chat passes `sessionId={topicId}` (`chat.tsx:559`), so these rows are topic-scoped and have no TTL |
 | `skill_graph` | `(user_id, topic-name)` (`skill_graph_repo.py:41`) | **No** — keyed by subject name, not `topicId`. Learning already absorbed from the thread survives it |
 | `subtopic_lists` | `topic` title, unique, no `user_id` | **No** — a global cross-user cache |
-| `sessions` (L3 episodic) | `session_id` | **No linkage today** — the topic chat path never writes it (`topic_chat_service.py` has no `session_id` reference); legacy session flow only |
+| `sessions` (L3 episodic) | `session_id` | **No linkage today** — the topic chat path never writes it (`mentor_agent.py` has no `session_id` reference); legacy session flow only |
 | `uploads/` on disk | `user_id/job_id` | **No** — already TTL-swept by `file_cleanup.py:43`, not addressable by topic |
 
 ## Open decision to resolve before design

@@ -1,4 +1,4 @@
-"""TopicChatService — orchestrates per-turn LLM calls within topic threads.
+"""MentorAgent — orchestrates per-turn LLM calls within topic threads.
 
 Replaces the standalone session model's per-turn flow. Messages are now
 appended to a topic thread, context is assembled including SummaryBlocks,
@@ -125,7 +125,7 @@ _SEARCH_OTHER_TOPICS_TOOL = {
 # --- Context tools: L1/L2/L3 on demand instead of injected into every system
 # prompt whether the turn needs them or not (see mentor_v1.md's "Context
 # tools" section). No input — each just formats what context_assembler
-# already fetched for this turn (see TopicChatService._execute_loop_tool),
+# already fetched for this turn (see MentorAgent._execute_loop_tool),
 # no extra DB round trip.
 _GET_USER_PROFILE_TOOL = {
     "name": "get_user_profile",
@@ -202,7 +202,7 @@ _META_MARKER = "\x00META\x00"
 _TOOL_MARKER = "\x00TOOL\x00"
 
 
-class TopicChatService:
+class MentorAgent:
     """Orchestrates per-turn LLM calls within topic threads.
 
     Flow:

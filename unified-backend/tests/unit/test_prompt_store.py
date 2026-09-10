@@ -169,7 +169,7 @@ class TestFormatTaughtConcepts:
 
 class TestFormatStyleNotes:
     """Issue #14: the user's 'how to teach me' note, served via the
-    get_user_profile tool (topic_chat_service._execute_loop_tool) rather
+    get_user_profile tool (mentor_agent._execute_loop_tool) rather
     than injected into every system prompt."""
 
     def test_formats_as_bullet_list(self):

@@ -25,7 +25,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config.settings import get_settings
-from app.services import context_assembler, mode_router, prompt_store, skill_graph_repo
+from app.services import context_assembler, prompt_store, skill_graph_repo, tactic_prompt_selector
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
 from app.services.session_boundary import maybe_force_close_long_session
@@ -290,7 +290,7 @@ class TopicChatService:
         effective_mode = mode
         instruction_override = ""
         if mode == "topic":
-            decision = await mode_router.route_user_turn(
+            decision = await tactic_prompt_selector.route_user_turn(
                 query=content,
                 skill=context.get("skill") or {},
                 recent_messages=existing_messages,

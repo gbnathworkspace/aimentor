@@ -15,7 +15,7 @@ This is a deliberately simpler alternative to the more elaborate `skill-graph-v2
 - **Canonical_Subtopic_List**: The cached, per-topic list of 6-9 subtopic names returned by `get_subtopics(topic)` (`app/services/subtopic_weights.py`), generated once via LLM decomposition and reused for every user.
 - **Diagnostic_Verdict**: The mid-turn tool call (`record_diagnostic_verdict`) the mentor makes during `DIAGNOSTIC` sub-mode once it has enough signal to assess the user.
 - **Compaction_Skill_Extraction**: The skill-update portion of the compaction/session-end LLM call (`_COMPACTION_TOOL_SCHEMA` in `compaction_service.py`) that also produces the session's narrative summary and taught-concepts list.
-- **Assessed**: The existing `bool` field on SkillNode gating cold-start diagnostic routing (`mode_router.py` Rule 1). Unaffected by this feature.
+- **Assessed**: The existing `bool` field on SkillNode gating cold-start diagnostic routing (`tactic_prompt_selector.py` Rule 1). Unaffected by this feature.
 
 ## Requirements
 
@@ -98,11 +98,11 @@ This is a deliberately simpler alternative to the more elaborate `skill-graph-v2
 
 ### Requirement 8: Mode router payload
 
-**User Story:** As the system, I want to stop sending a field that no longer exists to the mode router, without changing its routing behavior.
+**User Story:** As the system, I want to stop sending a field that no longer exists to the tactic prompt selector, without changing its routing behavior.
 
 #### Acceptance Criteria
 
-1. `mode_router.route_user_turn()`'s Haiku payload SHALL remove the `current_level` line.
+1. `tactic_prompt_selector.route_user_turn()`'s Haiku payload SHALL remove the `current_level` line.
 2. THE routing rules (Rules 2-6) SHALL NOT be modified — they do not branch on skill level today, so this removal SHALL NOT change any routing decision.
 
 ### Requirement 9: Subtopic weighting integration

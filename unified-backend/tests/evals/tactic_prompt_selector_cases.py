@@ -1,5 +1,5 @@
-"""Hand-labeled cases for the mode_router eval (route_user_turn's rule
-selection quality — see app/services/mode_router.py's Rule 1-6 decision
+"""Hand-labeled cases for the tactic_prompt_selector eval (route_user_turn's rule
+selection quality — see app/services/tactic_prompt_selector.py's Rule 1-6 decision
 tree).
 
 Each case gives the inputs route_user_turn() takes (query, skill, recent

@@ -1,4 +1,4 @@
-"""Pre-turn mode routing for topic-mode mentor turns.
+"""Pre-turn teaching-tactic selection for topic-mode mentor turns.
 
 Decides which teaching tactic the mentor should use for this turn —
 DIAGNOSTIC / DIRECT / SOCRATIC / HINT / GUIDED — instead of leaving that
@@ -25,11 +25,11 @@ from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
 
-_ROUTER_MODEL = "claude-haiku-4-5-20251001"
-_ROUTER_TIMEOUT_SECONDS = 5
-_ROUTER_MAX_TOKENS = 300
+_TACTIC_MODEL = "claude-haiku-4-5-20251001"
+_TACTIC_TIMEOUT_SECONDS = 5
+_TACTIC_MAX_TOKENS = 300
 _RECENT_MESSAGE_WINDOW = 6
-"""How many recent turns the router reads to judge frustration/attempts."""
+"""How many recent turns the selector reads to judge frustration/attempts."""
 
 _DIAGNOSTIC_STALL_CAP = 3
 """Rule 1 forces DIAGNOSTIC every turn while skill.last_studied is unset —
@@ -65,7 +65,7 @@ class RouterDecision(BaseModel):
     selected_mode: MentorMode
     reasoning: str
     # Specific instruction spliced into the mentor's system prompt for this
-    # turn — lets the router hand down a targeted directive instead of the
+    # turn — lets the selector hand down a targeted directive instead of the
     # mentor re-deriving "why" from the mode name alone. Optional: the
     # mode's own static instructions are often enough on their own.
     instruction_override: str = ""
@@ -74,10 +74,10 @@ class RouterDecision(BaseModel):
 _FALLBACK_DECISION = RouterDecision(
     matched_rule=MatchedRule.RULE_6_CATCH_ALL_FALLBACK,
     selected_mode=MentorMode.SOCRATIC,
-    reasoning="Router call failed or timed out — defaulted to attempt-first.",
+    reasoning="Tactic selector call failed or timed out — defaulted to attempt-first.",
 )
 
-_ROUTER_TOOL_SCHEMA = {
+_TACTIC_TOOL_SCHEMA = {
     "name": "select_mentor_mode",
     "description": (
         "Selects the exact teaching mode for the mentor's next response by "
@@ -114,7 +114,7 @@ _ROUTER_TOOL_SCHEMA = {
     },
 }
 
-_ROUTER_SYSTEM_PROMPT = """You are the Mode Routing Engine for an AI mentor. Your sole job is to select the exact teaching mode for the mentor's next response by evaluating rules strictly top-to-bottom and stopping at the first match. Do not evaluate rules after a match is found.
+_TACTIC_SYSTEM_PROMPT = """You are the Teaching Tactic Selector for an AI mentor. Your sole job is to select the exact teaching mode for the mentor's next response by evaluating rules strictly top-to-bottom and stopping at the first match. Do not evaluate rules after a match is found.
 
 RULE 2 — URGENCY / DIRECT LOOKUP
   User explicitly asks for a direct answer ("just tell me", "give me the code"), or asks a pure factual/syntax lookup ("what port does HTTPS use?", "syntax for array push").
@@ -156,7 +156,7 @@ async def route_user_turn(
 
     Rule 1 (cold start) is a plain Python check — no LLM call spent while
     the topic has never been assessed. Rules 2-6 run a forced tool_use
-    call to Haiku once there's an actual level to route around.
+    call to Haiku once there's an actual level to select a tactic for.
 
     Never raises — falls back to SOCRATIC on any failure, matching the
     fail-open pattern used throughout context_assembler.py.
@@ -176,8 +176,8 @@ async def route_user_turn(
             )
         logger.warning(
             "Cold-start gate stalled after %d DIAGNOSTIC turns with no verdict "
-            "ever recorded — falling through to the normal router instead of "
-            "forcing DIAGNOSTIC again.",
+            "ever recorded — falling through to the normal tactic selector "
+            "instead of forcing DIAGNOSTIC again.",
             prior_diagnostic_turns,
         )
 
@@ -192,26 +192,26 @@ async def route_user_turn(
     try:
         response = await asyncio.wait_for(
             traced_messages_create(
-                client, call_site="mode_router.route_user_turn",
-                model=_ROUTER_MODEL,
-                max_tokens=_ROUTER_MAX_TOKENS,
-                system=_ROUTER_SYSTEM_PROMPT,
-                tools=[_ROUTER_TOOL_SCHEMA],
+                client, call_site="tactic_prompt_selector.route_user_turn",
+                model=_TACTIC_MODEL,
+                max_tokens=_TACTIC_MAX_TOKENS,
+                system=_TACTIC_SYSTEM_PROMPT,
+                tools=[_TACTIC_TOOL_SCHEMA],
                 tool_choice={"type": "tool", "name": "select_mentor_mode"},
                 messages=[{"role": "user", "content": user_payload}],
             ),
-            timeout=_ROUTER_TIMEOUT_SECONDS,
+            timeout=_TACTIC_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
-        logger.warning("Mode router timed out after %ds — defaulting to SOCRATIC.", _ROUTER_TIMEOUT_SECONDS)
+        logger.warning("Tactic selector timed out after %ds — defaulting to SOCRATIC.", _TACTIC_TIMEOUT_SECONDS)
         return _FALLBACK_DECISION
     except Exception as e:
-        logger.warning("Mode router call failed: %s — defaulting to SOCRATIC.", e)
+        logger.warning("Tactic selector call failed: %s — defaulting to SOCRATIC.", e)
         return _FALLBACK_DECISION
 
     try:
         tool_use = next(b for b in response.content if b.type == "tool_use")
         return RouterDecision(**tool_use.input)
     except (StopIteration, ValidationError, TypeError) as e:
-        logger.warning("Mode router returned an unusable response: %s — defaulting to SOCRATIC.", e)
+        logger.warning("Tactic selector returned an unusable response: %s — defaulting to SOCRATIC.", e)
         return _FALLBACK_DECISION

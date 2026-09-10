@@ -734,7 +734,7 @@ class TestDiagnosticRouting:
         })
         mock_get_prompt.return_value = "direct prompt"
 
-        from app.services.mode_router import MatchedRule, MentorMode, RouterDecision
+        from app.services.tactic_prompt_selector import MatchedRule, MentorMode, RouterDecision
 
         fake_decision = RouterDecision(
             matched_rule=MatchedRule.RULE_2_URGENCY_DIRECT,
@@ -747,7 +747,7 @@ class TestDiagnosticRouting:
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("array.push(x)")]]),
         ) as mock_cls, patch(
-            "app.services.topic_chat_service.mode_router.route_user_turn",
+            "app.services.topic_chat_service.tactic_prompt_selector.route_user_turn",
             new_callable=AsyncMock,
         ) as mock_route:
             mock_route.return_value = fake_decision

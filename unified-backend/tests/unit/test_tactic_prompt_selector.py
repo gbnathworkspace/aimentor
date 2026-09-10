@@ -1,4 +1,4 @@
-"""Unit tests for mode_router.route_user_turn.
+"""Unit tests for tactic_prompt_selector.route_user_turn.
 
 Tests cover:
 - Rule 1 (cold start) short-circuits in Python, no LLM call
@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.mode_router import MatchedRule, MentorMode, route_user_turn
+from app.services.tactic_prompt_selector import MatchedRule, MentorMode, route_user_turn
 
 
 def _tool_use_response(**kwargs) -> SimpleNamespace:
@@ -22,7 +22,7 @@ def _tool_use_response(**kwargs) -> SimpleNamespace:
 
 @pytest.fixture(autouse=True)
 def mock_settings():
-    with patch("app.services.mode_router.get_settings") as mock_get_settings:
+    with patch("app.services.tactic_prompt_selector.get_settings") as mock_get_settings:
         mock_get_settings.return_value = SimpleNamespace(ANTHROPIC_API_KEY="test-key")
         yield
 
@@ -31,7 +31,7 @@ class TestRule1ColdStart:
     @pytest.mark.asyncio
     async def test_unassessed_skill_short_circuits_to_diagnostic(self):
         """No skill node at all — Rule 1 fires, no LLM call made."""
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic") as mock_client_cls:
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic") as mock_client_cls:
             decision = await route_user_turn(query="teach me JS", skill={}, recent_messages=[])
 
         assert decision.matched_rule == MatchedRule.RULE_1_COLD_START
@@ -41,7 +41,7 @@ class TestRule1ColdStart:
     @pytest.mark.asyncio
     async def test_no_last_studied_short_circuits_to_diagnostic(self):
         """Skill node exists but last_studied isn't set (never diagnosed)."""
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic") as mock_client_cls:
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic") as mock_client_cls:
             decision = await route_user_turn(
                 query="teach me JS",
                 skill={"subtopic_mastery": {}},
@@ -70,7 +70,7 @@ class TestRule1ColdStart:
             )
         )
 
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="what are data types",
                 skill={},
@@ -84,7 +84,7 @@ class TestRule1ColdStart:
     @pytest.mark.asyncio
     async def test_diagnostic_under_stall_cap_still_short_circuits(self):
         """Fewer prior DIAGNOSTIC turns than the cap — Rule 1 still fires."""
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic") as mock_client_cls:
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic") as mock_client_cls:
             decision = await route_user_turn(
                 query="what are data types",
                 skill={},
@@ -111,7 +111,7 @@ class TestRoutedRules:
             )
         )
 
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="syntax for array push in JS",
                 skill={"subtopic_mastery": {"Arrays": 55}, "last_studied": "2024-01-01T00:00:00Z"},
@@ -140,7 +140,7 @@ class TestFailureFallback:
 
         fake_client.messages.create = AsyncMock(side_effect=asyncio.TimeoutError())
 
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="anything",
                 skill={"subtopic_mastery": {"x": 1}, "last_studied": "2024-01-01T00:00:00Z"},
@@ -155,7 +155,7 @@ class TestFailureFallback:
         fake_client = MagicMock()
         fake_client.messages.create = AsyncMock(side_effect=RuntimeError("connection refused"))
 
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="anything", skill={"subtopic_mastery": {"x": 1}, "last_studied": "2024-01-01T00:00:00Z"}, recent_messages=[]
             )
@@ -170,7 +170,7 @@ class TestFailureFallback:
             return_value=SimpleNamespace(content=[SimpleNamespace(type="text", text="oops")])
         )
 
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="anything", skill={"subtopic_mastery": {"x": 1}, "last_studied": "2024-01-01T00:00:00Z"}, recent_messages=[]
             )
@@ -189,7 +189,7 @@ class TestFailureFallback:
             )
         )
 
-        with patch("app.services.mode_router.anthropic.AsyncAnthropic", return_value=fake_client):
+        with patch("app.services.tactic_prompt_selector.anthropic.AsyncAnthropic", return_value=fake_client):
             decision = await route_user_turn(
                 query="anything", skill={"subtopic_mastery": {"x": 1}, "last_studied": "2024-01-01T00:00:00Z"}, recent_messages=[]
             )

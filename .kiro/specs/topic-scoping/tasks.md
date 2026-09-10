@@ -88,9 +88,9 @@ prompt. No schema migration, no new dependency, no new collection.
       self._ensure_l1_scope(topic, user_id)` instead of returning `topic`
       directly
     - This is the single change point — it's what makes both `GET
-      /topic/{topic_id}` and `TopicChatService.handle_message()`'s pre-turn
+      /topic/{topic_id}` and `MentorAgent.handle_message()`'s pre-turn
       fetch (which calls `self._topic_service.get_topic(...)` at
-      `topic_chat_service.py:198`) pick up the lazy compute with no other
+      `mentor_agent.py:198`) pick up the lazy compute with no other
       call-site changes
     - _Requirements: 3.1_
 
@@ -114,7 +114,7 @@ prompt. No schema migration, no new dependency, no new collection.
 - [x] 3. Checkpoint — run `l1_scope` + `topic_service` tests
   - `test_l1_scope.py` (11 tests) and `test_topic_service_l1_scope.py`
     (5 tests) pass, plus existing `test_topics_router.py` /
-    `test_topic_service_messages.py` / `test_topic_chat_service.py`
+    `test_topic_service_messages.py` / `test_mentor_agent.py`
     (61 tests) unaffected.
 
 - [x] 4. Thread `l1_scope` through context assembly into the prompt
@@ -125,8 +125,8 @@ prompt. No schema migration, no new dependency, no new collection.
       `assemble()` itself
     - _Requirements: 4.2_
 
-  - [x] 4.2 Update the call site in `TopicChatService.handle_message()`
-    - `unified-backend/app/services/topic_chat_service.py:227` —
+  - [x] 4.2 Update the call site in `MentorAgent.handle_message()`
+    - `unified-backend/app/services/mentor_agent.py:227` —
       `context = await context_assembler.assemble(user_id, topic_title,
       content, l1_scope=topic.get("l1_scope"))`; `topic` here is already the
       `get_topic()` result from line 198, so `l1_scope` is current by
@@ -154,7 +154,7 @@ prompt. No schema migration, no new dependency, no new collection.
     - _Requirements: 4.2_
 
   - [x]* 4.5 Write tests
-    - `test_topic_chat_service.py`: assert `context_assembler.assemble` is
+    - `test_mentor_agent.py`: assert `context_assembler.assemble` is
       called with `l1_scope=topic["l1_scope"]` (mock assertion on call args)
     - `test_prompt_store.py`, new `TestFormatLearningContext` class:
       - `l1_scope=None` — output identical to today's (regression against

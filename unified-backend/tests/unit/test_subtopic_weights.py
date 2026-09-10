@@ -306,7 +306,7 @@ async def test_validate_subtopic_updates_skips_non_dict_entries():
     """A malformed (non-dict) entry is dropped, not a crash — callers pass
     raw LLM tool_use output straight through with no pre-filter of their own
     (see compaction_service._validate_skill_updates and
-    topic_chat_service._apply_diagnostic_verdict)."""
+    mentor_agent._apply_diagnostic_verdict)."""
     with patch(
         "app.services.subtopic_weights.get_subtopics",
         AsyncMock(return_value=["Loops", "Recursion"]),

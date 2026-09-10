@@ -55,7 +55,7 @@ Traced across every embedding read and write in the backend:
 
 **Nothing in this table embeds a topic.** The only summary-embedding writer is
 `session_save_handler.py:266`, on the legacy session-end path.
-`topic_chat_service.py` never calls it — consistent with the finding already
+`mentor_agent.py` never calls it — consistent with the finding already
 recorded in `.kiro/specs/topic-delete/requirements.md` that the topic chat path
 writes no `session_id` anywhere.
 

@@ -112,7 +112,7 @@ every topic.
 
 1. WHEN a topic is fetched for use (via `TopicService.get_topic()` — used by
    both `GET /topic/{topic_id}` and the pre-turn fetch in
-   `topic_chat_service.py::handle_message` at line 198) AND `l1_scope` is
+   `mentor_agent.py::handle_message` at line 198) AND `l1_scope` is
    absent OR `profileStamp` does not match a hash of the user's current
    `situations` + `contexts` THEN the system SHALL call `classify_relevance`
    and persist the refreshed `l1_scope` + `profileStamp` before returning.
@@ -142,7 +142,7 @@ subtopic weighting) don't get skewed by an unrelated situation.
    current topic's `l1_scope` (relevant subset) instead of flattening the
    full raw `profile.learning_context_detail.situations` /
    `.contexts` lists.
-2. THE call chain from `topic_chat_service.py::handle_message()` — which
+2. THE call chain from `mentor_agent.py::handle_message()` — which
    already fetches the `topic` document before calling
    `context_assembler.assemble()` — SHALL thread the topic's `l1_scope`
    through to the prompt-building step. (`context_assembler.assemble()`

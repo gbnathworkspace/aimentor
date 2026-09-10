@@ -67,7 +67,7 @@ At session end, one Sonnet call over the full transcript produces two outputs:
 
 ## Agent Loop
 
-The mentor isn't a single LLM call per turn — it's a bounded ReAct-style tool loop (`topic_chat_service.py`): reason → optionally call a tool → observe the result → reason again, up to 2 rounds (worst case: one tool-decision call + one forced-final-answer call, so latency stays bounded instead of looping unboundedly).
+The mentor isn't a single LLM call per turn — it's a bounded ReAct-style tool loop (`mentor_agent.py`): reason → optionally call a tool → observe the result → reason again, up to 2 rounds (worst case: one tool-decision call + one forced-final-answer call, so latency stays bounded instead of looping unboundedly).
 
 Tools bound with `tool_choice="auto"` (the model decides whether to act):
 

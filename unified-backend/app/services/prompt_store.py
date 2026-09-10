@@ -19,7 +19,7 @@ _cache: dict[str, str] = {}
 # Mode → template filename mapping
 _MODE_TEMPLATES: dict[str, str] = {
     # Routed sub-modes for "topic" turns — selected per-turn by
-    # mode_router.route_user_turn() instead of one static "topic" block
+    # tactic_prompt_selector.route_user_turn() instead of one static "topic" block
     # that used to give contradictory instructions.
     "diagnostic": "mentor_v1.md",
     "direct": "mentor_v1.md",
@@ -32,7 +32,7 @@ _ONBOARDING_TEMPLATE = "onboarding.md"
 
 # Mode-specific instruction blocks appended to the base mentor template
 _MODE_INSTRUCTIONS: dict[str, str] = {
-    # Routed sub-modes for "topic" turns (see mode_router.py). Each is
+    # Routed sub-modes for "topic" turns (see tactic_prompt_selector.py). Each is
     # self-contained — no shared universal "always end with a question"
     # suffix, since that used to defeat DIRECT's whole purpose.
     "diagnostic": (
@@ -218,7 +218,7 @@ def _build_context_variables(
     L1/L2/L3 (profile, skill state, past sessions) are deliberately NOT
     injected here anymore — they're served on demand via the
     get_user_profile / get_skill_state / get_past_sessions tools (see
-    topic_chat_service._execute_loop_tool, which reuses the _format_* helpers
+    mentor_agent._execute_loop_tool, which reuses the _format_* helpers
     below directly) instead of being stuffed into every system prompt
     whether the turn needs them or not."""
     skill = context.get("skill", {})
@@ -237,7 +237,7 @@ def get_system_prompt(
     """Load and format the system prompt for a given mentor mode.
 
     Args:
-        mode: A routed topic sub-mode from mode_router.py ("diagnostic",
+        mode: A routed topic sub-mode from tactic_prompt_selector.py ("diagnostic",
             "direct", "socratic", "hint", "guided").
         context: Dict with keys "profile", "skill", "summary_blocks" from context_assembler.
         tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.

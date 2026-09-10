@@ -30,7 +30,7 @@ class SkillNode(BaseModel):
     # enum, which couldn't represent uneven mastery within one topic.
     #
     # An empty dict IS "not assessed yet" — there's no separate `assessed`
-    # flag. The cold-start gate (mode_router.py Rule 1) reads the sibling
+    # flag. The cold-start gate (tactic_prompt_selector.py Rule 1) reads the sibling
     # `last_studied` field instead of this one, since last_studied is set
     # by any skill_graph write, not just a diagnostic verdict.
     subtopic_mastery: dict[str, float] = Field(default_factory=dict)

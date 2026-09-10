@@ -1,23 +1,23 @@
-"""Eval: mode_router.route_user_turn's rule-selection quality against
+"""Eval: tactic_prompt_selector.route_user_turn's rule-selection quality against
 hand-labeled cases.
 
 This is a QUALITY eval, not a unit test (unit-level plumbing/fallback
-behavior is already covered by tests/unit/test_mode_router.py with a
+behavior is already covered by tests/unit/test_tactic_prompt_selector.py with a
 mocked LLM). This eval makes real calls to the Anthropic API (Haiku) and
 checks route_user_turn's chosen mode against
-tests/evals/mode_router_cases.py's hand-labeled set. It costs money and
+tests/evals/tactic_prompt_selector_cases.py's hand-labeled set. It costs money and
 needs a real ANTHROPIC_API_KEY, so it's skipped by default and excluded
 from the normal `pytest` run.
 
 Run it explicitly:
-    RUN_EVALS=1 pytest tests/evals/test_mode_router.py -v -s
+    RUN_EVALS=1 pytest tests/evals/test_tactic_prompt_selector.py -v -s
 
-(PowerShell: `$env:RUN_EVALS = "1"; pytest tests/evals/test_mode_router.py -v -s`)
+(PowerShell: `$env:RUN_EVALS = "1"; pytest tests/evals/test_tactic_prompt_selector.py -v -s`)
 
 Every run writes a full report — every case, not just misses — to
 tests/evals/reports/, so results can be cross-checked without rerunning.
 
-Run whenever mode_router's rule prompt changes — this is a regression
+Run whenever tactic_prompt_selector's rule prompt changes — this is a regression
 suite for routing quality, not a one-time check.
 """
 
@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pytest
 
-from app.services.mode_router import route_user_turn
-from tests.evals.mode_router_cases import EVAL_CASES
+from app.services.tactic_prompt_selector import route_user_turn
+from tests.evals.tactic_prompt_selector_cases import EVAL_CASES
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_EVALS") != "1",
@@ -45,11 +45,11 @@ _REPORTS_DIR = Path(__file__).parent / "reports"
 def _write_report(case_rows: list[dict], category_stats: list[tuple[str, int, int, float, bool]]) -> Path:
     _REPORTS_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    path = _REPORTS_DIR / f"mode_router_{stamp}.md"
+    path = _REPORTS_DIR / f"tactic_prompt_selector_{stamp}.md"
 
     overall_pass = all(ok for _, _, _, _, ok in category_stats)
     lines = [
-        f"# mode_router eval — {stamp}",
+        f"# tactic_prompt_selector eval — {stamp}",
         "",
         f"**Result: {'PASS' if overall_pass else 'FAIL'}** — "
         f"{sum(r['correct'] for r in case_rows)}/{len(case_rows)} cases correct.",
@@ -81,7 +81,7 @@ def _write_report(case_rows: list[dict], category_stats: list[tuple[str, int, in
 
 
 @pytest.mark.asyncio
-async def test_mode_router_accuracy():
+async def test_tactic_prompt_selector_accuracy():
     results: dict[str, list[bool]] = defaultdict(list)
     case_rows: list[dict] = []
 
@@ -105,7 +105,7 @@ async def test_mode_router_accuracy():
             "reasoning": decision.reasoning,
         })
 
-    print("\nmode_router eval — per-category accuracy:")
+    print("\ntactic_prompt_selector eval — per-category accuracy:")
     below_bar = []
     category_stats = []
     for category, outcomes in sorted(results.items()):

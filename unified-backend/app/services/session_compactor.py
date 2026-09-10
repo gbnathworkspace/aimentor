@@ -3,7 +3,7 @@ into a SummaryBlock and keeps a topic's SummaryBlocks bounded via
 oldest-pair merging. Raw messages are never deleted from topic.messages —
 they remain permanent history; the messages a SummaryBlock covers are
 excluded from LLM context at read time instead (see
-topic_chat_service._format_messages_for_api), via summaryBlocks[].sourceSessionIds.
+mentor_agent._format_messages_for_api), via summaryBlocks[].sourceSessionIds.
 
 Replaces the old compaction_service.py + session_summarizer.py split: those
 two ran on different triggers (mid-turn token-budget crossing vs. session
@@ -13,7 +13,7 @@ inside topic.messages vs. a separate topic.summaryBlocks array).
 session_compactor runs at session boundaries only (session_boundary.py):
 idle-gap close, idle sweep, logout/checkpoint, or a hard-ceiling force-close
 for one session that's grown too large without ever going idle. There is no
-mid-turn trigger — topic_chat_service no longer checks or triggers this
+mid-turn trigger — mentor_agent no longer checks or triggers this
 per turn.
 """
 
@@ -427,7 +427,7 @@ async def _close_session(topic_id: str, user_id: str, upto_timestamp: datetime) 
 
     # Raw messages are never deleted from topic.messages — they stay as
     # permanent history. Covered messages are excluded from LLM context at
-    # read time instead (see topic_chat_service._format_messages_for_api),
+    # read time instead (see mentor_agent._format_messages_for_api),
     # using summaryBlocks[].sourceSessionIds as the exclusion set. Since
     # topic.messages isn't touched here, metadata.currentTokenEstimate
     # (maintained incrementally by TopicService.append_message) doesn't need

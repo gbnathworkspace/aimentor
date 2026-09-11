@@ -12,6 +12,7 @@ from app.auth.dependencies import require_auth
 from app.models.profile import ProfileCreate, ProfileResponse, ProfileUpdate, ProposableField
 from app.services.avatar_storage import delete_avatar, resolve_avatar_url, store_avatar
 from app.services.fact_quality import classify_fact_quality, compute_situations_stamp
+from app.services.l1_scope import extract_situations
 from app.services.memory_editor import apply_memory_edit
 
 logger = logging.getLogger(__name__)
@@ -156,7 +157,7 @@ async def get_situations_quality(user_id: str = Depends(require_auth)):
         {"user_id": user_id},
         {"learning_context_detail": 1, "situation_quality": 1, "situationQualityStamp": 1},
     )
-    situations = ((doc or {}).get("learning_context_detail") or {}).get("situations") or []
+    situations = extract_situations(doc or {})
     current_stamp = compute_situations_stamp(situations)
 
     if doc and doc.get("situationQualityStamp") == current_stamp and "situation_quality" in doc:

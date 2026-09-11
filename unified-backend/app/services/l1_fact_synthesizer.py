@@ -22,6 +22,7 @@ from app.config.database import profiles_col
 from app.config.settings import get_settings
 from app.models.document_upload import L1SynthesisOutput, SynthesizedStyleNote
 from app.models.profile import ProposableField, StyleNoteCategory
+from app.services.l1_scope import extract_situations
 from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
@@ -251,7 +252,7 @@ async def _get_user_profile_state(user_id: str) -> dict:
     if not profile:
         return {"situations": [], "style_notes": []}
     return {
-        "situations": (profile.get("learning_context_detail") or {}).get("situations") or [],
+        "situations": extract_situations(profile),
         "style_notes": profile.get("style_notes") or [],
     }
 

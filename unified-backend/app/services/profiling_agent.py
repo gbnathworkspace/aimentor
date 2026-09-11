@@ -18,12 +18,12 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.config.database import profiles_col
-from app.models.profile import PendingProfileChange, ProposableField, StyleNoteCategory
+from app.models.profile import PendingProfileChange, ProposableField
+from app.services.style_note_validation import is_valid_style_note
 
 logger = logging.getLogger(__name__)
 
 _VALID_FIELDS = {f.value for f in ProposableField}
-_VALID_CATEGORIES = {c.value for c in StyleNoteCategory}
 
 
 def _validate_signal(raw: Any, session_id: str) -> Optional[PendingProfileChange]:
@@ -40,7 +40,7 @@ def _validate_signal(raw: Any, session_id: str) -> Optional[PendingProfileChange
         return None
 
     if field == ProposableField.STYLE_NOTE.value:
-        if proposed_value.get("category") not in _VALID_CATEGORIES or not proposed_value.get("note"):
+        if not is_valid_style_note(proposed_value.get("category"), proposed_value.get("note")):
             return None
 
     try:

@@ -24,6 +24,7 @@ from app.models.document_upload import L1SynthesisOutput, SynthesizedStyleNote
 from app.models.profile import ProposableField, StyleNoteCategory
 from app.services.l1_scope import extract_situations
 from app.services.llm_trace import traced_messages_create
+from app.services.style_note_validation import is_valid_style_note
 
 logger = logging.getLogger(__name__)
 
@@ -143,36 +144,24 @@ def _validate_style_notes(
     """
     validated = []
     for note_dict in notes:
-        try:
-            category_val = note_dict.get("category", "")
-            # Validate category is a valid enum
-            StyleNoteCategory(category_val)
+        category_val = note_dict.get("category", "")
+        note_text = note_dict.get("note", "")
+        source_quote = note_dict.get("source_quote", "")
 
-            source_quote = note_dict.get("source_quote", "")
-            note_text = note_dict.get("note", "")
-
-            # Validate constraints
-            if not source_quote or len(source_quote) > 200:
-                logger.warning(
-                    "Discarding style note: source_quote missing or > 200 chars"
-                )
-                continue
-            if not note_text or len(note_text) > 140:
-                logger.warning(
-                    "Discarding style note: note missing or > 140 chars"
-                )
-                continue
-
-            validated.append(
-                SynthesizedStyleNote(
-                    category=StyleNoteCategory(category_val),
-                    note=note_text,
-                    source_quote=source_quote,
-                )
-            )
-        except (ValueError, KeyError) as e:
-            logger.warning("Discarding invalid style note: %s", e)
+        if not is_valid_style_note(category_val, note_text):
+            logger.warning("Discarding style note: invalid category or note > 140 chars")
             continue
+        if not source_quote or len(source_quote) > 200:
+            logger.warning("Discarding style note: source_quote missing or > 200 chars")
+            continue
+
+        validated.append(
+            SynthesizedStyleNote(
+                category=StyleNoteCategory(category_val),
+                note=note_text,
+                source_quote=source_quote,
+            )
+        )
 
     return validated
 

@@ -1,4 +1,4 @@
-"""Unit tests for TopicChatService.
+"""Unit tests for MentorAgent.
 
 Tests cover:
 - handle_message happy path (user message appended, LLM streamed, assistant message appended)
@@ -19,8 +19,8 @@ import pytest
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessageChunk
 
-from app.services.topic_chat_service import (
-    TopicChatService,
+from app.services.mentor_agent import (
+    MentorAgent,
     LLM_TIMEOUT_SECONDS,
     _META_MARKER,
     _TOOL_MARKER,
@@ -124,7 +124,7 @@ def mock_token_counter():
 
 @pytest.fixture
 def chat_service(mock_topic_service, mock_token_counter):
-    return TopicChatService(
+    return MentorAgent(
         topic_service=mock_topic_service,
         token_counter=mock_token_counter,
     )
@@ -134,8 +134,8 @@ class TestHandleMessageHappyPath:
     """Tests for the successful handle_message flow."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_happy_path_appends_user_and_assistant_messages(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
@@ -146,7 +146,7 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.return_value = "You are a mentor."
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Here's my response about graphs.")]]),
         ):
             result = await chat_service.handle_message(
@@ -172,8 +172,8 @@ class TestHandleMessageHappyPath:
         assert assistant_msg["systemPrompt"] == "You are a mentor."
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_happy_path_calls_context_assembler(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -184,7 +184,7 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.return_value = "System prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message(
@@ -199,8 +199,8 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.assert_called_once_with("diagnostic", mock_assembler.assemble.return_value)
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_threads_topic_l1_scope_into_assemble(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
@@ -221,7 +221,7 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.return_value = "System prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message(
@@ -235,8 +235,8 @@ class TestHandleMessageHappyPath:
         )
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_happy_path_returns_visible_text_and_metadata(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -246,7 +246,7 @@ class TestHandleMessageHappyPath:
         mock_get_prompt.return_value = "prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("LLM says hello")]]),
         ):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hi")
@@ -257,8 +257,8 @@ class TestHandleMessageHappyPath:
         assert meta == {"mode": "diagnostic", "suggestions": []}
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_suggestions_fence_mid_reply_is_never_shown_raw(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -280,7 +280,7 @@ class TestHandleMessageHappyPath:
             "Assuming it's this one, here's the breakdown in simple steps."
         )
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk(reply)]]),
         ):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hi")
@@ -304,7 +304,7 @@ class TestHandleMessageHardCap:
         mock_token_counter.get_usage_percent.return_value = 100
         mock_cls = _mock_chat_anthropic([])
 
-        with patch("app.services.topic_chat_service.ChatAnthropic", mock_cls):
+        with patch("app.services.mentor_agent.ChatAnthropic", mock_cls):
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "Hello", mode="topic"
             )
@@ -315,8 +315,8 @@ class TestHandleMessageHardCap:
         mock_cls.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_under_capacity_proceeds_normally(
         self, mock_get_prompt, mock_assembler, chat_service, mock_token_counter
     ):
@@ -327,7 +327,7 @@ class TestHandleMessageHardCap:
         mock_get_prompt.return_value = "prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Response")]]),
         ):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
@@ -341,8 +341,8 @@ class TestHandleMessageStreamFailure:
     """LLM failure mid-stream yields an in-band error marker (Req 4.4)."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_astream_exception_yields_error_marker(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
@@ -360,7 +360,7 @@ class TestHandleMessageStreamFailure:
         cls = MagicMock()
         cls.return_value.bind_tools.return_value = mock_llm
 
-        with patch("app.services.topic_chat_service.ChatAnthropic", cls):
+        with patch("app.services.mentor_agent.ChatAnthropic", cls):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
             full = await _collect_stream(result)
 
@@ -373,8 +373,8 @@ class TestHandleMessageStreamFailure:
         assert user_msg["content"] == "Hello"
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_time_budget_exceeded_yields_error_marker(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -384,9 +384,9 @@ class TestHandleMessageStreamFailure:
         mock_get_prompt.return_value = "prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("partial")]]),
-        ), patch("app.services.topic_chat_service.LLM_TIMEOUT_SECONDS", -1):
+        ), patch("app.services.mentor_agent.LLM_TIMEOUT_SECONDS", -1):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
             full = await _collect_stream(result)
 
@@ -399,8 +399,8 @@ class TestPostTurnHook:
     this hook only ever calls maybe_force_close_long_session."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_post_turn_hook_calls_force_close_check(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -410,10 +410,10 @@ class TestPostTurnHook:
         mock_get_prompt.return_value = "prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("LLM response")]]),
         ), patch(
-            "app.services.topic_chat_service.maybe_force_close_long_session", new=AsyncMock()
+            "app.services.mentor_agent.maybe_force_close_long_session", new=AsyncMock()
         ) as mock_force_close:
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
             await _collect_stream(result)
@@ -425,8 +425,8 @@ class TestPostTurnHook:
             assert mock_force_close.call_args.args[1] == "user-123"
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_post_turn_hook_failure_does_not_crash_service(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -436,10 +436,10 @@ class TestPostTurnHook:
         mock_get_prompt.return_value = "prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("All good")]]),
         ), patch(
-            "app.services.topic_chat_service.maybe_force_close_long_session",
+            "app.services.mentor_agent.maybe_force_close_long_session",
             new=AsyncMock(side_effect=Exception("DB down")),
         ):
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
@@ -454,7 +454,7 @@ class TestPostTurnHook:
     @pytest.mark.asyncio
     async def test_post_turn_hook_direct_call_logs_error(self, chat_service):
         with patch(
-            "app.services.topic_chat_service.maybe_force_close_long_session",
+            "app.services.mentor_agent.maybe_force_close_long_session",
             new=AsyncMock(side_effect=RuntimeError("connection lost")),
         ) as mock_force_close:
             await chat_service._post_turn_hook("topic-abc", "user-123")
@@ -467,7 +467,7 @@ class TestFormatMessagesForApi:
 
     @pytest.fixture
     def service(self, mock_topic_service, mock_token_counter):
-        return TopicChatService(
+        return MentorAgent(
             topic_service=mock_topic_service,
             token_counter=mock_token_counter,
         )
@@ -563,7 +563,7 @@ class TestBuildSystemBlocks:
 
     @pytest.fixture
     def service(self, mock_topic_service, mock_token_counter):
-        return TopicChatService(
+        return MentorAgent(
             topic_service=mock_topic_service,
             token_counter=mock_token_counter,
         )
@@ -601,8 +601,8 @@ class TestDiagnosticRouting:
     verdict gets written to the skill graph (issue #50)."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_unassessed_skill_routes_to_diagnostic_mode(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -612,7 +612,7 @@ class TestDiagnosticRouting:
         mock_get_prompt.return_value = "diagnostic prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Have you coded before?")]]),
         ):
             result = await chat_service.handle_message(
@@ -625,8 +625,8 @@ class TestDiagnosticRouting:
         assert meta["mode"] == "diagnostic"
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_diagnostic_verdict_written_to_skill_graph(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -643,7 +643,7 @@ class TestDiagnosticRouting:
         from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Got it — you're a beginner.", [verdict_call])]]),
         ), patch("app.services.mentor_tools.skill_graph_repo") as mock_repo, patch(
             "app.services.mentor_tools.validate_subtopic_updates",
@@ -663,8 +663,8 @@ class TestDiagnosticRouting:
         assert subtopic_updates[0].mastery == 15
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_tool_call_with_no_text_still_yields_and_persists_visible_reply(
         self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
     ):
@@ -686,7 +686,7 @@ class TestDiagnosticRouting:
         from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("", [verdict_call])]]),
         ), patch("app.services.mentor_tools.skill_graph_repo") as mock_repo, patch(
             "app.services.mentor_tools.validate_subtopic_updates",
@@ -705,8 +705,8 @@ class TestDiagnosticRouting:
         assert persisted["content"].strip() != ""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_no_verdict_tool_call_skips_skill_graph_write(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -716,7 +716,7 @@ class TestDiagnosticRouting:
         mock_get_prompt.return_value = "diagnostic prompt"
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Have you coded before?")]]),
         ), patch("app.services.mentor_tools.skill_graph_repo") as mock_repo:
             mock_repo.apply_update = AsyncMock()
@@ -728,8 +728,8 @@ class TestDiagnosticRouting:
         mock_repo.apply_update.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_assessed_skill_uses_router_decision_and_instruction_override(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -739,7 +739,7 @@ class TestDiagnosticRouting:
         })
         mock_get_prompt.return_value = "direct prompt"
 
-        from app.services.mode_router import MatchedRule, MentorMode, RouterDecision
+        from app.services.tactic_prompt_selector import MatchedRule, MentorMode, RouterDecision
 
         fake_decision = RouterDecision(
             matched_rule=MatchedRule.RULE_2_URGENCY_DIRECT,
@@ -749,10 +749,10 @@ class TestDiagnosticRouting:
         )
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("array.push(x)")]]),
         ) as mock_cls, patch(
-            "app.services.topic_chat_service.mode_router.route_user_turn",
+            "app.services.mentor_agent.tactic_prompt_selector.route_user_turn",
             new_callable=AsyncMock,
         ) as mock_route:
             mock_route.return_value = fake_decision
@@ -771,8 +771,8 @@ class TestToolLoop:
     see the result, and answer in a second round."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_non_loop_tool_call_short_circuits_without_looping(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -792,7 +792,7 @@ class TestToolLoop:
         from app.models.skill import SubtopicMasteryUpdate
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([round0]),
         ) as mock_cls, patch("app.services.mentor_tools.skill_graph_repo") as mock_repo, patch(
             "app.services.mentor_tools.validate_subtopic_updates",
@@ -810,8 +810,8 @@ class TestToolLoop:
         mock_repo.apply_update.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_loop_tool_call_emits_start_and_end_markers(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -831,7 +831,7 @@ class TestToolLoop:
         round1 = [_chunk("Final answer.")]
 
         with patch(
-            "app.services.topic_chat_service.ChatAnthropic",
+            "app.services.mentor_agent.ChatAnthropic",
             _mock_chat_anthropic([round0, round1]),
         ):
             result = await chat_service.handle_message(
@@ -868,8 +868,8 @@ class TestRoundTools:
     on non-final rounds, the verdict tool only in DIAGNOSTIC mode."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_diagnostic_final_round_keeps_only_web_search_and_verdict(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -877,7 +877,7 @@ class TestRoundTools:
         mock_get_prompt.return_value = "diagnostic prompt"
 
         mock_cls = _two_round_turn_mocks()
-        with patch("app.services.topic_chat_service.ChatAnthropic", mock_cls):
+        with patch("app.services.mentor_agent.ChatAnthropic", mock_cls):
             result = await chat_service.handle_message("topic-abc", "user-123", "what did we cover?", mode="topic")
             await _collect_stream(result)
 
@@ -888,15 +888,15 @@ class TestRoundTools:
         ]
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_non_diagnostic_final_round_keeps_only_web_search(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
         mock_assembler.assemble = AsyncMock(return_value={**_CONTEXT_WITH_SUMMARY, "skill": {"subtopic_mastery": {"A": 50}}})
         mock_get_prompt.return_value = "direct prompt"
 
-        from app.services.mode_router import MatchedRule, MentorMode, RouterDecision
+        from app.services.tactic_prompt_selector import MatchedRule, MentorMode, RouterDecision
 
         decision = RouterDecision(
             matched_rule=MatchedRule.RULE_2_URGENCY_DIRECT,
@@ -905,8 +905,8 @@ class TestRoundTools:
             instruction_override="",
         )
         mock_cls = _two_round_turn_mocks()
-        with patch("app.services.topic_chat_service.ChatAnthropic", mock_cls), patch(
-            "app.services.topic_chat_service.mode_router.route_user_turn", AsyncMock(return_value=decision),
+        with patch("app.services.mentor_agent.ChatAnthropic", mock_cls), patch(
+            "app.services.mentor_agent.tactic_prompt_selector.route_user_turn", AsyncMock(return_value=decision),
         ):
             result = await chat_service.handle_message("topic-abc", "user-123", "what did we cover?", mode="topic")
             await _collect_stream(result)
@@ -916,19 +916,19 @@ class TestRoundTools:
 
 
 class TestRoundTracing:
-    """One topic_chat_service.mentor_round trace per model round."""
+    """One mentor_agent.mentor_round trace per model round."""
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_one_trace_per_round_and_second_prompt_carries_tool_result(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
         mock_assembler.assemble = AsyncMock(return_value=_CONTEXT_WITH_SUMMARY)
         mock_get_prompt.return_value = "diagnostic prompt"
 
-        with patch("app.services.topic_chat_service.ChatAnthropic", _two_round_turn_mocks()), patch(
-            "app.services.topic_chat_service.write_trace", new_callable=AsyncMock,
+        with patch("app.services.mentor_agent.ChatAnthropic", _two_round_turn_mocks()), patch(
+            "app.services.mentor_agent.write_trace", new_callable=AsyncMock,
         ) as round_trace, patch("app.services.mentor_tools.write_trace", new_callable=AsyncMock):
             result = await chat_service.handle_message("topic-abc", "user-123", "what did we cover?", mode="topic")
             await _collect_stream(result)
@@ -937,7 +937,7 @@ class TestRoundTracing:
         (first, second) = round_trace.call_args_list
         for call in (first, second):
             call_site, model, user_id, _ = call.args
-            assert (call_site, model, user_id) == ("topic_chat_service.mentor_round", "claude-sonnet-5", "user-123")
+            assert (call_site, model, user_id) == ("mentor_agent.mentor_round", "claude-sonnet-5", "user-123")
             assert call.kwargs["error"] is None
 
         assert "what did we cover?" in first.args[3]
@@ -948,8 +948,8 @@ class TestRoundTracing:
         assert second.kwargs["response"] == "Final answer."
 
     @pytest.mark.asyncio
-    @patch("app.services.topic_chat_service.context_assembler")
-    @patch("app.services.topic_chat_service.get_system_prompt")
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
     async def test_raising_round_is_traced_with_error_and_still_yields_error_marker(
         self, mock_get_prompt, mock_assembler, chat_service
     ):
@@ -965,8 +965,8 @@ class TestRoundTracing:
         cls = MagicMock()
         cls.return_value.bind_tools.return_value = mock_llm
 
-        with patch("app.services.topic_chat_service.ChatAnthropic", cls), patch(
-            "app.services.topic_chat_service.write_trace", new_callable=AsyncMock,
+        with patch("app.services.mentor_agent.ChatAnthropic", cls), patch(
+            "app.services.mentor_agent.write_trace", new_callable=AsyncMock,
         ) as round_trace:
             result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
             full = await _collect_stream(result)

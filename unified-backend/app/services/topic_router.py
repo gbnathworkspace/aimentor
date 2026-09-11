@@ -9,7 +9,7 @@ never a silent reroute. That's what makes a single unverified Haiku call an
 acceptable trade here (unlike e.g. mentor prompt content, which the user
 never gets a chance to veto turn-by-turn).
 
-Same fail-open convention as mode_router.py: any failure (timeout, API
+Same fail-open convention as tactic_prompt_selector.py: any failure (timeout, API
 error, malformed response) falls back to TopicRouteResult() (no match, no
 candidates), i.e. "start a new topic" — the safe default the UI already
 falls back to when nothing matches.

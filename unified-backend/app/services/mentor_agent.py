@@ -1,4 +1,4 @@
-"""TopicChatService — orchestrates per-turn LLM calls within topic threads.
+"""MentorAgent — orchestrates per-turn LLM calls within topic threads.
 
 Replaces the standalone session model's per-turn flow. Messages are now
 appended to a topic thread, context is assembled including SummaryBlocks,
@@ -25,7 +25,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config.settings import get_settings
-from app.services import context_assembler, mentor_tools, mode_router
+from app.services import context_assembler, mentor_tools, tactic_prompt_selector
 from app.services.llm_trace import write_trace
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
@@ -90,7 +90,7 @@ _META_MARKER = "\x00META\x00"
 _TOOL_MARKER = "\x00TOOL\x00"
 
 
-class TopicChatService:
+class MentorAgent:
     """Orchestrates per-turn LLM calls within topic threads.
 
     Flow:
@@ -178,7 +178,7 @@ class TopicChatService:
         effective_mode = mode
         instruction_override = ""
         if mode == "topic":
-            decision = await mode_router.route_user_turn(
+            decision = await tactic_prompt_selector.route_user_turn(
                 query=content,
                 skill=context.get("skill") or {},
                 recent_messages=existing_messages,
@@ -435,7 +435,7 @@ class TopicChatService:
                 new_parts.append(self._message_text(message.content))
                 break
         await write_trace(
-            "topic_chat_service.mentor_round", _MENTOR_MODEL, user_id,
+            "mentor_agent.mentor_round", _MENTOR_MODEL, user_id,
             "\n\n".join(reversed(new_parts)),
             response=round_text, error=error,
             duration_ms=int((time.monotonic() - round_start) * 1000),

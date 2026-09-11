@@ -19,7 +19,7 @@ _cache: dict[str, str] = {}
 # Mode → template filename mapping
 _MODE_TEMPLATES: dict[str, str] = {
     # Routed sub-modes for "topic" turns — selected per-turn by
-    # mode_router.route_user_turn() instead of one static "topic" block
+    # tactic_prompt_selector.route_user_turn() instead of one static "topic" block
     # that used to give contradictory instructions.
     "diagnostic": "mentor_v1.md",
     "direct": "mentor_v1.md",
@@ -32,7 +32,7 @@ _ONBOARDING_TEMPLATE = "onboarding.md"
 
 # Mode-specific instruction blocks appended to the base mentor template
 _MODE_INSTRUCTIONS: dict[str, str] = {
-    # Routed sub-modes for "topic" turns (see mode_router.py). Each is
+    # Routed sub-modes for "topic" turns (see tactic_prompt_selector.py). Each is
     # self-contained — no shared universal "always end with a question"
     # suffix, since that used to defeat DIRECT's whole purpose.
     "diagnostic": (
@@ -237,7 +237,7 @@ def get_system_prompt(
     """Load and format the system prompt for a given mentor mode.
 
     Args:
-        mode: A routed topic sub-mode from mode_router.py ("diagnostic",
+        mode: A routed topic sub-mode from tactic_prompt_selector.py ("diagnostic",
             "direct", "socratic", "hint", "guided").
         context: Dict with keys "profile", "skill", "summary_blocks" from context_assembler.
         tone: Mentor voice (tough/balanced/encouraging). Defaults to DEFAULT_TONE.

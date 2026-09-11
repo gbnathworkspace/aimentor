@@ -29,7 +29,7 @@ entirely unmodified.
       (task 3.1) before the new message is appended
     - _Requirements: 1.1, 1.4_
 
-  - [x] 2.2 Wire `check_and_close_on_new_message` into `topic_chat_service.py`
+  - [x] 2.2 Wire `check_and_close_on_new_message` into `mentor_agent.py`
     - Called at the start of message handling, before `append_message`
     - _Requirements: 1.1_
 
@@ -65,7 +65,7 @@ entirely unmodified.
 
   - [x] 3.2 Retire the message-count checkpoint call site
     - Remove the `elif total_messages % SKILL_CHECK_EVERY_N_MESSAGES == 0` branch
-      in `topic_chat_service.py::_post_turn_hook`
+      in `mentor_agent.py::_post_turn_hook`
     - `extract_skill_updates_only` itself can remain in `compaction_service.py`
       (still may be useful standalone) but is no longer called from this path
     - _Requirements: 4.3_

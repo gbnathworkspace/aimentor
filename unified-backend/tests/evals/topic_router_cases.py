@@ -18,7 +18,7 @@ human-reviewed `expected` verdict:
   continuation. Correct iff the router returns no topic_id and no
   related_ids.
 
-Scope note: same rationale as classify_relevance_cases.py / mode_router_cases.py
+Scope note: same rationale as classify_relevance_cases.py / tactic_prompt_selector_cases.py
 — a small, actually-reviewed set beats a padded one. ~4 cases per category,
 plus one no-candidates sanity case that costs no LLM call.
 """

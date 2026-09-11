@@ -193,7 +193,7 @@ async def bootstrap_skills(
             "user_id": user_id,
             "topic": topic,
             # Empty until a real diagnostic verdict or compaction extraction
-            # lands. The cold-start gate (mode_router.py Rule 1) reads the
+            # lands. The cold-start gate (tactic_prompt_selector.py Rule 1) reads the
             # sibling `last_studied` field, which stays unset until then.
             "subtopic_mastery": {},
         }

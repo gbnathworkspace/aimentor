@@ -24,7 +24,7 @@ from app.services.extraction import process_topic_document
 from app.services.file_upload import store_file, validate_files
 from app.services.vector_search import delete_topic_document, list_topic_documents
 from app.services.topic_service import TopicService
-from app.services.topic_chat_service import TopicChatService
+from app.services.mentor_agent import MentorAgent
 from app.services.topic_router import route_topic
 from app.services.session_boundary import close_session_for_topic
 from app.services.subtopic_weights import derive_subtopic_weights, get_subtopics
@@ -33,7 +33,7 @@ from app.services.skill_graph_repo import fetch_skill_node
 router = APIRouter(prefix="/api", tags=["Topics"])
 
 _topic_service = TopicService()
-_chat_service = TopicChatService()
+_chat_service = MentorAgent()
 
 
 # --- Request/Response Models ---

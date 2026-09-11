@@ -48,8 +48,8 @@ flowchart TD
 
 **Why `get_topic()` and not a new hook:** both consumer paths already call
 it — the router's `GET /topic/{topic_id}` (the sidebar's "open a topic"
-moment, `chat.tsx:257`) and `TopicChatService.handle_message()`'s pre-turn
-fetch (`topic_chat_service.py:198`). Putting the staleness check inside
+moment, `chat.tsx:257`) and `MentorAgent.handle_message()`'s pre-turn
+fetch (`mentor_agent.py:198`). Putting the staleness check inside
 `get_topic()` covers both for free; no new call site needs to remember to
 invoke it.
 
@@ -293,14 +293,14 @@ async def assemble(
 ```
 
 `l1_scope` is passed straight through, not fetched here — the caller
-(`TopicChatService.handle_message`) already has the topic doc via
+(`MentorAgent.handle_message`) already has the topic doc via
 `get_topic()`, so `assemble()` doesn't need a second topic read.
 
 ---
 
-### Component 4: `TopicChatService.handle_message()` (one-line change)
+### Component 4: `MentorAgent.handle_message()` (one-line change)
 
-**File**: `unified-backend/app/services/topic_chat_service.py:227`
+**File**: `unified-backend/app/services/mentor_agent.py:227`
 
 ```python
 context = await context_assembler.assemble(
@@ -445,7 +445,7 @@ the same judgments anyway (same inputs).
   - `_format_learning_context(profile, l1_scope=[])` — `"Not specified"`.
   - All-irrelevant judgments — `"Not specified"`, not a fallback to
     unfiltered.
-- **Integration** (`tests/unit/test_topic_chat_service.py`):
+- **Integration** (`tests/unit/test_mentor_agent.py`):
   - `handle_message` threads `topic.get("l1_scope")` into
     `context_assembler.assemble()` — mock assertion on the call args.
 - **Eval** (deferred per Requirements' Out of Scope — noted here as a
@@ -473,7 +473,7 @@ the same judgments anyway (same inputs).
 - **No new external services or packages.** `langchain-anthropic` is
   already in `requirements.txt:19`; `.with_structured_output()` is a
   method on the `ChatAnthropic` client already imported elsewhere
-  (`topic_chat_service.py:24`).
+  (`mentor_agent.py:24`).
 - **No schema migration.** `l1_scope`/`profileStamp` are additive-optional
   fields on an existing document, backfilled lazily on first read.
 

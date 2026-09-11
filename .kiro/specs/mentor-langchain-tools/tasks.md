@@ -58,27 +58,27 @@ change.
     failure; context never written into `prompt`
     - _Requirements: 7.2, 7.3_
 
-- [ ] 4. Rewire `TopicChatService` (`app/services/topic_chat_service.py`)
-  - [ ] 4.1 Remove the six tool dicts, `_LOOP_TOOL_NAMES`,
+- [x] 4. Rewire `TopicChatService` (`app/services/topic_chat_service.py`)
+  - [x] 4.1 Remove the six tool dicts, `_LOOP_TOOL_NAMES`,
     `_execute_loop_tool`, `_format_search_results`,
     `_apply_diagnostic_verdict`, unused imports; add `_MENTOR_MODEL`
     - _Requirements: 1.4_
-  - [ ] 4.2 Build `TurnState`; bind `[web_search, *LOOP_TOOLS, verdict?]`
+  - [x] 4.2 Build `TurnState`; bind `[web_search, *LOOP_TOOLS, verdict?]`
     on non-final rounds and `[web_search, verdict?]` on the final round
     - _Requirements: 5.1, 5.2, 6.1_
-  - [ ] 4.3 Execute loop calls through `mentor_tools.run_tool`, markers and
+  - [x] 4.3 Execute loop calls through `mentor_tools.run_tool`, markers and
     `ToolMessage`s unchanged
     - _Requirements: 5.3, 5.4_
-  - [ ] 4.4 Deferred verdict through `run_tool` after the stream
+  - [x] 4.4 Deferred verdict through `run_tool` after the stream
     - _Requirements: 6.2, 6.3, 6.5_
-  - [ ] 4.5 `_trace_round`: one `topic_chat_service.mentor_round` trace per
+  - [x] 4.5 `_trace_round`: one `topic_chat_service.mentor_round` trace per
     round (visible text only; prompt = latest user message + this round's
     tool results; `error` on a raising round), written after the round's
     stream
     - _Requirements: 7.1, 7.4, 7.5, 7.6_
 
 - [ ] 5. Update `tests/unit/test_topic_chat_service.py`
-  - [ ] 5.1 Retarget verdict patches to `app.services.mentor_tools`; make the
+  - [x] 5.1 Retarget verdict patches to `app.services.mentor_tools`; make the
     bound-tool name assertion handle `BaseTool`s; remove `TestContextTools`
     (moved in 3.3)
     - _Requirements: 8.2_

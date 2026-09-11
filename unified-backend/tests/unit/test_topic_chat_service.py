@@ -45,6 +45,11 @@ def _tool_call(name: str, args: dict, call_id: str = "tc-1") -> dict:
     return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
 
 
+def _tool_names(bound_tools: list) -> list[str]:
+    """Bound tools are a mix of server-tool dicts (web_search) and LangChain BaseTools."""
+    return [t["name"] if isinstance(t, dict) else t.name for t in bound_tools]
+
+
 def _mock_chat_anthropic(round_chunks: list[list[AIMessageChunk]]) -> MagicMock:
     """Patch target for ChatAnthropic: each call to `.astream()` (one per
     loop round) returns the next pre-built stream in `round_chunks`, in order."""
@@ -640,8 +645,8 @@ class TestDiagnosticRouting:
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Got it — you're a beginner.", [verdict_call])]]),
-        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
-            "app.services.topic_chat_service.validate_subtopic_updates",
+        ), patch("app.services.mentor_tools.skill_graph_repo") as mock_repo, patch(
+            "app.services.mentor_tools.validate_subtopic_updates",
             AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
         ):
             mock_repo.apply_update = AsyncMock()
@@ -683,8 +688,8 @@ class TestDiagnosticRouting:
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("", [verdict_call])]]),
-        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
-            "app.services.topic_chat_service.validate_subtopic_updates",
+        ), patch("app.services.mentor_tools.skill_graph_repo") as mock_repo, patch(
+            "app.services.mentor_tools.validate_subtopic_updates",
             AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
         ):
             mock_repo.apply_update = AsyncMock()
@@ -713,7 +718,7 @@ class TestDiagnosticRouting:
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([[_chunk("Have you coded before?")]]),
-        ), patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo:
+        ), patch("app.services.mentor_tools.skill_graph_repo") as mock_repo:
             mock_repo.apply_update = AsyncMock()
             result = await chat_service.handle_message(
                 "topic-abc", "user-123", "teach me JS", mode="topic"
@@ -759,7 +764,7 @@ class TestDiagnosticRouting:
         mock_get_prompt.assert_called_once_with("direct", mock_assembler.assemble.return_value)
         # DIRECT is not diagnostic — no verdict tool should have been bound.
         bound_tools = mock_cls.return_value.bind_tools.call_args[0][0]
-        assert all(t["name"] != "record_diagnostic_verdict" for t in bound_tools)
+        assert "record_diagnostic_verdict" not in _tool_names(bound_tools)
 
 class TestToolLoop:
     """The mentor can call search_documents/search_other_topics mid-turn,
@@ -789,8 +794,8 @@ class TestToolLoop:
         with patch(
             "app.services.topic_chat_service.ChatAnthropic",
             _mock_chat_anthropic([round0]),
-        ) as mock_cls, patch("app.services.topic_chat_service.skill_graph_repo") as mock_repo, patch(
-            "app.services.topic_chat_service.validate_subtopic_updates",
+        ) as mock_cls, patch("app.services.mentor_tools.skill_graph_repo") as mock_repo, patch(
+            "app.services.mentor_tools.validate_subtopic_updates",
             AsyncMock(return_value=[SubtopicMasteryUpdate(subtopic="Loops", mastery=15)]),
         ):
             mock_repo.apply_update = AsyncMock()
@@ -839,50 +844,3 @@ class TestToolLoop:
         assert start_marker in full
         assert end_marker in full
         assert full.index(start_marker) < full.index(end_marker) < full.index("Final answer.")
-
-
-class TestContextTools:
-    """get_user_profile/get_skill_state/get_past_sessions: L1/L2/L3 served on
-    demand from the already-assembled context dict, no extra DB round trip,
-    no static injection into the system prompt (see mentor_v1.md)."""
-
-    @pytest.mark.asyncio
-    async def test_get_user_profile_formats_learning_context_and_style_notes(self, chat_service):
-        context = {
-            "profile": {
-                "learning_context_detail": {"situations": ["Backend engineer"]},
-                "style_notes": [{"category": "communication", "note": "Use analogies"}],
-            },
-        }
-        result = await chat_service._execute_loop_tool("get_user_profile", {}, "user-123", context)
-        assert "Backend engineer" in result
-        assert "Use analogies" in result
-
-    @pytest.mark.asyncio
-    async def test_get_skill_state_formats_mastery_and_taught_concepts(self, chat_service):
-        context = {
-            "skill": {"subtopic_mastery": {"Loops": 40}},
-            "taught_concepts": ["for vs while"],
-        }
-        result = await chat_service._execute_loop_tool("get_skill_state", {}, "user-123", context)
-        assert "Loops: 40%" in result
-        assert "for vs while" in result
-
-    @pytest.mark.asyncio
-    async def test_get_past_sessions_formats_summary_blocks(self, chat_service):
-        context = {
-            "summary_blocks": [
-                {"text": "Covered recursion basics", "createdAt": "2025-01-01"},
-            ],
-        }
-        result = await chat_service._execute_loop_tool("get_past_sessions", {}, "user-123", context)
-        assert "Covered recursion basics" in result
-
-    @pytest.mark.asyncio
-    async def test_missing_context_falls_back_to_placeholders(self, chat_service):
-        """No profile/skill/summary_blocks yet (e.g. brand-new topic) —
-        fail-open with the same placeholders the old static injection used,
-        not an error."""
-        result = await chat_service._execute_loop_tool("get_skill_state", {}, "user-123", {})
-        assert "not assessed yet" in result
-        assert "nothing recorded yet" in result

@@ -25,16 +25,17 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config.settings import get_settings
-from app.services import context_assembler, mode_router, prompt_store, skill_graph_repo
+from app.services import context_assembler, mentor_tools, mode_router
+from app.services.llm_trace import write_trace
 from app.services.prompt_store import get_system_prompt
 from app.services.response_parsing import extract_suggestions
 from app.services.session_boundary import maybe_force_close_long_session
-from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
-from app.services.vector_search import vector_search
 
 logger = logging.getLogger(__name__)
+
+_MENTOR_MODEL = "claude-sonnet-5"
 
 # Covers up to 2 sequential model round trips (tool-loop turn) plus the tool
 # execution between them. Most turns are a single round and finish well
@@ -47,124 +48,11 @@ WEB_SEARCH_MAX_USES = 3
 
 _WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": WEB_SEARCH_MAX_USES}
 
-# Bound onto the mentor call only in DIAGNOSTIC mode. tool_choice stays
-# "auto" (not forced) so the same response can carry both the reply text
-# and — once there's enough signal — this verdict, in one LLM call instead
-# of a separate diagnostic-agent round trip. Never treated as a loop tool:
-# calling it always ends the turn, same as before streaming/looping existed.
-_DIAGNOSTIC_VERDICT_TOOL = {
-    "name": "record_diagnostic_verdict",
-    "description": (
-        "Record mastery for the specific subtopics the user's answers gave enough "
-        "signal to judge, once you have that signal. Do not call this until you're "
-        "confident on at least one subtopic — it's fine to ask another question "
-        "first and call it on a later turn. Only include subtopics you actually "
-        "assessed this turn; do not guess at the rest."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "subtopic_updates": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "subtopic": {"type": "string"},
-                        "mastery": {"type": "number", "minimum": 0, "maximum": 100},
-                    },
-                    "required": ["subtopic", "mastery"],
-                },
-            },
-        },
-        "required": ["subtopic_updates"],
-    },
-}
-
-# --- Loop tools: the model can call these mid-turn, see the result, and keep
-# reasoning before its final reply. The two search_* tools run real Atlas
-# $vectorSearch queries (see vector_search.py).
-
-# Real semantic search (Atlas $vectorSearch), not the dump-all default
-# injection — for pulling something specific that isn't already in context.
-_SEARCH_DOCUMENTS_TOOL = {
-    "name": "search_documents",
-    "description": (
-        "Semantically search the user's uploaded documents (résumé, notes, "
-        "problem lists) for a specific query. Use this when you need a "
-        "detail that isn't already in the Uploaded Documents section — the "
-        "default injection is a small unranked sample, not the full set."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {"query": {"type": "string"}},
-        "required": ["query"],
-    },
-}
-
-# Cross-topic only — this topic's own history is reached via
-# get_past_sessions instead. This is the deliberate, agentic replacement for
-# the old always-on cross-topic backfill: the model must choose to look,
-# nothing crosses topics silently.
-_SEARCH_OTHER_TOPICS_TOOL = {
-    "name": "search_other_topics",
-    "description": (
-        "Semantically search the user's session history in OTHER topics "
-        "for a specific query. Use this only when the user references "
-        "something from a different topic that isn't already in your "
-        "context — not for anything about the current topic (use "
-        "get_past_sessions for that)."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {"query": {"type": "string"}},
-        "required": ["query"],
-    },
-}
-
-# --- Context tools: L1/L2/L3 on demand instead of injected into every system
-# prompt whether the turn needs them or not (see mentor_v1.md's "Context
-# tools" section). No input — each just formats what context_assembler
-# already fetched for this turn (see TopicChatService._execute_loop_tool),
-# no extra DB round trip.
-_GET_USER_PROFILE_TOOL = {
-    "name": "get_user_profile",
-    "description": (
-        "Get the user's learning-context facts (background, goals, "
-        "experience) and observed teaching-style notes. Call this if you "
-        "need to tailor an explanation or example to who the user is or "
-        "how they like to learn."
-    ),
-    "input_schema": {"type": "object", "properties": {}},
-}
-
-_GET_SKILL_STATE_TOOL = {
-    "name": "get_skill_state",
-    "description": (
-        "Get this topic's per-subtopic mastery levels and the specific "
-        "concepts already taught in this topic. Call this before deciding "
-        "how much to re-explain or how to calibrate difficulty."
-    ),
-    "input_schema": {"type": "object", "properties": {}},
-}
-
-_GET_PAST_SESSIONS_TOOL = {
-    "name": "get_past_sessions",
-    "description": (
-        "Get narrative summaries of this topic's own prior closed sessions. "
-        "Call this if the user references something discussed before in "
-        "this topic, or you need continuity with earlier sessions here."
-    ),
-    "input_schema": {"type": "object", "properties": {}},
-}
-
-_LOOP_TOOL_NAMES = {
-    _SEARCH_DOCUMENTS_TOOL["name"],
-    _SEARCH_OTHER_TOPICS_TOOL["name"],
-    _GET_USER_PROFILE_TOOL["name"],
-    _GET_SKILL_STATE_TOOL["name"],
-    _GET_PAST_SESSIONS_TOOL["name"],
-}
+# Tools themselves live in mentor_tools.py. The verdict tool is bound only in
+# DIAGNOSTIC mode, with tool_choice "auto" (not forced) so one response can
+# carry both the reply text and, once there's enough signal, the verdict.
+# It's never a loop tool: calling it ends the turn and its write is deferred
+# until after the stream.
 
 # One tool-decision round, then one forced-final-answer round. Keeps worst
 # case latency to 2 model calls instead of unbounded looping.
@@ -347,48 +235,56 @@ class TopicChatService:
         final_tool_calls: list[dict] = []
         start = time.monotonic()
 
+        turn = mentor_tools.TurnState(user_id=user_id, topic_title=topic_title, context=context)
+        # Final round drops the loop tools so the model has to answer instead
+        # of asking for more. Bind order matches the pre-toolkit order, which
+        # keeps the prompt-cache prefix stable.
+        final_round_tools: list = [_WEB_SEARCH_TOOL]
+        if include_diagnostic_tool:
+            final_round_tools.append(mentor_tools.DIAGNOSTIC_VERDICT_TOOL)
+        loop_round_tools = [_WEB_SEARCH_TOOL, *mentor_tools.LOOP_TOOLS, *final_round_tools[1:]]
+
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages, summary_blocks)
-            tools = [
-                _WEB_SEARCH_TOOL, _SEARCH_DOCUMENTS_TOOL, _SEARCH_OTHER_TOPICS_TOOL,
-                _GET_USER_PROFILE_TOOL, _GET_SKILL_STATE_TOOL, _GET_PAST_SESSIONS_TOOL,
-            ]
-            if include_diagnostic_tool:
-                tools.append(_DIAGNOSTIC_VERDICT_TOOL)
 
             for round_idx in range(_MAX_LOOP_ROUNDS):
-                round_tools = tools
-                if round_idx == _MAX_LOOP_ROUNDS - 1:
-                    # Final round: strip loop tools so the model is forced to
-                    # answer instead of asking for more.
-                    round_tools = [t for t in tools if t["name"] not in _LOOP_TOOL_NAMES]
-
+                is_final_round = round_idx == _MAX_LOOP_ROUNDS - 1
                 llm = ChatAnthropic(
-                    model="claude-sonnet-5",
+                    model=_MENTOR_MODEL,
                     max_tokens=8192,
                     thinking={"type": "adaptive"},
                     output_config={"effort": "high"},
                     api_key=get_settings().ANTHROPIC_API_KEY,
-                ).bind_tools(round_tools, tool_choice="auto")
+                ).bind_tools(final_round_tools if is_final_round else loop_round_tools, tool_choice="auto")
 
                 accumulated = None
-                async for chunk in llm.astream(lc_messages):
-                    if time.monotonic() - start > LLM_TIMEOUT_SECONDS:
-                        raise TimeoutError("mentor stream exceeded time budget")
-                    accumulated = chunk if accumulated is None else accumulated + chunk
-                    for block in self._text_blocks(chunk.content):
-                        full_text += block
-                        pending += block
-                        fence_pos = pending.find(_FENCE_START)
-                        flush_len = fence_pos if fence_pos != -1 else len(pending) - _STREAM_TRAIL_BUFFER
-                        if flush_len > 0:
-                            yield pending[:flush_len]
-                            pending = pending[flush_len:]
+                round_text = ""
+                round_start = time.monotonic()
+                try:
+                    async for chunk in llm.astream(lc_messages):
+                        if time.monotonic() - start > LLM_TIMEOUT_SECONDS:
+                            raise TimeoutError("mentor stream exceeded time budget")
+                        accumulated = chunk if accumulated is None else accumulated + chunk
+                        for block in self._text_blocks(chunk.content):
+                            full_text += block
+                            round_text += block
+                            pending += block
+                            fence_pos = pending.find(_FENCE_START)
+                            flush_len = fence_pos if fence_pos != -1 else len(pending) - _STREAM_TRAIL_BUFFER
+                            if flush_len > 0:
+                                yield pending[:flush_len]
+                                pending = pending[flush_len:]
+                except Exception as e:
+                    await self._trace_round(user_id, lc_messages, round_text, str(e), round_start)
+                    raise
+                # ponytail: awaited insert, after the round's stream so first-token
+                # latency is untouched; move to a background task if it shows up.
+                await self._trace_round(user_id, lc_messages, round_text, None, round_start)
 
                 tool_calls = accumulated.tool_calls if accumulated else []
-                loop_calls = [tc for tc in tool_calls if tc["name"] in _LOOP_TOOL_NAMES]
+                loop_calls = [tc for tc in tool_calls if tc["name"] in mentor_tools.LOOP_TOOL_NAMES]
 
-                if not loop_calls or round_idx == _MAX_LOOP_ROUNDS - 1:
+                if not loop_calls or is_final_round:
                     final_tool_calls = tool_calls
                     break
 
@@ -409,9 +305,7 @@ class TopicChatService:
                     # to every context-tool call for an indicator that still
                     # wouldn't show. Left as-is: those three just won't show a
                     # live indicator, only a result.
-                    result_text = await self._execute_loop_tool(
-                        tc["name"], tc.get("args") or {}, user_id, context
-                    )
+                    result_text = await mentor_tools.run_tool(tc["name"], tc.get("args") or {}, turn)
                     yield _TOOL_MARKER + json.dumps({"phase": "end", "name": tc["name"]}) + "\n"
                     lc_messages.append(ToolMessage(content=result_text, tool_call_id=tc["id"]))
 
@@ -424,9 +318,16 @@ class TopicChatService:
             return
 
         # Diagnostic verdict write-back (Req: populates subtopic_mastery so
-        # the cold-start gate stops firing on the next message).
+        # the cold-start gate stops firing on the next message). Best-effort:
+        # run_tool never raises, and the periodic skill checkpoint
+        # (extract_skill_updates_only) is the backstop if this write is lost.
         if include_diagnostic_tool:
-            await self._apply_diagnostic_verdict(final_tool_calls, user_id, topic_title)
+            verdict = next(
+                (tc for tc in final_tool_calls if tc["name"] == mentor_tools.DIAGNOSTIC_VERDICT_TOOL.name),
+                None,
+            )
+            if verdict:
+                await mentor_tools.run_tool(verdict["name"], verdict.get("args") or {}, turn)
 
         # Strip the suggestions fence out of the visible text before
         # persisting, then flush whatever clean tail wasn't shown yet.
@@ -520,50 +421,31 @@ class TopicChatService:
             if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
         ]
 
-    async def _execute_loop_tool(
-        self, name: str, tool_input: dict, user_id: str, context: dict
-    ) -> str:
-        """Run a loop tool locally and return its result as plain text for
-        the model. Fail-open on any error — matches context_assembler.py's
-        pattern, a lookup miss shouldn't break the turn.
-
-        The three get_* tools don't hit the DB here — context_assembler
-        already fetched everything for this turn; they just format the
-        relevant slice of it on demand instead of it being injected into
-        every system prompt unconditionally (see mentor_v1.md)."""
-        try:
-            if name == "search_documents":
-                results = await vector_search(
-                    tool_input.get("query", ""), user_id, source="ingestion", limit=5
-                )
-                return self._format_search_results(results, empty_msg="No matching documents found.")
-            if name == "search_other_topics":
-                results = await vector_search(
-                    tool_input.get("query", ""), user_id, source="summary_block", limit=5
-                )
-                return self._format_search_results(results, empty_msg="No matching past sessions found.")
-            if name == "get_user_profile":
-                profile = context.get("profile", {})
-                learning_context = prompt_store.format_learning_context(profile, context.get("l1_scope"))
-                style_notes = prompt_store.format_style_notes(profile.get("style_notes") or [])
-                return f"Learning Context: {learning_context}\n\nTeaching style notes:\n{style_notes}"
-            if name == "get_skill_state":
-                skill = context.get("skill", {})
-                mastery = prompt_store.format_subtopic_mastery(skill.get("subtopic_mastery"))
-                taught = prompt_store.format_taught_concepts(context.get("taught_concepts"))
-                return f"Subtopic Mastery:\n{mastery}\n\nAlready Taught In This Topic:\n{taught}"
-            if name == "get_past_sessions":
-                return prompt_store.format_summary_blocks(context.get("summary_blocks"))
-            return f"Unknown tool: {name}"
-        except Exception as e:
-            logger.warning("Loop tool %s failed for user=%s: %s", name, user_id, e)
-            return f"Lookup failed for {name} — proceed without this information."
+    async def _trace_round(
+        self, user_id: str, lc_messages: list, round_text: str, error: str | None, round_start: float
+    ) -> None:
+        """One trace per model round. `prompt` is what's new this round: the
+        latest user message plus any tool results fed back into it. The full
+        message list would truncate to mostly the static system prompt."""
+        new_parts: list[str] = []
+        for message in reversed(lc_messages):
+            if isinstance(message, ToolMessage):
+                new_parts.append(self._message_text(message.content))
+            elif isinstance(message, HumanMessage):
+                new_parts.append(self._message_text(message.content))
+                break
+        await write_trace(
+            "topic_chat_service.mentor_round", _MENTOR_MODEL, user_id,
+            "\n\n".join(reversed(new_parts)),
+            response=round_text, error=error,
+            duration_ms=int((time.monotonic() - round_start) * 1000),
+        )
 
     @staticmethod
-    def _format_search_results(results: list[dict], empty_msg: str) -> str:
-        if not results:
-            return empty_msg
-        return "\n\n".join(r.get("text", "") for r in results)
+    def _message_text(content) -> str:
+        if isinstance(content, str):
+            return content
+        return "".join(block.get("text", "") for block in content if isinstance(block, dict))
 
     def _to_langchain_messages(
         self, system_prompt: str, messages: list[dict], summary_blocks: list[dict] | None = None
@@ -577,33 +459,6 @@ class TopicChatService:
             msg_cls = HumanMessage if m["role"] == "user" else AIMessage
             lc_messages.append(msg_cls(content=m["content"]))
         return lc_messages
-
-    async def _apply_diagnostic_verdict(
-        self, tool_calls: list[dict], user_id: str, topic_title: str
-    ) -> None:
-        """If the mentor called record_diagnostic_verdict this turn, write it
-        to the skill graph. Best-effort: a failure here shouldn't break the
-        turn — the periodic skill checkpoint (extract_skill_updates_only)
-        is the backstop if this write is lost.
-        """
-        verdict = next(
-            (tc for tc in tool_calls if tc["name"] == "record_diagnostic_verdict"),
-            None,
-        )
-        if not verdict:
-            return
-
-        try:
-            raw_updates = (verdict.get("args") or {}).get("subtopic_updates") or []
-            validated = await validate_subtopic_updates(topic_title, raw_updates)
-            await skill_graph_repo.apply_update(user_id, topic_title, validated)
-        except Exception as e:
-            logger.warning(
-                "Diagnostic verdict write failed for topic=%s user=%s: %s",
-                topic_title,
-                user_id,
-                str(e),
-            )
 
     def _build_system_blocks(self, system_prompt: str) -> list[dict]:
         """Split the system prompt into three cache blocks, most-stable first,

@@ -21,20 +21,20 @@ change.
     - `traced_messages_create` still writes one trace with truncated text
     - _Requirements: 7.3, 7.4_
 
-- [ ] 2. Create `app/services/mentor_tools.py`
-  - [ ] 2.1 `TurnState` frozen dataclass (`user_id`, `topic_title`, `context`)
+- [x] 2. Create `app/services/mentor_tools.py`
+  - [x] 2.1 `TurnState` frozen dataclass (`user_id`, `topic_title`, `context`)
     - _Requirements: 3.1, 3.2, 3.4_
-  - [ ] 2.2 Five loop tools via `@tool(name, description=CONST)` with
+  - [x] 2.2 Five loop tools via `@tool(name, description=CONST)` with
     `turn: Annotated[TurnState, InjectedToolArg]`; descriptions copied
     verbatim; bodies moved from `_execute_loop_tool`
     - _Requirements: 1.1, 2.1, 2.2, 2.3, 4.1, 4.2, 4.3_
-  - [ ] 2.3 `record_diagnostic_verdict` with dict `args_schema` (exact
+  - [x] 2.3 `record_diagnostic_verdict` with dict `args_schema` (exact
     current schema), `**_model_extras`; validates via
     `validate_subtopic_updates`, writes via `skill_graph_repo.apply_update`
     - _Requirements: 2.3, 6.3, 6.4_
-  - [ ] 2.4 `LOOP_TOOLS`, `LOOP_TOOL_NAMES`, `DIAGNOSTIC_VERDICT_TOOL`
+  - [x] 2.4 `LOOP_TOOLS`, `LOOP_TOOL_NAMES`, `DIAGNOSTIC_VERDICT_TOOL`
     - _Requirements: 1.3_
-  - [ ] 2.5 `run_tool(name, args, turn)`: lookup, inject `turn` last,
+  - [x] 2.5 `run_tool(name, args, turn)`: lookup, inject `turn` last,
     fail-open text, unknown-tool text, one `mentor_tool.<name>` trace per
     execution (model args only in `prompt`)
     - _Requirements: 3.3, 4.4, 4.5, 6.5, 7.2, 7.3, 7.4_

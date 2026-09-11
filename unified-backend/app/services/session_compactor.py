@@ -30,6 +30,7 @@ from app.config.settings import get_settings
 from app.models.skill import SubtopicMasteryUpdate
 from app.services.llm_trace import traced_messages_create
 from app.services.profiling_agent import propose_changes as propose_profile_changes
+from app.services.skill_graph_repo import fetch_skill_node
 from app.services.token_counter import TokenCounter
 from app.services.vector_search import delete_vectors, embed_and_upsert
 
@@ -340,9 +341,7 @@ async def _apply_taught_concepts(topic_title: str, user_id: str, new_concepts: l
     skill_graph document exists for it. Best-effort: a failure here never
     blocks the write it rides alongside."""
     try:
-        skill = await skill_graph_col().find_one(
-            {"user_id": user_id, "topic": topic_title}, {"_id": 0, "taught_concepts": 1},
-        )
+        skill = await fetch_skill_node(user_id, topic_title, {"_id": 0, "taught_concepts": 1})
         existing = (skill or {}).get("taught_concepts") or []
         merged = existing + [c for c in new_concepts if c not in existing]
         merged = merged[-MAX_TAUGHT_CONCEPTS:]

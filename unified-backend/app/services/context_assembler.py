@@ -20,10 +20,8 @@ from fastapi import HTTPException, status
 
 from app.services.token_budget import count_tokens
 
-from app.config.database import (
-    profiles_col,
-    skill_graph_col,
-)
+from app.config.database import profiles_col
+from app.services.skill_graph_repo import fetch_skill_node
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +73,7 @@ async def assemble(
     # rather than on the topic itself, since it's "what this user knows
     # about this topic" state, not part of any one topic thread's history.
     try:
-        skill = await skill_graph_col().find_one(
-            {"user_id": user_id, "topic": topic}, {"_id": 0}
-        )
+        skill = await fetch_skill_node(user_id, topic, {"_id": 0})
     except Exception as e:
         logger.warning("Skill graph fetch failed for user=%s topic=%s: %s", user_id, topic, e)
         skill = None

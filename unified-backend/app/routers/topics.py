@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.auth.dependencies import require_auth
-from app.config.database import skill_graph_col, topics_col, weight_nudges_col
+from app.config.database import topics_col, weight_nudges_col
 from app.models.chat import MentorMode
 from app.services.extraction import process_topic_document
 from app.services.file_upload import store_file, validate_files
@@ -28,6 +28,7 @@ from app.services.topic_chat_service import TopicChatService
 from app.services.topic_router import route_topic
 from app.services.session_boundary import close_session_for_topic
 from app.services.subtopic_weights import derive_subtopic_weights, get_subtopics
+from app.services.skill_graph_repo import fetch_skill_node
 
 router = APIRouter(prefix="/api", tags=["Topics"])
 
@@ -366,9 +367,7 @@ async def get_subtopic_weights(
     # Real (non-LLM-estimated) per-subtopic history, independent of the
     # goal_intent cache below — always current, so it's looked up fresh on
     # every call rather than cached on the topic doc.
-    skill_node = await skill_graph_col().find_one(
-        {"user_id": user_id, "topic": topic["title"]}, {"subtopic_last_studied": 1}
-    )
+    skill_node = await fetch_skill_node(user_id, topic["title"], {"subtopic_last_studied": 1})
     subtopic_last_studied = (skill_node or {}).get("subtopic_last_studied") or None
 
     cacheable = (

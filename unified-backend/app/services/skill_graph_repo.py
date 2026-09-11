@@ -8,11 +8,19 @@ called it (diagnostic verdict, compaction extraction).
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from app.config.database import skill_graph_col
 from app.models.skill import SubtopicMasteryUpdate
 
 logger = logging.getLogger(__name__)
+
+
+async def fetch_skill_node(
+    user_id: str, topic: str, projection: dict[str, int] | None = None
+) -> dict[str, Any] | None:
+    """Fetch a skill graph node by (user_id, topic), or None if it doesn't exist yet."""
+    return await skill_graph_col().find_one({"user_id": user_id, "topic": topic}, projection)
 
 
 async def apply_update(

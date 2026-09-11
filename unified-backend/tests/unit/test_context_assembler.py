@@ -22,7 +22,7 @@ class TestAssemble:
                 "app.services.context_assembler.profiles_col"
             ) as mock_profiles,
             patch(
-                "app.services.context_assembler.skill_graph_col"
+                "app.services.skill_graph_repo.skill_graph_col"
             ) as mock_skills,
         ):
             mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)
@@ -58,7 +58,7 @@ class TestAssemble:
                 "app.services.context_assembler.profiles_col"
             ) as mock_profiles,
             patch(
-                "app.services.context_assembler.skill_graph_col"
+                "app.services.skill_graph_repo.skill_graph_col"
             ) as mock_skills,
         ):
             mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)
@@ -82,7 +82,7 @@ class TestAssemble:
                 "app.services.context_assembler.profiles_col"
             ) as mock_profiles,
             patch(
-                "app.services.context_assembler.skill_graph_col"
+                "app.services.skill_graph_repo.skill_graph_col"
             ) as mock_skills,
         ):
             mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)
@@ -108,7 +108,7 @@ class TestAssemble:
                 "app.services.context_assembler.profiles_col"
             ) as mock_profiles,
             patch(
-                "app.services.context_assembler.skill_graph_col"
+                "app.services.skill_graph_repo.skill_graph_col"
             ) as mock_skills,
         ):
             mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)
@@ -128,7 +128,7 @@ class TestAssemble:
                 "app.services.context_assembler.profiles_col"
             ) as mock_profiles,
             patch(
-                "app.services.context_assembler.skill_graph_col"
+                "app.services.skill_graph_repo.skill_graph_col"
             ) as mock_skills,
         ):
             mock_profiles.return_value.find_one = AsyncMock(return_value=mock_profile)

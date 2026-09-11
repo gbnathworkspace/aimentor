@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import anthropic
 
-from app.config.database import sessions_col, skill_graph_col
+from app.config.database import sessions_col
 from app.config.settings import get_settings
 from app.models.session import (
     Message,
@@ -35,6 +35,7 @@ from app.services.message_store import MessageStore
 from app.services.profiling_agent import propose_changes as propose_profile_changes
 from app.services.session_manager import SessionManager
 from app.services.skill_graph_repo import apply_update as _apply_skill_graph_update
+from app.services.skill_graph_repo import fetch_skill_node
 
 logger = logging.getLogger(__name__)
 
@@ -337,9 +338,7 @@ class SessionSaveHandler:
         # Anchor grading to the student's current level (default beginner for a
         # brand-new topic) so new_level is rubric-graded, not an unguided guess.
         transcript = _truncate_transcript(messages)
-        existing = await skill_graph_col().find_one(
-            {"user_id": user_id, "topic": topic}, {"current_level": 1, "_id": 0}
-        )
+        existing = await fetch_skill_node(user_id, topic, {"current_level": 1, "_id": 0})
         current_level = (existing or {}).get("current_level", "beginner")
         prompt = _build_combined_prompt(transcript, topic, mode, current_level)
 

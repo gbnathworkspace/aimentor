@@ -18,9 +18,13 @@ from app.services.session_compactor import MAX_TAUGHT_CONCEPTS, _apply_taught_co
 class TestApplyTaughtConcepts:
     @pytest.mark.asyncio
     async def test_appends_new_concepts_to_empty_list(self):
-        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
+        with (
+            patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph,
+            patch("app.services.skill_graph_repo.skill_graph_col") as mock_skill_graph_repo,
+        ):
             mock_col = MagicMock()
             mock_skill_graph.return_value = mock_col
+            mock_skill_graph_repo.return_value = mock_col
             mock_col.find_one = AsyncMock(return_value={"taught_concepts": []})
             mock_col.update_one = AsyncMock()
 
@@ -34,9 +38,13 @@ class TestApplyTaughtConcepts:
 
     @pytest.mark.asyncio
     async def test_deduplicates_against_existing(self):
-        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
+        with (
+            patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph,
+            patch("app.services.skill_graph_repo.skill_graph_col") as mock_skill_graph_repo,
+        ):
             mock_col = MagicMock()
             mock_skill_graph.return_value = mock_col
+            mock_skill_graph_repo.return_value = mock_col
             mock_col.find_one = AsyncMock(return_value={"taught_concepts": ["Signed URLs in CloudFront"]})
             mock_col.update_one = AsyncMock()
 
@@ -50,9 +58,13 @@ class TestApplyTaughtConcepts:
     @pytest.mark.asyncio
     async def test_caps_at_max_dropping_oldest(self):
         existing = [f"concept-{i}" for i in range(MAX_TAUGHT_CONCEPTS)]
-        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
+        with (
+            patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph,
+            patch("app.services.skill_graph_repo.skill_graph_col") as mock_skill_graph_repo,
+        ):
             mock_col = MagicMock()
             mock_skill_graph.return_value = mock_col
+            mock_skill_graph_repo.return_value = mock_col
             mock_col.find_one = AsyncMock(return_value={"taught_concepts": existing})
             mock_col.update_one = AsyncMock()
 
@@ -68,9 +80,13 @@ class TestApplyTaughtConcepts:
     async def test_no_existing_skill_graph_doc_upserts(self):
         """No skill_graph node exists yet for this (user, topic) — the write
         still lands, creating one, rather than being skipped."""
-        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
+        with (
+            patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph,
+            patch("app.services.skill_graph_repo.skill_graph_col") as mock_skill_graph_repo,
+        ):
             mock_col = MagicMock()
             mock_skill_graph.return_value = mock_col
+            mock_skill_graph_repo.return_value = mock_col
             mock_col.find_one = AsyncMock(return_value=None)
             mock_col.update_one = AsyncMock()
 
@@ -85,9 +101,13 @@ class TestApplyTaughtConcepts:
     @pytest.mark.asyncio
     async def test_db_failure_is_swallowed(self):
         """Best-effort — never raises out of the post-turn hook."""
-        with patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph:
+        with (
+            patch("app.services.session_compactor.skill_graph_col") as mock_skill_graph,
+            patch("app.services.skill_graph_repo.skill_graph_col") as mock_skill_graph_repo,
+        ):
             mock_col = MagicMock()
             mock_skill_graph.return_value = mock_col
+            mock_skill_graph_repo.return_value = mock_col
             mock_col.find_one = AsyncMock(side_effect=RuntimeError("db down"))
 
             await _apply_taught_concepts("Topic 1", "user-1", ["x"])  # must not raise

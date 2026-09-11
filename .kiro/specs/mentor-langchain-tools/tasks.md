@@ -11,12 +11,12 @@ change.
 
 ## Tasks
 
-- [ ] 1. Make trace writing shareable (`app/services/llm_trace.py`)
-  - [ ] 1.1 Rename `_write_trace` → `write_trace`; move truncation inside it
+- [x] 1. Make trace writing shareable (`app/services/llm_trace.py`)
+  - [x] 1.1 Rename `_write_trace` → `write_trace`; move truncation inside it
     (prompt, and response when not `None`); drop truncation from
     `_extract_prompt_text` / `_extract_response_text`
     - _Requirements: 7.3, 7.4_
-  - [ ] 1.2 Add `tests/unit/test_llm_trace.py`
+  - [x] 1.2 Add `tests/unit/test_llm_trace.py`
     - `write_trace` truncates prompt/response; swallows a DB error
     - `traced_messages_create` still writes one trace with truncated text
     - _Requirements: 7.3, 7.4_

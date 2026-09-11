@@ -35,14 +35,13 @@ def _extract_prompt_text(messages: list[dict]) -> str:
             parts.append("".join(
                 block.get("text", "") for block in content if isinstance(block, dict)
             ))
-    return _truncate("\n\n".join(parts))
+    return "\n\n".join(parts)
 
 
 def _extract_response_text(response: Any) -> str:
-    text = "".join(
+    return "".join(
         block.text for block in response.content if getattr(block, "type", None) == "text"
     )
-    return _truncate(text)
 
 
 async def traced_messages_create(client, *, call_site: str, user_id: str | None = None, **kwargs):
@@ -61,14 +60,14 @@ async def traced_messages_create(client, *, call_site: str, user_id: str | None 
     try:
         response = await client.messages.create(**kwargs)
     except Exception as e:
-        await _write_trace(
+        await write_trace(
             call_site, kwargs.get("model", ""), user_id, prompt,
             response=None, error=str(e),
             duration_ms=int((time.monotonic() - start) * 1000),
         )
         raise
 
-    await _write_trace(
+    await write_trace(
         call_site, kwargs.get("model", ""), user_id, prompt,
         response=_extract_response_text(response), error=None,
         duration_ms=int((time.monotonic() - start) * 1000),
@@ -76,17 +75,18 @@ async def traced_messages_create(client, *, call_site: str, user_id: str | None 
     return response
 
 
-async def _write_trace(
+async def write_trace(
     call_site: str, model: str, user_id: str | None, prompt: str,
     *, response: str | None, error: str | None, duration_ms: int,
 ) -> None:
+    """Persist one trace document. Never raises."""
     try:
         await llm_traces_col().insert_one({
             "call_site": call_site,
             "model": model,
             "user_id": user_id,
-            "prompt": prompt,
-            "response": response,
+            "prompt": _truncate(prompt),
+            "response": _truncate(response) if response is not None else None,
             "error": error,
             "duration_ms": duration_ms,
             "created_at": datetime.now(timezone.utc),

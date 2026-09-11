@@ -77,15 +77,15 @@ change.
     stream
     - _Requirements: 7.1, 7.4, 7.5, 7.6_
 
-- [ ] 5. Update `tests/unit/test_topic_chat_service.py`
+- [x] 5. Update `tests/unit/test_topic_chat_service.py`
   - [x] 5.1 Retarget verdict patches to `app.services.mentor_tools`; make the
     bound-tool name assertion handle `BaseTool`s; remove `TestContextTools`
     (moved in 3.3)
     - _Requirements: 8.2_
-  - [ ] 5.2 New: final round binds only `web_search` (+ verdict in
+  - [x] 5.2 New: final round binds only `web_search` (+ verdict in
     diagnostic); `web_search` bound every round
     - _Requirements: 5.1, 5.2_
-  - [ ] 5.3 New: one `mentor_round` trace per round; round 1 prompt carries
+  - [x] 5.3 New: one `mentor_round` trace per round; round 1 prompt carries
     the tool result; raising round traced with `error`
     - _Requirements: 7.1_
 

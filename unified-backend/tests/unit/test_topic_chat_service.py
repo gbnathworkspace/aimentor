@@ -844,3 +844,133 @@ class TestToolLoop:
         assert start_marker in full
         assert end_marker in full
         assert full.index(start_marker) < full.index(end_marker) < full.index("Final answer.")
+
+
+_LOOP_TOOLS_IN_BIND_ORDER = [
+    "search_documents", "search_other_topics", "get_user_profile", "get_skill_state", "get_past_sessions",
+]
+
+
+def _two_round_turn_mocks():
+    """Round 0 calls get_past_sessions; round 1 answers."""
+    round0 = [_chunk("", [_tool_call("get_past_sessions", {})])]
+    round1 = [_chunk("Final answer.")]
+    return _mock_chat_anthropic([round0, round1])
+
+
+_CONTEXT_WITH_SUMMARY = {
+    "profile": {}, "skill": {}, "summary_blocks": [{"text": "prior session", "createdAt": "2025-01-01"}],
+}
+
+
+class TestRoundTools:
+    """Which tools each round binds: web_search every round, loop tools only
+    on non-final rounds, the verdict tool only in DIAGNOSTIC mode."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_diagnostic_final_round_keeps_only_web_search_and_verdict(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        mock_assembler.assemble = AsyncMock(return_value=_CONTEXT_WITH_SUMMARY)
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        mock_cls = _two_round_turn_mocks()
+        with patch("app.services.topic_chat_service.ChatAnthropic", mock_cls):
+            result = await chat_service.handle_message("topic-abc", "user-123", "what did we cover?", mode="topic")
+            await _collect_stream(result)
+
+        rounds = [_tool_names(c[0][0]) for c in mock_cls.return_value.bind_tools.call_args_list]
+        assert rounds == [
+            ["web_search", *_LOOP_TOOLS_IN_BIND_ORDER, "record_diagnostic_verdict"],
+            ["web_search", "record_diagnostic_verdict"],
+        ]
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_non_diagnostic_final_round_keeps_only_web_search(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        mock_assembler.assemble = AsyncMock(return_value={**_CONTEXT_WITH_SUMMARY, "skill": {"subtopic_mastery": {"A": 50}}})
+        mock_get_prompt.return_value = "direct prompt"
+
+        from app.services.mode_router import MatchedRule, MentorMode, RouterDecision
+
+        decision = RouterDecision(
+            matched_rule=MatchedRule.RULE_2_URGENCY_DIRECT,
+            selected_mode=MentorMode.DIRECT,
+            reasoning="r",
+            instruction_override="",
+        )
+        mock_cls = _two_round_turn_mocks()
+        with patch("app.services.topic_chat_service.ChatAnthropic", mock_cls), patch(
+            "app.services.topic_chat_service.mode_router.route_user_turn", AsyncMock(return_value=decision),
+        ):
+            result = await chat_service.handle_message("topic-abc", "user-123", "what did we cover?", mode="topic")
+            await _collect_stream(result)
+
+        rounds = [_tool_names(c[0][0]) for c in mock_cls.return_value.bind_tools.call_args_list]
+        assert rounds == [["web_search", *_LOOP_TOOLS_IN_BIND_ORDER], ["web_search"]]
+
+
+class TestRoundTracing:
+    """One topic_chat_service.mentor_round trace per model round."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_one_trace_per_round_and_second_prompt_carries_tool_result(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        mock_assembler.assemble = AsyncMock(return_value=_CONTEXT_WITH_SUMMARY)
+        mock_get_prompt.return_value = "diagnostic prompt"
+
+        with patch("app.services.topic_chat_service.ChatAnthropic", _two_round_turn_mocks()), patch(
+            "app.services.topic_chat_service.write_trace", new_callable=AsyncMock,
+        ) as round_trace, patch("app.services.mentor_tools.write_trace", new_callable=AsyncMock):
+            result = await chat_service.handle_message("topic-abc", "user-123", "what did we cover?", mode="topic")
+            await _collect_stream(result)
+
+        assert round_trace.await_count == 2
+        (first, second) = round_trace.call_args_list
+        for call in (first, second):
+            call_site, model, user_id, _ = call.args
+            assert (call_site, model, user_id) == ("topic_chat_service.mentor_round", "claude-sonnet-5", "user-123")
+            assert call.kwargs["error"] is None
+
+        assert "what did we cover?" in first.args[3]
+        assert "prior session" not in first.args[3]
+        assert "what did we cover?" in second.args[3]
+        assert "prior session" in second.args[3]
+        assert first.kwargs["response"] == ""
+        assert second.kwargs["response"] == "Final answer."
+
+    @pytest.mark.asyncio
+    @patch("app.services.topic_chat_service.context_assembler")
+    @patch("app.services.topic_chat_service.get_system_prompt")
+    async def test_raising_round_is_traced_with_error_and_still_yields_error_marker(
+        self, mock_get_prompt, mock_assembler, chat_service
+    ):
+        mock_assembler.assemble = AsyncMock(return_value={"profile": {}, "skill": {}})
+        mock_get_prompt.return_value = "prompt"
+
+        async def _raising_astream(*args, **kwargs):
+            raise RuntimeError("Anthropic API error: rate limit")
+            yield  # pragma: no cover - makes this an async generator
+
+        mock_llm = MagicMock()
+        mock_llm.astream = MagicMock(side_effect=_raising_astream)
+        cls = MagicMock()
+        cls.return_value.bind_tools.return_value = mock_llm
+
+        with patch("app.services.topic_chat_service.ChatAnthropic", cls), patch(
+            "app.services.topic_chat_service.write_trace", new_callable=AsyncMock,
+        ) as round_trace:
+            result = await chat_service.handle_message("topic-abc", "user-123", "Hello")
+            full = await _collect_stream(result)
+
+        assert "[error: the mentor response was interrupted" in full
+        round_trace.assert_awaited_once()
+        assert "rate limit" in round_trace.call_args.kwargs["error"]

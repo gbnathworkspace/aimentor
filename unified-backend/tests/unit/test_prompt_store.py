@@ -8,11 +8,11 @@ from app.services.prompt_store import (
     clear_cache,
     get_onboarding_prompt,
     get_system_prompt,
-    _format_learning_context,
-    _format_style_notes,
-    _format_subtopic_mastery,
-    _format_summary_blocks,
-    _format_taught_concepts,
+    format_learning_context,
+    format_style_notes,
+    format_subtopic_mastery,
+    format_summary_blocks,
+    format_taught_concepts,
     _interpolate,
 )
 
@@ -95,7 +95,7 @@ class TestGetSystemPrompt:
 
 
 class TestFormatLearningContext:
-    """Topic Scoping: l1_scope filters _format_learning_context's output."""
+    """Topic Scoping: l1_scope filters format_learning_context's output."""
 
     @pytest.fixture
     def profile(self):
@@ -113,13 +113,13 @@ class TestFormatLearningContext:
         return {"situation": text, "verdict": verdict, "reason": "because"}
 
     def test_l1_scope_none_is_unfiltered(self, profile):
-        result = _format_learning_context(profile, l1_scope=None)
+        result = format_learning_context(profile, l1_scope=None)
         assert "preparing for interview backend engineer" in result
         assert "casually looking for frontend" in result
         assert "senior backend, Mumbai" in result
 
     def test_l1_scope_empty_list_is_not_specified(self, profile):
-        assert _format_learning_context(profile, l1_scope=[]) == "Not specified"
+        assert format_learning_context(profile, l1_scope=[]) == "Not specified"
 
     def test_l1_scope_filters_to_relevant_only(self, profile):
         l1_scope = [
@@ -127,7 +127,7 @@ class TestFormatLearningContext:
             self._judgment("casually looking for frontend", "irrelevant"),
             self._judgment("senior backend, Mumbai", "relevant"),
         ]
-        result = _format_learning_context(profile, l1_scope=l1_scope)
+        result = format_learning_context(profile, l1_scope=l1_scope)
         assert "preparing for interview backend engineer" in result
         assert "senior backend, Mumbai" in result
         assert "casually looking for frontend" not in result
@@ -138,7 +138,7 @@ class TestFormatLearningContext:
             self._judgment("casually looking for frontend", "irrelevant"),
             self._judgment("senior backend, Mumbai", "irrelevant"),
         ]
-        assert _format_learning_context(profile, l1_scope=l1_scope) == "Not specified"
+        assert format_learning_context(profile, l1_scope=l1_scope) == "Not specified"
 
     def test_uncertain_is_included_pending_ask_user_flow(self, profile):
         """Interim policy: "uncertain" is included, not dropped — there's no
@@ -151,7 +151,7 @@ class TestFormatLearningContext:
             self._judgment("casually looking for frontend", "irrelevant"),
             self._judgment("senior backend, Mumbai", "irrelevant"),
         ]
-        result = _format_learning_context(profile, l1_scope=l1_scope)
+        result = format_learning_context(profile, l1_scope=l1_scope)
         assert "preparing for interview backend engineer" in result
 
 
@@ -159,11 +159,11 @@ class TestFormatTaughtConcepts:
     """TS-1: episodic memory of specific things taught in this topic."""
 
     def test_empty_or_none_shows_placeholder(self):
-        assert _format_taught_concepts(None) == "(nothing recorded yet)"
-        assert _format_taught_concepts([]) == "(nothing recorded yet)"
+        assert format_taught_concepts(None) == "(nothing recorded yet)"
+        assert format_taught_concepts([]) == "(nothing recorded yet)"
 
     def test_formats_as_bullet_list(self):
-        result = _format_taught_concepts(["Signed URLs in CloudFront", "Signed Cookies in CloudFront"])
+        result = format_taught_concepts(["Signed URLs in CloudFront", "Signed Cookies in CloudFront"])
         assert result == "- Signed URLs in CloudFront\n- Signed Cookies in CloudFront"
 
 
@@ -173,13 +173,13 @@ class TestFormatStyleNotes:
     than injected into every system prompt."""
 
     def test_formats_as_bullet_list(self):
-        result = _format_style_notes(
+        result = format_style_notes(
             [{"category": "communication", "note": "Use code examples, be concise"}]
         )
         assert result == "- [communication] Use code examples, be concise"
 
     def test_empty_shows_placeholder(self):
-        assert _format_style_notes([]) == "(none observed yet)"
+        assert format_style_notes([]) == "(none observed yet)"
 
 
 class TestFormatSubtopicMastery:
@@ -187,12 +187,12 @@ class TestFormatSubtopicMastery:
     injected into every system prompt."""
 
     def test_formats_sorted_weakest_first(self):
-        result = _format_subtopic_mastery({"CAP theorem": 55, "Sharding": 20})
+        result = format_subtopic_mastery({"CAP theorem": 55, "Sharding": 20})
         assert result == "- Sharding: 20%\n- CAP theorem: 55%"
 
     def test_empty_or_none_shows_placeholder(self):
-        assert _format_subtopic_mastery(None) == "(not assessed yet)"
-        assert _format_subtopic_mastery({}) == "(not assessed yet)"
+        assert format_subtopic_mastery(None) == "(not assessed yet)"
+        assert format_subtopic_mastery({}) == "(not assessed yet)"
 
 
 class TestAttemptFirstTeaching:
@@ -253,7 +253,7 @@ class TestFormatSummaryBlocks:
     (session-narrative-summary spec, Requirement 7.1, 7.2)."""
 
     def test_empty_blocks(self):
-        result = _format_summary_blocks(None)
+        result = format_summary_blocks(None)
         assert "no prior sessions" in result.lower()
 
     def test_not_truncated_at_500_words(self):
@@ -262,7 +262,7 @@ class TestFormatSummaryBlocks:
             "blockId": "b1", "text": long_text, "wordCount": 500,
             "createdAt": datetime(2025, 1, 1, tzinfo=timezone.utc),
         }]
-        result = _format_summary_blocks(blocks)
+        result = format_summary_blocks(blocks)
         assert result.strip() == long_text.strip()
         assert "…" not in result
 
@@ -271,7 +271,7 @@ class TestFormatSummaryBlocks:
             {"blockId": "b2", "text": "second", "createdAt": datetime(2025, 1, 2, tzinfo=timezone.utc)},
             {"blockId": "b1", "text": "first", "createdAt": datetime(2025, 1, 1, tzinfo=timezone.utc)},
         ]
-        result = _format_summary_blocks(blocks)
+        result = format_summary_blocks(blocks)
         assert result.index("first") < result.index("second")
 
 

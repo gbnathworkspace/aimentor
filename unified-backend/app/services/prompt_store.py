@@ -141,7 +141,7 @@ def _interpolate(template: str, variables: dict[str, str]) -> str:
     return re.sub(r"\{\{(\w+)\}\}", replacer, template)
 
 
-def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | None = None) -> str:
+def format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | None = None) -> str:
     """Format the user's Facts About You, filtered to what's relevant to the
     current topic when a scope is available.
 
@@ -168,7 +168,7 @@ def _format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | Non
     return "; ".join(situations) if situations else "Not specified"
 
 
-def _format_taught_concepts(taught_concepts: list[str] | None) -> str:
+def format_taught_concepts(taught_concepts: list[str] | None) -> str:
     """Format the skill graph's accumulated taught_concepts list (see
     CompactionService._apply_taught_concepts, TS-1) — an L3 episodic memory
     record, scoped to this topic and concept-grained rather than narrative-
@@ -179,7 +179,7 @@ def _format_taught_concepts(taught_concepts: list[str] | None) -> str:
     return "\n".join(f"- {c}" for c in taught_concepts)
 
 
-def _format_style_notes(style_notes: list[dict[str, Any]]) -> str:
+def format_style_notes(style_notes: list[dict[str, Any]]) -> str:
     """Format observed StyleNote entries into a readable bullet list."""
     if not style_notes:
         return "(none observed yet)"
@@ -189,7 +189,7 @@ def _format_style_notes(style_notes: list[dict[str, Any]]) -> str:
     )
 
 
-def _format_summary_blocks(blocks: list[dict[str, Any]] | None) -> str:
+def format_summary_blocks(blocks: list[dict[str, Any]] | None) -> str:
     """Format this topic's own SummaryBlocks (session-narrative-summary spec),
     oldest first (Requirement 7.2), full text, not truncated (Requirement
     7.1) — this topic's sole narrative L3 source."""
@@ -199,7 +199,7 @@ def _format_summary_blocks(blocks: list[dict[str, Any]] | None) -> str:
     return "\n\n".join(b.get("text", "") for b in ordered)
 
 
-def _format_subtopic_mastery(subtopic_mastery: dict[str, float] | None) -> str:
+def format_subtopic_mastery(subtopic_mastery: dict[str, float] | None) -> str:
     """Format the topic's per-subtopic mastery map (see
     .kiro/specs/skill-graph-subtopic-mastery) — replaces the old single
     current_level word with a per-subtopic breakdown, sorted weakest first

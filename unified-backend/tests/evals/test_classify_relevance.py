@@ -87,7 +87,7 @@ async def test_classify_relevance_accuracy():
         judgments = await classify_relevance(case["topic"], [case["text"]])
         verdict = judgments[0]["verdict"]
         # "uncertain" is included, same as production's interim policy
-        # (see prompt_store._format_learning_context) — scored against
+        # (see prompt_store.format_learning_context) — scored against
         # actual system behavior, not treated as automatically wrong.
         got = verdict != "irrelevant"
         correct = got == case["expected_relevant"]

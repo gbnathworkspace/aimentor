@@ -544,16 +544,16 @@ class TopicChatService:
                 return self._format_search_results(results, empty_msg="No matching past sessions found.")
             if name == "get_user_profile":
                 profile = context.get("profile", {})
-                learning_context = prompt_store._format_learning_context(profile, context.get("l1_scope"))
-                style_notes = prompt_store._format_style_notes(profile.get("style_notes") or [])
+                learning_context = prompt_store.format_learning_context(profile, context.get("l1_scope"))
+                style_notes = prompt_store.format_style_notes(profile.get("style_notes") or [])
                 return f"Learning Context: {learning_context}\n\nTeaching style notes:\n{style_notes}"
             if name == "get_skill_state":
                 skill = context.get("skill", {})
-                mastery = prompt_store._format_subtopic_mastery(skill.get("subtopic_mastery"))
-                taught = prompt_store._format_taught_concepts(context.get("taught_concepts"))
+                mastery = prompt_store.format_subtopic_mastery(skill.get("subtopic_mastery"))
+                taught = prompt_store.format_taught_concepts(context.get("taught_concepts"))
                 return f"Subtopic Mastery:\n{mastery}\n\nAlready Taught In This Topic:\n{taught}"
             if name == "get_past_sessions":
-                return prompt_store._format_summary_blocks(context.get("summary_blocks"))
+                return prompt_store.format_summary_blocks(context.get("summary_blocks"))
             return f"Unknown tool: {name}"
         except Exception as e:
             logger.warning("Loop tool %s failed for user=%s: %s", name, user_id, e)

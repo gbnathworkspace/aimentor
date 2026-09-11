@@ -39,22 +39,22 @@ change.
     execution (model args only in `prompt`)
     - _Requirements: 3.3, 4.4, 4.5, 6.5, 7.2, 7.3, 7.4_
 
-- [ ] 3. Add `tests/unit/test_mentor_tools.py`
-  - [ ] 3.1 Golden schema test: frozen copy of today's six tool dicts ==
+- [x] 3. Add `tests/unit/test_mentor_tools.py`
+  - [x] 3.1 Golden schema test: frozen copy of today's six tool dicts ==
     `convert_to_anthropic_tool(t)`; no schema exposes `turn`/`user_id`/`context`
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 3.1, 3.2_
-  - [ ] 3.2 Injection: model-supplied `user_id`/`turn` can't change the
+  - [x] 3.2 Injection: model-supplied `user_id`/`turn` can't change the
     user passed to `vector_search`; concurrent calls stay isolated
     - _Requirements: 3.3, 3.4_
-  - [ ] 3.3 Execution parity: search tools' `source`/`limit`/format/empty
+  - [x] 3.3 Execution parity: search tools' `source`/`limit`/format/empty
     text; context tools' strings + placeholders (moved from
     `TestContextTools`); fail-open; unknown tool
     - _Requirements: 4.1-4.5, 8.1, 8.2_
-  - [ ] 3.4 Verdict: raw updates (incl. out-of-range item) reach
+  - [x] 3.4 Verdict: raw updates (incl. out-of-range item) reach
     `validate_subtopic_updates` unfiltered; `apply_update` gets validated
     list; extra model key doesn't raise
     - _Requirements: 6.3, 6.4_
-  - [ ] 3.5 Tracing: call_site/model/prompt/response on success; `error` on
+  - [x] 3.5 Tracing: call_site/model/prompt/response on success; `error` on
     failure; context never written into `prompt`
     - _Requirements: 7.2, 7.3_
 

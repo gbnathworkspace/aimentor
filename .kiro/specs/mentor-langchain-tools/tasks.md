@@ -89,14 +89,14 @@ change.
     the tool result; raising round traced with `error`
     - _Requirements: 7.1_
 
-- [ ] 6. Docs and stale references
-  - [ ] 6.1 Update `design_decisions/15_llm_orchestration.md`
+- [x] 6. Docs and stale references
+  - [x] 6.1 Update `design_decisions/15_llm_orchestration.md`
     - _Requirements: 9.1, 9.2_
-  - [ ] 6.2 Repoint `_execute_loop_tool` / `_apply_diagnostic_verdict`
+  - [x] 6.2 Repoint `_execute_loop_tool` / `_apply_diagnostic_verdict`
     mentions in `prompt_store.py`, `test_prompt_store.py`,
     `test_subtopic_weights.py`, and `topic_chat_service.py` comments
     - _Requirements: 1.4_
 
-- [ ] 7. Verify
-  - [ ] 7.1 Full unit suite passes (`tests/unit`)
+- [x] 7. Verify
+  - [x] 7.1 Full unit suite passes (`tests/unit`)
     - _Requirements: 8.3_

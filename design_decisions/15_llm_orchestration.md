@@ -1,6 +1,35 @@
 # LLM Orchestration: Direct Anthropic SDK over LangChain
 
-## Decision
+## Update (2026-09-11): where LangChain is used now
+
+The original decision below said "no LangChain". That is no longer
+literally true. Its own first revisit trigger ("Mentor turns become
+agentic") has fired: the mentor now streams, calls tools mid-turn, and
+loops. The current split:
+
+- **Mentor chat loop** (`topic_chat_service.py`): `langchain-anthropic`
+  `ChatAnthropic` for streaming and `bind_tools`, with the six locally
+  executed tools defined as LangChain `@tool`s in `mentor_tools.py`. Per-turn
+  state reaches them through one injected `TurnState` that is kept out of the
+  model-visible schema, so the model can't pick whose data a tool reads.
+- **The loop itself stays hand-rolled.** It is capped at 2 rounds, with the
+  suggestions-fence holdback, `_TOOL_MARKER` stream events, and a time
+  budget. Neither LangGraph nor the SDK's tool runner was adopted; the loop
+  is small and its streaming contract is custom. Revisit if turns need
+  branching, retries, or more than 2 rounds.
+- **Structured-output judgments** (`l1_scope.py`, `fact_quality.py`):
+  `ChatAnthropic.with_structured_output`.
+- **Everything else** (routers, compaction, session save, synthesis,
+  onboarding, subtopic weights): raw SDK through `traced_messages_create`,
+  as below. Forced `tool_use` there is a structured-output technique, not
+  agent tooling, and stays on the SDK.
+- **Tracing** stays in-house: mentor rounds (`topic_chat_service.mentor_round`)
+  and tool executions (`mentor_tool.<name>`) write to the same
+  `llm_traces_col` as `traced_messages_create`. LangSmith is still not used.
+
+See `.kiro/specs/mentor-langchain-tools/`.
+
+## Decision (original)
 All LLM calls go through the direct Anthropic SDK (`anthropic.AsyncAnthropic`).
 No LangChain, no orchestration framework. FastAPI serves HTTP; the SDK talks
 to Claude; everything in between is our own code.

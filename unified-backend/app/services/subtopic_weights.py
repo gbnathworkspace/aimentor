@@ -7,7 +7,6 @@ diagnostic-verdict / compaction skill extractions from writing near-duplicate
 subtopic names into the skill graph (see .kiro/specs/skill-graph-subtopic-mastery).
 """
 
-import json
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ import anthropic
 from app.config.database import subtopic_lists_col
 from app.config.settings import get_settings
 from app.models.skill import SubtopicMasteryUpdate
+from app.services.json_extraction import extract_json_array, extract_json_object
 from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
@@ -145,18 +145,9 @@ async def _decompose_via_llm(topic: str) -> list[str]:
     )
     text = "".join(block.text for block in response.content if block.type == "text").strip()
 
-    try:
-        subtopics = json.loads(text)
-        if isinstance(subtopics, list) and all(isinstance(s, str) for s in subtopics):
-            return subtopics[:9]
-    except json.JSONDecodeError:
-        pass
-
-    start, end = text.find("["), text.rfind("]")
-    if start != -1 and end != -1:
-        subtopics = json.loads(text[start : end + 1])
-        if isinstance(subtopics, list) and all(isinstance(s, str) for s in subtopics):
-            return subtopics[:9]
+    subtopics = extract_json_array(text)
+    if subtopics is not None and all(isinstance(s, str) for s in subtopics):
+        return subtopics[:9]
 
     raise ValueError(f"Could not parse subtopics from LLM response for topic={topic!r}")
 
@@ -276,15 +267,9 @@ async def _score_proficiency_llm(
 
 
 def _parse_json_object(text: str) -> dict:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1:
-        return json.loads(text[start : end + 1])
-
+    obj = extract_json_object(text)
+    if obj is not None:
+        return obj
     raise ValueError(f"Could not parse a JSON object from LLM response: {text[:200]!r}")
 
 

@@ -5,7 +5,6 @@ Provides:
 - bootstrap_skills(user_id, goal, overall_level): async function to generate and persist skill nodes
 """
 
-import json
 import logging
 from typing import Optional
 
@@ -13,6 +12,7 @@ import anthropic
 
 from app.config.database import skill_graph_col
 from app.config.settings import get_settings
+from app.services.json_extraction import extract_json_array
 from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
@@ -148,24 +148,9 @@ async def _generate_topics_via_llm(goal: str) -> list[str]:
 
     text = response.content[0].text.strip()
 
-    # Try to parse the response as JSON array
-    try:
-        topics = json.loads(text)
-        if isinstance(topics, list) and all(isinstance(t, str) for t in topics):
-            return topics[:6]  # Cap at 6 topics
-    except json.JSONDecodeError:
-        pass
-
-    # Fallback: try to extract JSON array from the text
-    start = text.find("[")
-    end = text.rfind("]")
-    if start != -1 and end != -1:
-        try:
-            topics = json.loads(text[start : end + 1])
-            if isinstance(topics, list) and all(isinstance(t, str) for t in topics):
-                return topics[:6]
-        except json.JSONDecodeError:
-            pass
+    topics = extract_json_array(text)
+    if topics is not None and all(isinstance(t, str) for t in topics):
+        return topics[:6]  # Cap at 6 topics
 
     # Last resort: split by newlines and clean up
     lines = [line.strip().strip("-•*").strip() for line in text.split("\n") if line.strip()]

@@ -8,7 +8,6 @@ level as editing a form field directly; no accept/dismiss gate.
 
 import json
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +16,7 @@ import anthropic
 from app.config.database import profiles_col
 from app.config.settings import get_settings
 from app.models.profile import StyleNoteCategory
+from app.services.json_extraction import extract_json_object
 from app.services.llm_trace import traced_messages_create
 
 logger = logging.getLogger(__name__)
@@ -55,25 +55,6 @@ def _build_prompt(profile: dict[str, Any], message: str) -> str:
     )
 
 
-def _extract_json(text: str) -> dict[str, Any] | None:
-    """Parse a JSON object from LLM output, tolerating markdown code fences
-    (Haiku sometimes wraps JSON in ```json ... ``` despite instructions)."""
-    stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE).strip()
-    try:
-        data = json.loads(stripped)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        pass
-    start, end = stripped.find("{"), stripped.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            data = json.loads(stripped[start : end + 1])
-            return data if isinstance(data, dict) else None
-        except json.JSONDecodeError:
-            return None
-    return None
-
-
 async def _call_llm(prompt: str) -> dict[str, Any] | None:
     settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -85,7 +66,7 @@ async def _call_llm(prompt: str) -> dict[str, Any] | None:
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text if response.content else ""
-        data = _extract_json(text)
+        data = extract_json_object(text)
         if data is None:
             logger.warning("Memory edit response had no parseable JSON: %r", text[:300])
         return data

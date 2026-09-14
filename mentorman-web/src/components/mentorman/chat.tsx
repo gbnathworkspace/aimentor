@@ -115,6 +115,9 @@ function Composer({ tone, onSend, busy, disabled }: {
 }) {
   const [val, setVal] = useState('');
   const [focus, setFocus] = useState(false);
+  // Collapsed just shrinks this into a thin re-openable bar — draft text in
+  // `val` survives the toggle since the component itself never unmounts.
+  const [collapsed, setCollapsed] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const grow = () => {
@@ -133,6 +136,25 @@ function Composer({ tone, onSend, busy, disabled }: {
     if (!ok) setVal(text);
   };
 
+  if (collapsed) {
+    return (
+      <div className="composer composer-collapsed">
+        <div className="composer-inner">
+          <button
+            className="composer-collapsed-bar"
+            onClick={() => setCollapsed(false)}
+            aria-expanded={false}
+            aria-label="Expand message composer"
+            title="Expand composer"
+          >
+            <span>Reply to your mentor…</span>
+            <Icon name="chevronDown" size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="composer">
       <div className="composer-inner">
@@ -149,6 +171,15 @@ function Composer({ tone, onSend, busy, disabled }: {
           <div className="composer-tools">
             <button className="tool-btn" title="Code block">{'</>'}</button>
             <div className="spacer" />
+            <button
+              className="icon-btn"
+              onClick={() => setCollapsed(true)}
+              aria-expanded={true}
+              aria-label="Collapse composer"
+              title="Collapse composer"
+            >
+              <Icon name="chevronDown" size={14} />
+            </button>
             <button className="send-btn" onClick={submit} disabled={busy || disabled || !canSubmit} title="Send">
               <Icon name="send" />
             </button>
@@ -268,6 +299,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
 }) {
   const [msgs, setMsgs] = useState<MessageItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [workingDismissed, setWorkingDismissed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   // Text typed on the welcome screen, held until the freshly-created topic's
@@ -420,6 +452,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     const userMsg: MessageItem = { who: 'user', text, _id: userId, attachments: opts?.attachments, timestamp: new Date().toISOString() };
     setMsgs(prev => [...prev, userMsg]);
     setSuggestions([]);
+    setWorkingDismissed(false);
     setBusy(true);
     const mentorId = 'm' + Date.now();
     try {
@@ -529,7 +562,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       if (metaIdx !== -1) {
         try { meta = JSON.parse(full.slice(full.indexOf(META_MARKER) + META_MARKER.length)); } catch { /* malformed trailer — show text as-is */ }
       }
-      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, activeTools: [], toolEvents: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
+      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, activeTools: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
       setSuggestions(Array.isArray(meta?.suggestions) ? meta.suggestions : []);
       return true;
     } catch {
@@ -840,19 +873,23 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
             }
             return null;
           })()}
-
-          {!busy && suggestions.length > 0 && (
-            <div className="chat-options">
-              <QuickReplyOptions
-                options={suggestions}
-                onSelect={send}
-                onTypeOwn={() => { setSuggestions([]); document.getElementById('composer-textarea')?.focus(); }}
-                onClose={() => setSuggestions([])}
-              />
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Docked with the composer, not scrolled with the messages — a
+          floating card mid-scrollback (the previous behavior) reads as
+          detached from the chat window; pinning it above the composer
+          keeps it anchored the same way the composer itself is. */}
+      {!busy && suggestions.length > 0 && (
+        <div className="chat-options chat-options-docked">
+          <QuickReplyOptions
+            options={suggestions}
+            onSelect={send}
+            onTypeOwn={() => { setSuggestions([]); document.getElementById('composer-textarea')?.focus(); }}
+            onClose={() => setSuggestions([])}
+          />
+        </div>
+      )}
 
       <Composer
         tone={tone}
@@ -862,7 +899,8 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     </div>
     <TopicContextPanel
       topicId={topicId}
-      toolEvents={busy ? msgs[msgs.length - 1]?.toolEvents : undefined}
+      toolEvents={workingDismissed ? undefined : msgs[msgs.length - 1]?.toolEvents}
+      onDismissWorking={() => setWorkingDismissed(true)}
     />
     </>
   );

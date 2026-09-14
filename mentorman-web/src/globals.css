@@ -432,37 +432,24 @@ body {
 .context-panel-collapsed {
   width: 36px; padding: 16px 8px; align-items: center;
 }
-/* CONTEXT and WORKING ON THIS REPLY each get one of these — the working
-   section flexes to fill remaining height below the (capped-height, own
-   scroll) context section, separated by a border instead of a draggable
-   divider. A drag-to-resize handle (per the mockup) was cut here — it's a
-   real feature, but a fixed split reads fine at this panel width and costs
-   a lot less than mouse-drag-with-clamping state for the value it adds. */
+/* CONTEXT and WORKING ON THIS REPLY are permanent halves of the panel, each
+   taking half the height and scrolling independently — a fixed split reads
+   fine at this panel width and costs a lot less than mouse-drag-with-clamping
+   state for a draggable divider. */
 .context-panel-section {
   display: flex; flex-direction: column;
   padding: 14px 14px; gap: 10px;
   min-height: 0;
-}
-/* Cap the context section's height only when the working-on-this-reply
-   section is actually present below it (:not(:last-child)) — otherwise,
-   with no reply in flight, this is the only section and should just use
-   the full panel height instead of leaving blank space under a 45% cap. */
-.context-panel-section:first-child:not(:last-child) {
-  max-height: 45%;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--border-soft);
-}
-.context-panel-section:only-child {
   flex: 1;
   overflow-y: auto;
 }
 .working-section {
-  flex: 1;
-  overflow-y: auto;
+  border-top: 1px solid var(--border-soft);
 }
 .context-panel-head {
   display: flex; align-items: center; gap: 4px;
 }
+.section-toggle svg { transition: transform .15s ease; }
 .context-panel-title-group {
   display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
 }
@@ -892,8 +879,21 @@ body {
 .verdict .v-fb { font-size: 12.5px; color: var(--muted-2); line-height: 1.55; }
 
 /* ---- composer ---- */
-.composer { padding: 14px 26px 20px; border-top: 1px solid var(--border-soft); background: color-mix(in oklch, var(--bg) 86%, var(--panel)); }
+.composer { flex-shrink: 0; padding: 14px 26px 20px; border-top: 1px solid var(--border-soft); background: color-mix(in oklch, var(--bg) 86%, var(--panel)); }
 .composer-inner { max-width: 760px; margin: 0 auto; }
+
+/* Collapsed composer: thin re-openable bar, same click target height as the
+   rest of the icon-btn/tool-btn family. */
+.composer-collapsed { padding: 10px 26px; }
+.composer-collapsed-bar {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 34px; padding: 0 14px; border-radius: var(--r);
+  border: 1px solid var(--border); background: var(--card); color: var(--muted);
+  font-family: inherit; font-size: 13px; cursor: pointer;
+  transition: background .14s, border-color .14s, color .14s;
+}
+.composer-collapsed-bar:hover { background: var(--card-2); color: var(--fg-dim); border-color: var(--border-soft); }
+.composer-collapsed-bar svg { color: var(--muted-2); transform: rotate(180deg); }
 .eval-flag {
   display: flex; align-items: center; gap: 8px; margin: 0 auto 9px; max-width: 760px;
   font-family: var(--mono); font-size: 10px; color: var(--accent);
@@ -905,6 +905,15 @@ body {
    already own width/centering/padding) so it never shrinks the chat body's
    available space the way a fixed-height sibling would. */
 .chat-options { width: 100%; }
+/* Docked variant: sits between chat-body and the composer as a fixed
+   footer row (flex-shrink: 0, same as .composer) instead of scrolling with
+   messages. Widened + centered to match composer-inner so it reads as part
+   of the same anchored footer rather than a narrow floating card. */
+.chat-options-docked {
+  flex-shrink: 0;
+  max-width: 760px; margin: 0 auto; padding: 0 26px;
+}
+.chat-options-docked .onb-options { max-width: none; margin: 0 0 12px; }
 
 .speak-btn {
   width: 24px; height: 24px; border-radius: 6px; border: 1px solid transparent;

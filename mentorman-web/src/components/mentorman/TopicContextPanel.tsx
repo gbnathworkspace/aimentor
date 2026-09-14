@@ -18,12 +18,12 @@ function formatElapsed(ms: number): string {
   return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
 }
 
-// Timeline of tool calls made so far for the in-flight streaming reply.
-// Ephemeral — only rendered while a reply is streaming (see chat.tsx), and
-// cleared once it settles, same lifecycle as the inline ToolActivity
-// indicator in the message stream. No error state: the TOOL_MARKER protocol
-// only ever emits "start"/"end", so there's nothing to render for it.
-function WorkingOnReply({ events }: { events: ToolEvent[] }) {
+// Timeline of tool calls made for the most recent reply. Stays visible after
+// the reply finishes — the user asked to keep it around as a reference —
+// until they dismiss it or send another message (chat.tsx resets it then).
+// No error state: the TOOL_MARKER protocol only ever emits "start"/"end", so
+// there's nothing to render for it.
+function WorkingOnReply({ events, onDismiss }: { events: ToolEvent[]; onDismiss: () => void }) {
   // Re-render every second so a still-running step's "Ns so far" keeps
   // ticking even between stream chunks (network waits between tool calls).
   const [, setTick] = useState(0);
@@ -33,21 +33,46 @@ function WorkingOnReply({ events }: { events: ToolEvent[] }) {
     return () => clearInterval(id);
   }, [events]);
 
+  const [open, setOpen] = useState(true);
+
   const now = Date.now();
   const runningCount = events.filter(e => e.endedAt === undefined).length;
-  const summary = runningCount > 0
+  const summary = events.length === 0
+    ? 'Nothing yet — steps will show up here as the next reply works.'
+    : runningCount > 0
     ? `Running ${TOOL_LABELS[events[events.length - 1].name] ?? events[events.length - 1].name}…`
     : `${events.length} step${events.length === 1 ? '' : 's'} so far`;
 
   return (
     <div className="context-panel-section working-section">
       <div className="context-panel-head">
+        <button
+          type="button"
+          className="icon-btn section-toggle"
+          title={open ? 'Collapse' : 'Expand'}
+          aria-label={open ? 'Collapse working on this reply' : 'Expand working on this reply'}
+          aria-expanded={open}
+          onClick={() => setOpen(o => !o)}
+        >
+          <Icon name="chevronDown" size={14} style={{ transform: open ? undefined : 'rotate(-90deg)' }} />
+        </button>
         <span className="context-panel-title">Working on this reply</span>
+        {events.length > 0 && (
+          <button
+            type="button"
+            className="icon-btn"
+            title="Clear"
+            aria-label="Clear working history"
+            onClick={onDismiss}
+          >
+            <Icon name="x" size={12} />
+          </button>
+        )}
       </div>
-      <div className="working-summary" role="status" aria-live="polite" aria-atomic="true">
+      {open && <div className="working-summary" role="status" aria-live="polite" aria-atomic="true">
         {summary}
-      </div>
-      <div className="working-timeline">
+      </div>}
+      {open && <div className="working-timeline">
         {events.map((ev, i) => {
           const running = ev.endedAt === undefined;
           const elapsed = formatElapsed((ev.endedAt ?? now) - ev.startedAt);
@@ -67,7 +92,7 @@ function WorkingOnReply({ events }: { events: ToolEvent[] }) {
             </div>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -78,11 +103,12 @@ function WorkingOnReply({ events }: { events: ToolEvent[] }) {
  * flow. Files uploaded here are embedded (metadata.topic_id) and injected
  * into every turn for this topic, not just the turn they were sent on.
  */
-export function TopicContextPanel({ topicId, toolEvents }: { topicId: string | null; toolEvents?: ToolEvent[] }) {
+export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { topicId: string | null; toolEvents?: ToolEvent[]; onDismissWorking?: () => void }) {
   const [documents, setDocuments] = useState<TopicDocument[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [contentOpen, setContentOpen] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
@@ -135,6 +161,16 @@ export function TopicContextPanel({ topicId, toolEvents }: { topicId: string | n
     <div className="context-panel">
       <div className="context-panel-section">
         <div className="context-panel-head">
+          <button
+            type="button"
+            className="icon-btn section-toggle"
+            title={contentOpen ? 'Collapse section' : 'Expand section'}
+            aria-label={contentOpen ? 'Collapse context section' : 'Expand context section'}
+            aria-expanded={contentOpen}
+            onClick={() => setContentOpen(o => !o)}
+          >
+            <Icon name="chevronDown" size={14} style={{ transform: contentOpen ? undefined : 'rotate(-90deg)' }} />
+          </button>
           <span className="context-panel-title-group">
             <span className="context-panel-title">Context</span>
             {documents.length > 0 && <span className="context-panel-count">{documents.length}</span>}
@@ -152,8 +188,8 @@ export function TopicContextPanel({ topicId, toolEvents }: { topicId: string | n
           <button
             type="button"
             className="icon-btn"
-            title="Collapse context"
-            aria-label="Collapse context"
+            title="Collapse context panel"
+            aria-label="Collapse context panel"
             onClick={() => setCollapsed(true)}
           >
             <Icon name="back" size={14} />
@@ -168,9 +204,9 @@ export function TopicContextPanel({ topicId, toolEvents }: { topicId: string | n
           />
         </div>
 
-        {error && <div className="context-panel-error">{error}</div>}
+        {contentOpen && error && <div className="context-panel-error">{error}</div>}
 
-        {documents.length > 0 && (
+        {contentOpen && documents.length > 0 && (
           <div className="context-panel-list">
             {documents.map(doc => (
               <div key={doc.filename} className="context-doc-card">
@@ -192,14 +228,16 @@ export function TopicContextPanel({ topicId, toolEvents }: { topicId: string | n
           </div>
         )}
 
-        <button type="button" className="context-panel-dropzone" onClick={() => inputRef.current?.click()} disabled={loading}>
-          {documents.length === 0
-            ? 'No documents yet — add notes, syllabi, or problem sets.'
-            : '+ Add a document'}
-        </button>
+        {contentOpen && (
+          <button type="button" className="context-panel-dropzone" onClick={() => inputRef.current?.click()} disabled={loading}>
+            {documents.length === 0
+              ? 'No documents yet — add notes, syllabi, or problem sets.'
+              : '+ Add a document'}
+          </button>
+        )}
       </div>
 
-      {toolEvents && toolEvents.length > 0 && <WorkingOnReply events={toolEvents} />}
+      <WorkingOnReply events={toolEvents ?? []} onDismiss={() => onDismissWorking?.()} />
     </div>
   );
 }

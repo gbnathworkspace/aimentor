@@ -1,0 +1,13 @@
+# ponytail: allowlist — the image only needs these two dirs (see unified-backend/Dockerfile)
+*
+!mentorman-web
+!unified-backend
+**/node_modules
+**/.venv
+**/.env
+**/__pycache__
+**/.pytest_cache
+**/.hypothesis
+**/logs
+**/uploads
+mentorman-web/dist

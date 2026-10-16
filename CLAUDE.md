@@ -20,3 +20,9 @@ unicode.
 The `topics` collection is camelCase (`userId`, `topicId`, `lastActiveAt`); every
 other collection is snake_case (`user_id`). Filtering topics on `user_id` silently
 returns 0 rows instead of erroring.
+
+## Memory
+
+Structured project memory (index below; rules in `.claude/rules/memory.md`):
+
+@.claude/memory/MEMORY.md

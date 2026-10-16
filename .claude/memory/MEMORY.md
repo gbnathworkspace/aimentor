@@ -13,4 +13,4 @@ Keep this file under 200 lines. Rules for saving/recalling: `.claude/rules/memor
 <!-- Goals, deadlines, decisions -->
 
 ## Reference
-<!-- Pointers to external systems -->
+- [reference-feature-roadmap.md](reference-feature-roadmap.md) — Roadmap lives in Atlas: mentorman_product.feature_analysis

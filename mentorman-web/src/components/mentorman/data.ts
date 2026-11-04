@@ -21,6 +21,9 @@ export type MessageItem = {
   // turn settles, same lifecycle as activeTools.
   toolEvents?: ToolEvent[];
   suggestions?: { title: string; description: string }[];
+  // MCQ card for this mentor turn (.kiro/specs/mcq-quiz).
+  quiz?: import('./QuestionCard').Quiz;
+  quizSummary?: import('./QuestionCard').QuizSummary;
   attachments?: { name: string; size: number }[];
   summaryBlock?: {
     type: 'summary';

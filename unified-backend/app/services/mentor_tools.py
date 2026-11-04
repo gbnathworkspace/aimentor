@@ -21,6 +21,7 @@ from langchain_core.tools import BaseTool, InjectedToolArg, tool
 from app.services import prompt_store, skill_graph_repo
 from app.services.llm_trace import write_trace
 from app.services.subtopic_weights import validate_subtopic_updates
+from app.services.topic_service import UNNAMED_TITLE
 from app.services.vector_search import vector_search
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,10 @@ async def record_diagnostic_verdict(
     subtopic_updates: list | None = None,
     **_model_extras: Any,
 ) -> str:
+    if turn.topic_title == UNNAMED_TITLE:
+        # No real topic to file mastery under yet; the session-end summary
+        # names the topic and records mastery under that name.
+        return "Topic not named yet; mastery will be recorded at session end."
     validated = await validate_subtopic_updates(turn.topic_title, subtopic_updates or [])
     await skill_graph_repo.apply_update(turn.user_id, turn.topic_title, validated)
     return f"Recorded mastery for {len(validated)} subtopic(s)."

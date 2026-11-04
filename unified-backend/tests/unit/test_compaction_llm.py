@@ -364,3 +364,48 @@ def _get_tool_schema():
     """Helper to get the tool schema for assertions."""
     from app.services.session_compactor import _COMPACTION_TOOL_SCHEMA
     return _COMPACTION_TOOL_SCHEMA
+
+
+class TestUnnamedTopicNaming:
+    """An unnamed topic takes the LLM's proposed title, and skill updates are
+    validated against that title, not the placeholder."""
+
+    def _response(self, tool_input: dict):
+        block = MagicMock(type="tool_use", input=tool_input)
+        block.name = "compaction_result"
+        return MagicMock(content=[block])
+
+    @pytest.mark.asyncio
+    async def test_names_unnamed_topic_and_validates_under_new_name(self):
+        from app.services.session_compactor import _parse_tool_use_response
+        from app.services.topic_service import UNNAMED_TITLE
+
+        validate = AsyncMock(return_value=[])
+        with patch("app.services.session_compactor._validate_skill_updates", validate):
+            result = await _parse_tool_use_response(
+                self._response({"summary": "s", "title": "  AWS Envelope Encryption ", "skill_updates": [{"subtopic": "x", "mastery": 1}]}),
+                UNNAMED_TITLE,
+            )
+        assert result["title"] == "AWS Envelope Encryption"
+        assert validate.call_args[0][0] == "AWS Envelope Encryption"
+
+    @pytest.mark.asyncio
+    async def test_named_topic_ignores_proposed_title(self):
+        from app.services.session_compactor import _parse_tool_use_response
+
+        with patch("app.services.session_compactor._validate_skill_updates", AsyncMock(return_value=[])):
+            result = await _parse_tool_use_response(
+                self._response({"summary": "s", "title": "Something Else"}), "React",
+            )
+        assert result["title"] == "React"
+
+    @pytest.mark.asyncio
+    async def test_unnamed_without_title_stays_unnamed_and_skips_skills(self):
+        from app.services.session_compactor import _parse_tool_use_response
+        from app.services.topic_service import UNNAMED_TITLE
+
+        result = await _parse_tool_use_response(
+            self._response({"summary": "s", "skill_updates": [{"subtopic": "x", "mastery": 1}]}), UNNAMED_TITLE,
+        )
+        assert result["title"] == UNNAMED_TITLE
+        assert result["skill_updates"] is None

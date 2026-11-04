@@ -254,7 +254,7 @@ class TestHandleMessageHappyPath:
 
         visible, meta = _split_meta(full)
         assert visible == "LLM says hello"
-        assert meta == {"mode": "diagnostic", "suggestions": []}
+        assert {k: meta[k] for k in ("mode", "suggestions", "quiz")} == {"mode": "diagnostic", "suggestions": [], "quiz": None}
 
     @pytest.mark.asyncio
     @patch("app.services.mentor_agent.context_assembler")
@@ -449,7 +449,7 @@ class TestPostTurnHook:
 
         visible, meta = _split_meta(full)
         assert visible == "All good"
-        assert meta == {"mode": "diagnostic", "suggestions": []}
+        assert {k: meta[k] for k in ("mode", "suggestions", "quiz")} == {"mode": "diagnostic", "suggestions": [], "quiz": None}
 
     @pytest.mark.asyncio
     async def test_post_turn_hook_direct_call_logs_error(self, chat_service):
@@ -974,3 +974,49 @@ class TestRoundTracing:
         assert "[error: the mentor response was interrupted" in full
         round_trace.assert_awaited_once()
         assert "rate limit" in round_trace.call_args.kwargs["error"]
+
+
+class TestRegenerateConcise:
+    """Shorten: drop the latest reply and re-answer the question before it."""
+
+    def _msg(self, mid: str, role: str, content: str) -> dict:
+        return {"type": "message", "id": mid, "role": role, "content": content,
+                "timestamp": datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc), "tokenCount": 3}
+
+    @pytest.mark.asyncio
+    @patch("app.services.mentor_agent.context_assembler")
+    @patch("app.services.mentor_agent.get_system_prompt")
+    async def test_replaces_latest_reply_with_concise_answer(
+        self, mock_get_prompt, mock_assembler, chat_service, mock_topic_service
+    ):
+        from app.services.mentor_agent import CONCISE_INSTRUCTION
+
+        mock_topic_service.get_topic.return_value["messages"] = [
+            self._msg("u1", "user", "Explain BFS"), self._msg("a1", "assistant", "A very long answer..."),
+        ]
+        mock_assembler.assemble = AsyncMock(return_value={"profile": {}, "skill": {}})
+        mock_get_prompt.return_value = "You are a mentor."
+
+        with patch("app.services.mentor_agent.ChatAnthropic", _mock_chat_anthropic([[_chunk("Short.")]])):
+            result = await chat_service.handle_message(
+                "topic-abc", "user-123", "-", mode="topic", regenerate_concise=True,
+            )
+            full = await _collect_stream(result)
+
+        mock_topic_service.remove_last_message.assert_awaited_once_with("topic-abc", "user-123", "a1")
+        # No new user message — only the regenerated assistant reply is appended.
+        appended = [c[0][2] for c in mock_topic_service.append_message.call_args_list]
+        assert [m["role"] for m in appended] == ["assistant"]
+        assert CONCISE_INSTRUCTION in appended[0]["systemPrompt"]
+        # Re-answers the stored question, not the placeholder content.
+        assert mock_assembler.assemble.call_args[0][2] == "Explain BFS"
+        assert _split_meta(full)[0] == "Short."
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_user_already_replied(self, chat_service, mock_topic_service):
+        mock_topic_service.get_topic.return_value["messages"] = [
+            self._msg("u1", "user", "Q"), self._msg("a1", "assistant", "A"), self._msg("u2", "user", "Q2"),
+        ]
+        result = await chat_service.handle_message("topic-abc", "user-123", "-", regenerate_concise=True)
+        assert "error" in result
+        mock_topic_service.remove_last_message.assert_not_awaited()

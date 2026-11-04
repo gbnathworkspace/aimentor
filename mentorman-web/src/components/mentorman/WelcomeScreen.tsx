@@ -15,7 +15,7 @@ type Suggestion = { icon: IconName; title: string; desc: string; prompt: string 
 const SUGGESTIONS: Suggestion[] = [
   { icon: 'spark', title: 'Explain a concept', desc: 'Break down a topic step by step', prompt: 'Explain ' },
   { icon: 'code', title: 'Review my code', desc: 'Get feedback on what you wrote', prompt: 'Review my code for ' },
-  { icon: 'target', title: 'Quiz me', desc: 'Test what you have learned', prompt: 'Quiz me on ' },
+  { icon: 'target', title: 'Quiz me', desc: 'Test what you have learned', prompt: 'Quiz me on what I have learned so far' },
   { icon: 'chart', title: 'See my progress', desc: 'Review your skill graph', prompt: 'Show me my progress in ' },
 ];
 

@@ -28,7 +28,7 @@ from app.config.settings import get_settings
 from app.services import context_assembler, mentor_tools, tactic_prompt_selector
 from app.services.llm_trace import write_trace
 from app.services.prompt_store import get_system_prompt
-from app.services.response_parsing import extract_suggestions
+from app.services.response_parsing import extract_quiz, extract_suggestions
 from app.services.session_boundary import maybe_force_close_long_session
 from app.services.token_counter import OVER_CAPACITY_THRESHOLD, TokenCounter
 from app.services.topic_service import TopicService
@@ -70,6 +70,7 @@ _STREAM_TRAIL_BUFFER = 200
 # that point on is flushed until the fence is stripped at stream end —
 # regardless of how much more text the model emits after it.
 _FENCE_START = "```json suggestions"
+_QUIZ_FENCE_START = "```json quiz"  # same hold-back, for the MCQ card (.kiro/specs/mcq-quiz)
 
 # Sentinel separating the visible reply from trailing {mode, suggestions}
 # metadata that can't ride on headers (streaming has already started, 200
@@ -88,6 +89,15 @@ _META_MARKER = "\x00META\x00"
 # mid-marker; an incomplete tail just won't match yet and gets picked up
 # once the rest arrives.
 _TOOL_MARKER = "\x00TOOL\x00"
+
+
+CONCISE_INSTRUCTION = (
+    "The student found your previous answer to this message too long and asked "
+    "for it again, shorter. Answer in 2-3 short, readable sentences of plain "
+    "prose: no headings, lists, tables or code blocks, no preamble. Keep only the "
+    "core point and the one key term they need. This overrides every other "
+    "length or format instruction above."
+)
 
 
 class MentorAgent:
@@ -113,7 +123,9 @@ class MentorAgent:
         self._token_counter = token_counter or TokenCounter()
 
     async def handle_message(
-        self, topic_id: str, user_id: str, content: str, mode: str = "topic"
+        self, topic_id: str, user_id: str, content: str, mode: str = "topic",
+        regenerate_concise: bool = False,
+        quiz_action: str | None = None,
     ) -> dict | StreamingResponse:
         """Handle a user message within a topic thread.
 
@@ -122,6 +134,12 @@ class MentorAgent:
             user_id: The authenticated user's ID.
             content: The user's message text.
             mode: Chat mode (always "topic").
+            regenerate_concise: Instead of a new turn, drop the latest
+                assistant reply and re-answer the user message before it in
+                2-3 sentences. `content` is ignored; only allowed while that
+                reply is still the last message (user hasn't answered it).
+            quiz_action: "next" | "finish" from the quiz Next bar — forces
+                DIAGNOSTIC and tells the mentor exactly what to emit.
 
         Returns:
             A dict with an "error" key if the turn is rejected before any
@@ -146,16 +164,32 @@ class MentorAgent:
 
         now = datetime.now(timezone.utc)
 
-        # Step 1: Create and append user message (Req 4.1)
-        user_msg = {
-            "type": "message",
-            "id": str(uuid.uuid4()),
-            "role": "user",
-            "content": content,
-            "timestamp": now,
-        }
+        if regenerate_concise:
+            # Re-answer the last question: only while the reply being replaced
+            # is still the latest message and not yet folded into a summary.
+            covered = {mid for b in topic.get("summaryBlocks") or [] for mid in b.get("sourceSessionIds", [])}
+            if (
+                len(existing_messages) < 2
+                or existing_messages[-1].get("role") != "assistant"
+                or existing_messages[-2].get("role") != "user"
+                or existing_messages[-1].get("id") in covered
+            ):
+                return {"error": "Only the latest reply to your question can be shortened."}
+            await self._topic_service.remove_last_message(topic_id, user_id, existing_messages[-1]["id"])
+            existing_messages = existing_messages[:-1]
+            user_msg = existing_messages.pop()
+            content = user_msg["content"]
+        else:
+            # Step 1: Create and append user message (Req 4.1)
+            user_msg = {
+                "type": "message",
+                "id": str(uuid.uuid4()),
+                "role": "user",
+                "content": content,
+                "timestamp": now,
+            }
 
-        await self._topic_service.append_message(topic_id, user_id, user_msg)
+            await self._topic_service.append_message(topic_id, user_id, user_msg)
 
         # Step 2: Build the message list for context assembly — reuse the
         # pre-append fetch above instead of a second DB round trip.
@@ -177,7 +211,48 @@ class MentorAgent:
         # intents, not per-message tactics.
         effective_mode = mode
         instruction_override = ""
-        if mode == "topic":
+        quiz_summary = None
+        run = _quiz_run(existing_messages)
+        latest_quiz = run[-1] if run else None
+        mid_quiz = mode == "topic" and bool(quiz_action or (latest_quiz and latest_quiz["q"] < latest_quiz["of"]))
+        if mid_quiz:
+            # Mid-quiz turns skip the tactic selector: DIAGNOSTIC carries the
+            # quiz instructions.
+            effective_mode = "diagnostic"
+            # Researched once on the start turn (Req 5.3), re-supplied here.
+            brief = f" Follow this style brief: {run[0]['styleBrief']}" if run and run[0].get("styleBrief") else ""
+            if quiz_action == "next" and latest_quiz:
+                asked = ", ".join(sorted({q.get("subtopic", "") for q in run if q.get("subtopic")}))
+                instruction_override = (
+                    f"The learner clicked Next. Emit question {latest_quiz['q'] + 1} of "
+                    f"{latest_quiz['of']} as a quiz block now, on a subtopic not yet asked "
+                    f"(asked so far: {asked or 'none'}), in a different question type than the "
+                    f"last one.{brief}"
+                )
+            elif quiz_action == "finish":
+                # Scored in code (Decision 1) — the model, offered the verdict
+                # tool here, records it and writes nothing.
+                quiz_summary = _summarize_quiz_run(run)
+                updates = quiz_summary["subtopics"]
+                if updates:
+                    await mentor_tools.run_tool(
+                        mentor_tools.DIAGNOSTIC_VERDICT_TOOL.name,
+                        {"subtopic_updates": updates},
+                        mentor_tools.TurnState(user_id=user_id, topic_title=topic_title, context=context),
+                    )
+                instruction_override = (
+                    f"The learner finished the quiz: {quiz_summary['correct']}/{quiz_summary['total']}. "
+                    "The app shows the score, per-subtopic bars and the missed questions in a "
+                    "summary card. Write ONE short sentence only: what to focus on next. "
+                    "Do not restate the score or list questions. Do not emit a quiz block."
+                )
+            else:
+                instruction_override = (
+                    "A quiz is in progress. The learner is discussing the current question — "
+                    "answer their point directly. Do not emit a new quiz block; they will "
+                    "click Next when ready."
+                )
+        elif mode == "topic":
             decision = await tactic_prompt_selector.route_user_turn(
                 query=content,
                 skill=context.get("skill") or {},
@@ -185,13 +260,35 @@ class MentorAgent:
             )
             effective_mode = decision.selected_mode.value.lower()
             instruction_override = decision.instruction_override
+            if decision.matched_rule == tactic_prompt_selector.MatchedRule.RULE_QUIZ_REQUEST:
+                mid_quiz = True  # also holds back the verdict tool on the start turn
+                # Without this the model copies earlier open-ended questions in
+                # the thread instead of the card template.
+                instruction_override = (
+                    "The learner asked for a quiz. Start a NEW 5-question quiz now.\n"
+                    "1. First run ONE web search for how multiple-choice questions on this "
+                    "topic are commonly written (e.g. \"<topic> <subtopic> multiple choice "
+                    "questions\"). From the results, write a 2-4 line style brief: the "
+                    "question types typically used (e.g. predict the output, fill the "
+                    "missing line, spot the bug, real-world scenario), snippet size, and the "
+                    "usual traps. If the search finds nothing useful, base the brief on the "
+                    "template rules alone.\n"
+                    "2. Plan 5 questions across different subtopics the learner has covered.\n"
+                    "3. Emit question 1 of 5 ONLY as a ```json quiz block, with the brief in "
+                    "its \"styleBrief\" field. No open-ended questions, no prose question, no "
+                    "commentary — ignore the style of any earlier questions in this conversation."
+                )
 
         # Step 4: Build system prompt
         system_prompt = get_system_prompt(effective_mode, context)
         if instruction_override:
             system_prompt += f"\n\n## This Turn's Specific Instruction\n{instruction_override}"
+        if regenerate_concise:
+            system_prompt += f"\n\n## Length Override\n{CONCISE_INSTRUCTION}"
 
-        include_diagnostic_tool = effective_mode == "diagnostic"
+        # Never offered mid-quiz: on a Next turn the model records a score and
+        # skips the question; Finish is scored in code above.
+        include_diagnostic_tool = effective_mode == "diagnostic" and not mid_quiz
 
         return StreamingResponse(
             self._stream_turn(
@@ -204,6 +301,7 @@ class MentorAgent:
                 include_diagnostic_tool=include_diagnostic_tool,
                 effective_mode=effective_mode,
                 context=context,
+                quiz_summary=quiz_summary,
             ),
             media_type="text/plain; charset=utf-8",
         )
@@ -219,6 +317,7 @@ class MentorAgent:
         include_diagnostic_tool: bool,
         effective_mode: str,
         context: dict,
+        quiz_summary: dict | None = None,
     ):
         """Run the tool-loop mentor call, streaming text as it's generated.
 
@@ -269,7 +368,10 @@ class MentorAgent:
                             full_text += block
                             round_text += block
                             pending += block
-                            fence_pos = pending.find(_FENCE_START)
+                            fence_pos = min(
+                                (p for p in (pending.find(_FENCE_START), pending.find(_QUIZ_FENCE_START)) if p != -1),
+                                default=-1,
+                            )
                             flush_len = fence_pos if fence_pos != -1 else len(pending) - _STREAM_TRAIL_BUFFER
                             if flush_len > 0:
                                 yield pending[:flush_len]
@@ -332,6 +434,13 @@ class MentorAgent:
         # Strip the suggestions fence out of the visible text before
         # persisting, then flush whatever clean tail wasn't shown yet.
         clean_content, suggestions = extract_suggestions(full_text)
+        clean_content, quiz = extract_quiz(clean_content)
+        if quiz:
+            suggestions = []  # the card has its own options
+            if not clean_content.strip():
+                # Keeps content meaningful for compaction/search; the client
+                # hides text equal to the stem since the card shows it.
+                clean_content = quiz["stem"]
 
         # The model can end a turn with only a tool call (e.g. calling
         # record_diagnostic_verdict without any accompanying text) despite
@@ -363,6 +472,10 @@ class MentorAgent:
             "systemPrompt": system_prompt,
             "mode": effective_mode,
         }
+        if quiz:
+            assistant_msg["quiz"] = quiz
+        if quiz_summary:
+            assistant_msg["quizSummary"] = quiz_summary
         # The reply is already streamed to the client above (line ~385), so a
         # persist failure here would otherwise be invisible: the user sees a
         # reply that silently never made it into topic.messages, and the next
@@ -401,7 +514,7 @@ class MentorAgent:
 
         asyncio.create_task(self._post_turn_hook(topic_id, user_id))
 
-        yield _META_MARKER + json.dumps({"mode": effective_mode, "suggestions": suggestions})
+        yield _META_MARKER + json.dumps({"mode": effective_mode, "suggestions": suggestions, "quiz": quiz, "quizSummary": quiz_summary, "messageId": assistant_msg["id"]})
 
     @staticmethod
     def _text_blocks(content) -> list[str]:
@@ -534,9 +647,12 @@ class MentorAgent:
                 # Normalize "mentor" role to "assistant" for API compatibility
                 if role == "mentor":
                     role = "assistant"
+                content = msg.get("content", "")
+                if msg.get("quiz"):
+                    content = f"{content}\n\n{_render_quiz_for_model(msg['quiz'])}"
                 api_messages.append({
                     "role": role,
-                    "content": msg.get("content", ""),
+                    "content": content,
                 })
 
         # Ensure first message is from user (Anthropic requirement)
@@ -588,3 +704,71 @@ class MentorAgent:
             logger.error(
                 "Post-turn hook failed for topic %s: %s", topic_id, str(e)
             )
+
+
+def _render_quiz_for_model(quiz: dict) -> str:
+    """The quiz block is stripped from stored content, so restate it (plus the
+    learner's pick) for the model's history — .kiro/specs/mcq-quiz Req 4."""
+    opts = "\n".join(f"{o['id']}. {o['text']}" for o in quiz["options"])
+    picked = quiz.get("picked")
+    if picked is None:
+        result = "not answered yet"
+    elif picked == "skip":
+        result = "learner chose \"I don't know\""
+    else:
+        result = f"learner picked {picked} ({'correct' if picked == quiz['answer'] else 'wrong'})"
+        mistake = (quiz.get("misconceptions") or {}).get(picked)
+        if picked != quiz["answer"] and mistake:
+            result += f" — likely misconception: {mistake}"
+    return (
+        f"[Quiz Q{quiz['q']}/{quiz['of']} ({quiz.get('subtopic', '')}) asked as a card: {quiz['stem']}\n"
+        f"{opts}\nCorrect: {quiz['answer']}. Result: {result}.]"
+    )
+
+
+def _quiz_run(messages: list[dict]) -> list[dict]:
+    """Quizzes of the latest run, oldest first: back from the newest quiz
+    message to its Q1. Empty if the topic has no quiz."""
+    run: list[dict] = []
+    for m in reversed(messages):
+        quiz = m.get("quiz")
+        if not quiz:
+            continue
+        run.append(quiz)
+        if quiz["q"] == 1:
+            break
+    return run[::-1]
+
+
+def _option_text(quiz: dict, oid: str | None) -> str:
+    return next((o["text"] for o in quiz["options"] if o["id"] == oid), "")
+
+
+def _summarize_quiz_run(run: list[dict]) -> dict:
+    """Score card data for the Finish turn (Req 6), computed from the picks the
+    cards graded. "I don't know" and unanswered count as wrong."""
+    by_sub: dict[str, list[bool]] = {}
+    missed = []
+    for quiz in run:
+        ok = quiz.get("picked") == quiz["answer"]
+        by_sub.setdefault(quiz.get("subtopic") or "General", []).append(ok)
+        if not ok:
+            picked = quiz.get("picked")
+            missed.append({
+                "q": quiz["q"],
+                "stem": quiz["stem"],
+                "picked": picked,
+                "pickedText": _option_text(quiz, picked),
+                "answer": quiz["answer"],
+                "answerText": _option_text(quiz, quiz["answer"]),
+                "misconception": (quiz.get("misconceptions") or {}).get(picked, ""),
+                "why": quiz["why"],
+            })
+    subtopics = [{"subtopic": s, "mastery": round(100 * sum(r) / len(r))} for s, r in by_sub.items()]
+    return {
+        "correct": sum(sum(r) for r in by_sub.values()),
+        "total": len(run),
+        "subtopics": subtopics,
+        "missed": missed,
+        "weakest": min(subtopics, key=lambda u: u["mastery"])["subtopic"] if subtopics else None,
+    }

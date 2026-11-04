@@ -38,6 +38,13 @@ def _merge_l1_scope(old: list[dict] | None, fresh: list[dict]) -> list[dict]:
     ]
 
 
+UNNAMED_TITLE = "New conversation"
+"""Placeholder title for a topic started from a bare message. session_compactor
+names it from the first session's conversation at session end.
+ponytail: the title itself is the marker, so a user who names a topic exactly
+this will get it auto-renamed; add an `unnamed` flag if that ever matters."""
+
+
 class TopicService:
     """Manages topic thread CRUD operations and lifecycle transitions."""
 
@@ -46,8 +53,8 @@ class TopicService:
 
     # --- Creation ---
 
-    async def create_topic(self, user_id: str, title: str) -> dict:
-        """Create a new topic with validated title.
+    async def create_topic(self, user_id: str, title: str | None = None) -> dict:
+        """Create a new topic with validated title (UNNAMED_TITLE when omitted).
 
         Args:
             user_id: The authenticated user's ID.
@@ -59,7 +66,7 @@ class TopicService:
         Raises:
             HTTPException: 400 if title is invalid.
         """
-        validated_title = self._validate_title(title)
+        validated_title = self._validate_title(title) if title else UNNAMED_TITLE
 
         now = datetime.now(timezone.utc)
         topic_id = str(uuid.uuid4())
@@ -494,6 +501,45 @@ class TopicService:
         await self._optimistic_append(topic_id, user_id, update_fn)
         return appended_message
 
+    async def record_quiz_answer(self, topic_id: str, user_id: str, message_id: str, picked: str) -> dict:
+        """Persist the learner's pick on a quiz message (.kiro/specs/mcq-quiz
+        Req 2.4). One answer per card: 409 if already answered."""
+        result: dict = {}
+
+        def update_fn(topic: dict) -> dict:
+            messages = topic.get("messages", [])
+            idx = next((i for i, m in enumerate(messages) if m.get("id") == message_id and m.get("quiz")), None)
+            if idx is None:
+                raise HTTPException(status_code=404, detail="Quiz question not found")
+            quiz = messages[idx]["quiz"]
+            if quiz.get("picked") is not None:
+                raise HTTPException(status_code=409, detail="This question is already answered")
+            if picked != "skip" and picked not in {o["id"] for o in quiz["options"]}:
+                raise HTTPException(status_code=400, detail="Unknown option")
+            result.update(picked=picked, correct=picked == quiz["answer"], answer=quiz["answer"])
+            return {f"messages.{idx}.quiz.picked": picked}
+
+        await self._optimistic_append(topic_id, user_id, update_fn)
+        return result
+
+    async def remove_last_message(self, topic_id: str, user_id: str, message_id: str) -> None:
+        """Drop `message_id` if it is still the topic's last message (used to
+        replace a reply with a regenerated one). 409 if anything was appended
+        after it in the meantime."""
+
+        def update_fn(topic: dict) -> dict:
+            messages = topic.get("messages", [])
+            if not messages or messages[-1].get("id") != message_id:
+                raise HTTPException(status_code=409, detail="That reply is no longer the latest message.")
+            meta = topic.get("metadata", {})
+            return {
+                "pop_last_message": True,
+                "metadata.currentTokenEstimate": max(0, meta.get("currentTokenEstimate", 0) - messages[-1].get("tokenCount", 0)),
+                "metadata.totalMessageCount": max(0, meta.get("totalMessageCount", 0) - 1),
+            }
+
+        await self._optimistic_append(topic_id, user_id, update_fn)
+
     async def get_messages_paginated(
         self, topic_id: str, user_id: str, limit: int = 50, skip: int = 0
     ) -> dict:
@@ -580,6 +626,7 @@ class TopicService:
 
             # Separate the push operation from $set fields
             push_message = update.pop("push_message", None)
+            pop_last = update.pop("pop_last_message", False)
 
             # Build the MongoDB update operation
             set_fields = {**update, "version": current_version + 1}
@@ -587,6 +634,8 @@ class TopicService:
 
             if push_message is not None:
                 mongo_update["$push"] = {"messages": push_message}
+            if pop_last:
+                mongo_update["$pop"] = {"messages": 1}
 
             result = await topics_col().update_one(
                 {"topicId": topic_id, "userId": user_id, "version": current_version},

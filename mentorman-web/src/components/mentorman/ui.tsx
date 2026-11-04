@@ -323,8 +323,10 @@ export function formatBubbleTime(iso: string): string {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(d);
 }
 
-export function Bubble({ who, item, delay }: {
+export function Bubble({ who, item, delay, onShorten }: {
   who: 'mentor' | 'user';
+  /** Latest unanswered mentor reply only: regenerate it in 2-3 sentences. */
+  onShorten?: () => void;
   item: { text: string; label?: string; code?: string; nudge?: string; timestamp?: string; attachments?: { name: string; size: number }[] };
   delay?: number;
 }) {
@@ -355,7 +357,21 @@ export function Bubble({ who, item, delay }: {
               {fmt(item.nudge)}
             </div>
           )}
-          {who === 'mentor' && item.text && <SpeakButton text={item.text} className="bubble-speak" />}
+          {who === 'mentor' && item.text && (
+            <div className="bubble-actions">
+              <SpeakButton text={item.text} />
+              {onShorten && (
+                <button
+                  className="speak-btn shorten-btn"
+                  onClick={onShorten}
+                  title="Re-answer in 2-3 sentences"
+                  aria-label="Re-answer my last question in 2-3 sentences"
+                >
+                  <Icon name="bolt" size={13} /> <span>Shorter</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </Msg>

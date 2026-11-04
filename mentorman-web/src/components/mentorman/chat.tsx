@@ -10,7 +10,7 @@ import { SummaryBlockIndicator } from './SummaryBlockIndicator';
 import { SubtopicWeightsModal, buildGoalCards } from './SubtopicWeightsModal';
 import { UncertainRelevanceModal, type UncertainL1ScopeItem } from './UncertainRelevanceModal';
 import { L1MemoryModal } from './L1MemoryModal';
-import { MentorQuestionCard, QuickReplyOptions, looksLikeQuestion, type QuickReplyOption } from './QuestionCard';
+import { MentorQuestionCard, QuickReplyOptions, QuizCard, QuizSummaryCard, looksLikeQuestion, type QuickReplyOption, type Quiz, type QuizSummary } from './QuestionCard';
 import { TopicContextPanel } from './TopicContextPanel';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
@@ -389,7 +389,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       .then(data => {
         if (cancelled) return;
         const messages = data.messages || [];
-        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; mode?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number; timestamp?: string }, i: number) => {
+        const loaded: MessageItem[] = messages.map((m: { id?: string; type?: string; role?: string; content?: string; mode?: string; summary?: string; compactedRange?: { from: string; to: string }; messageCount?: number; tokenCount?: number; timestamp?: string; quiz?: Quiz; quizSummary?: QuizSummary }, i: number) => {
           if (m.type === 'summary') {
             return {
               who: 'summary' as const,
@@ -411,6 +411,8 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
             label: m.mode ? m.mode.toUpperCase() : undefined,
             _id: m.id || `loaded${i}`,
             timestamp: m.timestamp,
+            quiz: m.quiz ?? undefined,
+            quizSummary: m.quizSummary ?? undefined,
           };
         });
         setMsgs(loaded);
@@ -445,12 +447,21 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   // stream (and its 200) has already started.
   const send = useCallback(async (
     text: string,
-    opts?: { attachments?: { name: string; size: number }[]; backendContent?: string },
+    opts?: {
+      attachments?: { name: string; size: number }[];
+      backendContent?: string;
+      /** Latest mentor reply to replace with a 2-3 sentence re-answer of the
+       *  question before it — no new user bubble; the reply streams in its place. */
+      regenerate?: MessageItem;
+      /** Quiz Next bar action — forces the next/finish quiz turn server-side. */
+      quizAction?: 'next' | 'finish';
+    },
   ): Promise<boolean> => {
     if (!topicId) return false;
+    const regen = opts?.regenerate;
     const userId = 'u' + Date.now();
     const userMsg: MessageItem = { who: 'user', text, _id: userId, attachments: opts?.attachments, timestamp: new Date().toISOString() };
-    setMsgs(prev => [...prev, userMsg]);
+    setMsgs(prev => regen ? prev.filter(m => m._id !== regen._id) : [...prev, userMsg]);
     setSuggestions([]);
     setWorkingDismissed(false);
     setBusy(true);
@@ -459,7 +470,10 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       const res = await fetch(`/api/topic/${topicId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: opts?.backendContent ?? text, mode: 'topic' }),
+        body: JSON.stringify(regen
+          // content is ignored server-side on regenerate; it just has to be non-empty.
+          ? { content: '-', mode: 'topic', regenerate_concise: true }
+          : { content: opts?.backendContent ?? text, mode: 'topic', quiz_action: opts?.quizAction }),
       });
 
       // Pre-flight rejections (e.g. topic at capacity, chronological-order
@@ -470,7 +484,8 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       if (res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
         setMsgs(prev => [
-          ...prev.filter(m => m._id !== userId),
+          // Rejected before anything changed server-side — a regenerate's old reply is still there.
+          ...(regen ? [...prev, regen] : prev.filter(m => m._id !== userId)),
           { who: 'mentor', text: data.error ?? data.detail ?? "I'm having trouble — try again in a moment.", _id: 'err' + Date.now() },
         ]);
         return false;
@@ -558,11 +573,16 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       const { visible: deToolMarkedFinal } = parseToolMarkers(full);
       const metaIdx = deToolMarkedFinal.indexOf(META_MARKER);
       const visibleFinal = metaIdx === -1 ? deToolMarkedFinal : deToolMarkedFinal.slice(0, metaIdx);
-      let meta: { mode?: string; suggestions?: QuickReplyOption[] } | null = null;
+      let meta: { mode?: string; suggestions?: QuickReplyOption[]; quiz?: Quiz | null; quizSummary?: QuizSummary | null; messageId?: string } | null = null;
       if (metaIdx !== -1) {
         try { meta = JSON.parse(full.slice(full.indexOf(META_MARKER) + META_MARKER.length)); } catch { /* malformed trailer — show text as-is */ }
       }
-      setMsgs(prev => prev.map(m => m._id === mentorId ? { ...m, text: visibleFinal, activeTools: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined } : m));
+      setMsgs(prev => prev.map(m => m._id === mentorId ? {
+        ...m, text: visibleFinal, activeTools: [], label: meta?.mode ? String(meta.mode).toUpperCase() : undefined,
+        // Real id needed so the quiz card can POST its answer against this message.
+        ...(meta?.quiz ? { quiz: meta.quiz, _id: meta.messageId ?? m._id } : {}),
+        ...(meta?.quizSummary ? { quizSummary: meta.quizSummary } : {}),
+      } : m));
       setSuggestions(Array.isArray(meta?.suggestions) ? meta.suggestions : []);
       return true;
     } catch {
@@ -579,9 +599,42 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     }
   }, [topicId]);
 
+  // Quiz card pick: graded locally by the card, persisted here so a reload
+  // keeps it and the mentor sees the result next turn. Optimistic; reverted
+  // if the save fails so the card stays answerable.
+  const answerQuiz = useCallback(async (msgId: string, picked: string) => {
+    const setPicked = (p: string | undefined) =>
+      setMsgs(prev => prev.map(m => m._id === msgId && m.quiz ? { ...m, quiz: { ...m.quiz, picked: p } } : m));
+    setPicked(picked);
+    try {
+      const res = await fetch(`/api/topic/${topicId}/quiz-answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: msgId, picked }),
+      });
+      if (!res.ok && res.status !== 409) setPicked(undefined); // 409 = already saved
+    } catch {
+      setPicked(undefined);
+    }
+  }, [topicId]);
+
+  // Next bar (Req 3): shown once the latest quiz question is answered, and
+  // stays up while the user discusses it. "Finish quiz" on the last one;
+  // gone once that's been sent (exact text match — we send it ourselves).
+  const quizBar = useMemo(() => {
+    let idx = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].quiz) { idx = i; break; }
+    if (idx === -1) return null;
+    const quiz = msgs[idx].quiz!;
+    if (quiz.picked == null) return null;
+    const last = quiz.q >= quiz.of;
+    if (last && msgs.slice(idx + 1).some(m => m.quizSummary || (m.who === 'user' && m.text === 'Finish quiz'))) return null;
+    return { last };
+  }, [msgs]);
+
   // Welcome screen: send the typed text into the topic the user picked, or —
-  // when they picked "New topic" — create one first. A new topic's title is
-  // derived from the message (first 100 chars), so there's no naming step.
+  // when they picked "New topic" — create one first. It starts unnamed; the
+  // backend names it from the conversation when its first session ends.
   const startFromMessage = useCallback(async (text: string, existingTopicId: string | null) => {
     if (creating) return;
     if (existingTopicId) {
@@ -596,7 +649,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
       const res = await fetch('/api/topics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: text.trim().slice(0, 100) }),
+        body: JSON.stringify({}),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -857,9 +910,37 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
               ? <div key={m._id || i} className="system-msg">
                   <span className="system-msg-text">{m.text}</span>
                 </div>
+              : m.who === 'mentor' && m.quiz
+              ? <React.Fragment key={m._id || i}>
+                  {/* Content falls back to the stem server-side; the card already shows it. */}
+                  {m.text && m.text !== m.quiz.stem && <Bubble who="mentor" item={m} />}
+                  <QuizCard
+                    quiz={m.quiz}
+                    // Placeholder ids ('m' + Date.now()) aren't saved yet — no answering until the real id lands.
+                    onAnswer={m._id && !m._id.startsWith('m') ? (p) => answerQuiz(m._id!, p) : undefined}
+                    onExplain={!busy ? () => send(`Explain question ${m.quiz!.q} in more detail`) : undefined}
+                  />
+                </React.Fragment>
+              : m.who === 'mentor' && m.quizSummary
+              ? <QuizSummaryCard
+                  key={m._id || i}
+                  summary={m.quizSummary}
+                  note={m.text}
+                  onTeach={!busy && m.quizSummary.weakest
+                    ? () => send(`Teach me what I missed in the quiz, starting with ${m.quizSummary!.weakest}`)
+                    : undefined}
+                />
               : m.who === 'mentor' && looksLikeQuestion(m.text)
               ? <MentorQuestionCard key={m._id || i} text={m.text} label={m.label} timestamp={m.timestamp} />
-              : <Bubble key={m._id || i} who={m.who as 'mentor' | 'user'} item={m} />
+              : <Bubble
+                  key={m._id || i}
+                  who={m.who as 'mentor' | 'user'}
+                  item={m}
+                  // Only the latest reply you haven't answered yet can be re-asked shorter.
+                  onShorten={m.who === 'mentor' && !busy && i === displayMsgs.length - 1 && !m._id?.startsWith('err')
+                    ? () => { send('', { regenerate: m }); }
+                    : undefined}
+                />
           )}
           {busy && (() => {
             const last = msgs[msgs.length - 1];
@@ -880,6 +961,23 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
           floating card mid-scrollback (the previous behavior) reads as
           detached from the chat window; pinning it above the composer
           keeps it anchored the same way the composer itself is. */}
+      {!busy && quizBar && (
+        <div className="chat-options chat-options-docked">
+          <div className="quiz-bar">
+            <span className="quiz-bar-hint">Ask about this question, or move on when ready.</span>
+            <button
+              type="button"
+              className="btn btn-accent btn-sm"
+              onClick={() => quizBar.last
+                ? send('Finish quiz', { quizAction: 'finish' })
+                : send('Next question', { quizAction: 'next' })}
+            >
+              {quizBar.last ? 'Finish quiz' : 'Next question'} <Icon name="arrowR" size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {!busy && suggestions.length > 0 && (
         <div className="chat-options chat-options-docked">
           <QuickReplyOptions

@@ -32,6 +32,7 @@ from app.services.llm_trace import traced_messages_create
 from app.services.profiling_agent import propose_changes as propose_profile_changes
 from app.services.skill_graph_repo import fetch_skill_node
 from app.services.token_counter import TokenCounter
+from app.services.topic_service import UNNAMED_TITLE
 from app.services.vector_search import delete_vectors, embed_and_upsert
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,14 @@ _COMPACTION_TOOL_SCHEMA = {
             "summary": {
                 "type": "string",
                 "description": "A concise narrative summary (3-5 sentences) of the learning discussion",
+            },
+            "title": {
+                "type": "string",
+                "description": (
+                    "Only when the topic is unnamed: a short topic name (2-5 words, "
+                    "Title Case) for what this conversation is about, e.g. 'AWS "
+                    "Envelope Encryption'. Omit when the topic already has a name."
+                ),
             },
             "skill_updates": {
                 "type": "array",
@@ -180,6 +189,14 @@ async def _parse_tool_use_response(response, topic_title: str) -> dict:
         logger.error("LLM returned empty or invalid summary")
         raise ValueError("LLM returned empty summary")
 
+    # An unnamed topic takes the LLM's proposed name, and skill updates are
+    # validated against that name (subtopics of "New conversation" are noise).
+    # No usable name → keep the placeholder and drop skill updates this round.
+    if topic_title == UNNAMED_TITLE:
+        proposed = tool_input.get("title")
+        proposed = proposed.strip()[:100] if isinstance(proposed, str) else ""
+        topic_title = proposed if proposed and proposed != UNNAMED_TITLE else ""
+
     raw_skill_updates = tool_input.get("skill_updates", [])
     if not isinstance(raw_skill_updates, list):
         raw_skill_updates = []
@@ -196,6 +213,7 @@ async def _parse_tool_use_response(response, topic_title: str) -> dict:
 
     return {
         "summary": summary.strip(),
+        "title": topic_title or UNNAMED_TITLE,
         "skill_updates": validated_updates if validated_updates else None,
         "taught_concepts": taught_concepts,
         "profile_signals": raw_profile_signals,
@@ -209,7 +227,11 @@ async def _call_summarization_llm(messages: list[dict], topic_title: str) -> dic
     prompt_template = _load_prompt(_COMPACTION_PROMPT_FILE)
     prompt_text = (
         prompt_template
-        .replace("{{topic}}", topic_title or "General")
+        .replace(
+            "{{topic}}",
+            "(unnamed — choose a name and return it as `title`)" if topic_title == UNNAMED_TITLE
+            else topic_title or "General",
+        )
         .replace("{{conversation}}", conversation_excerpt)
     )
 
@@ -398,13 +420,24 @@ async def _close_session(topic_id: str, user_id: str, upto_timestamp: datetime) 
         logger.error("Session summarization LLM call failed for topic %s: %s", topic_id, str(e))
         return
 
+    # Rename an unnamed topic before anything keyed by title (skill_graph,
+    # taught_concepts) is written, so they land under the real name.
+    # Unsetting profileStamp makes the L1 scope re-classify for the new title.
+    topic_title = topic.get("title", "")
+    if topic_title == UNNAMED_TITLE and llm_result["title"] != UNNAMED_TITLE:
+        topic_title = llm_result["title"]
+        await topics_col().update_one(
+            {"topicId": topic_id, "userId": user_id, "title": UNNAMED_TITLE},
+            {"$set": {"title": topic_title}, "$unset": {"profileStamp": ""}},
+        )
+
     skill_updates = llm_result.get("skill_updates")
     if skill_updates:
-        await _apply_skill_updates(user_id, topic.get("title", ""), skill_updates)
+        await _apply_skill_updates(user_id, topic_title, skill_updates)
 
     taught_concepts = llm_result.get("taught_concepts")
-    if taught_concepts:
-        await _apply_taught_concepts(topic.get("title", ""), user_id, taught_concepts)
+    if taught_concepts and topic_title != UNNAMED_TITLE:
+        await _apply_taught_concepts(topic_title, user_id, taught_concepts)
 
     profile_signals = llm_result.get("profile_signals")
     if profile_signals:

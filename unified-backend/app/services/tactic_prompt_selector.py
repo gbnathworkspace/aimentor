@@ -53,6 +53,7 @@ class MentorMode(str, Enum):
 
 class MatchedRule(str, Enum):
     RULE_1_COLD_START = "RULE_1_COLD_START"
+    RULE_QUIZ_REQUEST = "RULE_QUIZ_REQUEST"
     RULE_2_URGENCY_DIRECT = "RULE_2_URGENCY_DIRECT"
     RULE_3_HIGH_FRUSTRATION_MULTI_ERROR = "RULE_3_HIGH_FRUSTRATION_MULTI_ERROR"
     RULE_4_SINGLE_ERROR_HINT = "RULE_4_SINGLE_ERROR_HINT"
@@ -115,6 +116,10 @@ _TACTIC_TOOL_SCHEMA = {
 }
 
 _TACTIC_SYSTEM_PROMPT = """You are the Teaching Tactic Selector for an AI mentor. Your sole job is to select the exact teaching mode for the mentor's next response by evaluating rules strictly top-to-bottom and stopping at the first match. Do not evaluate rules after a match is found.
+
+RULE QUIZ — EXPLICIT QUIZ / TEST REQUEST
+  User asks to be quizzed or tested ("quiz me", "test me on X", "ask me questions on what we covered").
+  -> RULE_QUIZ_REQUEST / DIAGNOSTIC
 
 RULE 2 — URGENCY / DIRECT LOOKUP
   User explicitly asks for a direct answer ("just tell me", "give me the code"), or asks a pure factual/syntax lookup ("what port does HTTPS use?", "syntax for array push").

@@ -98,3 +98,147 @@ export function QuickReplyOptions({
     </div>
   );
 }
+
+/** One MCQ in the fixed quiz template (.kiro/specs/mcq-quiz Req 1). */
+export type Quiz = {
+  q: number;
+  of: number;
+  /** Scoring/summary only — not shown on the card (Decision 8). */
+  subtopic?: string;
+  stem: string;
+  code?: string;
+  options: { id: string; text: string }[];
+  answer: string;
+  why: string;
+  misconceptions?: Record<string, string>;
+  /** Option id, "skip" for "I don't know", or absent while unanswered. */
+  picked?: string;
+};
+
+/** Finish-turn score card data, computed server-side from the graded picks (Req 6). */
+export type QuizSummary = {
+  correct: number;
+  total: number;
+  subtopics: { subtopic: string; mastery: number }[];
+  missed: {
+    q: number; stem: string; picked?: string; pickedText: string;
+    answer: string; answerText: string; misconception: string; why: string;
+  }[];
+  weakest?: string | null;
+};
+
+/** Minimal on-brand quiz card (Decisions 4, 8-10): `q / of`, stem, code,
+ *  vertical options. Grades the pick locally — no LLM call. */
+export function QuizCard({ quiz, onAnswer, onExplain }: {
+  quiz: Quiz;
+  onAnswer?: (picked: string) => void;
+  onExplain?: () => void;
+}) {
+  const picked = quiz.picked ?? undefined;
+  const answered = picked !== undefined;
+  const right = picked === quiz.answer;
+  const mistake = answered && !right && picked !== 'skip' ? quiz.misconceptions?.[picked!] : undefined;
+  return (
+    <div className="bubble-row">
+      <div className="onb-card quiz-card fade-up">
+        <div className="onb-card-icon"><Icon name="spark" size={14} /></div>
+        <div className="onb-card-body quiz-body">
+          <div className="quiz-count">{quiz.q} / {quiz.of}</div>
+          <div className="quiz-stem">{fmt(quiz.stem)}</div>
+          {quiz.code && <pre className="quiz-code"><code>{quiz.code}</code></pre>}
+          <div className="quiz-options" role="radiogroup" aria-label={`Question ${quiz.q} options`}>
+            {quiz.options.map((o) => {
+              const state = !answered ? '' : o.id === quiz.answer ? 'correct' : o.id === picked ? 'wrong' : 'dim';
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={picked === o.id}
+                  className={`quiz-option ${state}`}
+                  disabled={answered || !onAnswer}
+                  onClick={() => onAnswer?.(o.id)}
+                >
+                  <span className="quiz-option-id">{o.id}</span>
+                  <span className="quiz-option-text">{o.text}</span>
+                  {state === 'correct' && <Icon name="check" size={13} />}
+                  {state === 'wrong' && <Icon name="x" size={13} />}
+                </button>
+              );
+            })}
+          </div>
+          {!answered ? (
+            <button type="button" className="quiz-link quiz-skip" disabled={!onAnswer} onClick={() => onAnswer?.('skip')}>
+              I don't know
+            </button>
+          ) : (
+            <div className="quiz-result" role="status">
+              <div className={`quiz-verdict ${right ? 'correct' : 'wrong'}`}>
+                <Icon name={right ? 'check' : 'x'} size={13} />
+                {right ? `${quiz.answer} — Correct` : `${quiz.answer} is the answer`}
+              </div>
+              {mistake && <div className="quiz-why"><span className="quiz-why-label">Your pick:</span> {fmt(mistake)}</div>}
+              <div className="quiz-why">{fmt(quiz.why)}</div>
+              {onExplain && (
+                <button type="button" className="quiz-link" onClick={onExplain}>Explain more</button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** End-of-quiz card (Req 6): score, per-subtopic bars, missed-question review,
+ *  and a "Teach me what I missed" action. Numbers come from code, not the model. */
+export function QuizSummaryCard({ summary, note, onTeach }: {
+  summary: QuizSummary;
+  /** The mentor's one-line pointer, if any. */
+  note?: string;
+  onTeach?: () => void;
+}) {
+  return (
+    <div className="bubble-row">
+      <div className="onb-card quiz-card fade-up">
+        <div className="onb-card-icon"><Icon name="chart" size={14} /></div>
+        <div className="onb-card-body quiz-body">
+          <div className="quiz-count">Quiz complete</div>
+          <div className="quiz-score">{summary.correct} / {summary.total}</div>
+          <div className="quiz-bars">
+            {summary.subtopics.map((s) => (
+              <div key={s.subtopic} className="quiz-bar-row">
+                <span className="quiz-bar-label" title={s.subtopic}>{s.subtopic}</span>
+                <span className="quiz-bar-track" role="img" aria-label={`${s.subtopic}: ${s.mastery}%`}>
+                  <span className="quiz-bar-fill" style={{ width: `${s.mastery}%` }} />
+                </span>
+                <span className="quiz-bar-pct">{s.mastery}%</span>
+              </div>
+            ))}
+          </div>
+          {summary.missed.length > 0 && (
+            <div className="quiz-review">
+              <div className="quiz-review-head">Review</div>
+              {summary.missed.map((m) => (
+                <div key={m.q} className="quiz-review-item">
+                  <div className="quiz-review-stem">{m.q}. {fmt(m.stem)}</div>
+                  <div className="quiz-why">
+                    <Icon name="x" size={11} /> {m.picked && m.picked !== 'skip' ? `${m.picked}: ${m.pickedText}` : "You didn't know"}
+                    {m.misconception && <> — {m.misconception}</>}
+                  </div>
+                  <div className="quiz-why"><Icon name="check" size={11} /> {m.answer}: {m.answerText}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {note && <div className="quiz-why quiz-note">{fmt(note)}</div>}
+          {onTeach && summary.missed.length > 0 && (
+            <button type="button" className="btn btn-accent btn-sm quiz-teach" onClick={onTeach}>
+              Teach me what I missed <Icon name="arrowR" size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

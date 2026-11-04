@@ -22,6 +22,12 @@ You are analyzing a segment of a learning conversation that is being compacted t
 - skill_updates is a list of {subtopic, mastery} pairs, mastery 0-100 — only include
   subtopics of {{topic}} this excerpt gives real evidence about, do not guess at the rest
 
+## Rules for the title:
+- Only if the topic above says it is unnamed: return `title`, a 2-5 word Title Case name for
+  the subject being learned (e.g. "AWS Envelope Encryption", "React Hooks"), not a sentence
+  or a question. Use that same name as the topic for the skill_updates rules above.
+- If the topic already has a name, omit `title`.
+
 ## Rules for profile signals:
 - Only include a signal with real, specific evidence in this excerpt — do not force one
 - Return an empty profile_signals array if nothing stands out

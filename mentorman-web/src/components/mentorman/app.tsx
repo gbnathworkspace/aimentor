@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from './icons';
 import { TopicSidebar } from './TopicSidebar';
+import { TopicsPage } from './TopicsPage';
 import { ArchivedTopics } from './ArchivedTopics';
 import { ChatPanel } from './chat';
 import { Dashboard } from './dashboard';
@@ -10,7 +11,7 @@ import { Onboarding, Settings, AdminUsers, TraceLog } from './screens';
 import { DEFAULT_TONE, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
 
-type View = 'chat' | 'dashboard' | 'settings' | 'admin' | 'analytics' | 'onboarding';
+type View = 'chat' | 'topics' | 'dashboard' | 'settings' | 'admin' | 'analytics' | 'onboarding';
 
 export function MentorManApp() {
   // Baked-in defaults (the demo tweaks panel was removed for production).
@@ -30,9 +31,9 @@ export function MentorManApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Settings renders as a modal over whichever main view was active — remember it so
   // closing the modal returns there instead of always landing on chat.
-  const [lastMainView, setLastMainView] = useState<'chat' | 'dashboard' | 'admin' | 'analytics'>('chat');
+  const [lastMainView, setLastMainView] = useState<'chat' | 'topics' | 'dashboard' | 'admin' | 'analytics'>('chat');
   useEffect(() => {
-    if (view === 'chat' || view === 'dashboard' || view === 'admin' || view === 'analytics') setLastMainView(view);
+    if (view === 'chat' || view === 'topics' || view === 'dashboard' || view === 'admin' || view === 'analytics') setLastMainView(view);
   }, [view]);
 
   // Fetch user name via /api/me
@@ -114,12 +115,8 @@ export function MentorManApp() {
     />
   ) : (
     <TopicSidebar
-      selectedTopicId={activeTopic ?? undefined}
-      onSelectTopic={(topicId) => { setActiveTopic(topicId); setView('chat'); }}
-      onNewTopic={() => { setActiveTopic(null); setView('chat'); setChatKey(k => k + 1); }}
+      onAskMentor={() => { setActiveTopic(null); setView('chat'); setChatKey(k => k + 1); }}
       onViewArchived={() => setSidebarView('archived')}
-      onClearActiveTopic={() => setActiveTopic(null)}
-      refreshKey={topicsVersion}
       view={view}
       onNav={(v) => setView(v as View)}
       profile={profile}
@@ -173,6 +170,15 @@ export function MentorManApp() {
               topics={topics}
               profile={profile}
               userName={userName}
+            />
+          )}
+          {lastMainView === 'topics' && (
+            <TopicsPage
+              selectedTopicId={activeTopic ?? undefined}
+              onSelectTopic={(topicId) => { setActiveTopic(topicId); setView('chat'); }}
+              onNewTopic={() => { setActiveTopic(null); setView('chat'); setChatKey(k => k + 1); }}
+              onClearActiveTopic={() => setActiveTopic(null)}
+              refreshKey={topicsVersion}
             />
           )}
           {lastMainView === 'dashboard' && (

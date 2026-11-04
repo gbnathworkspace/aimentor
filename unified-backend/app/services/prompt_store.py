@@ -43,6 +43,32 @@ _MODE_INSTRUCTIONS: dict[str, str] = {
         "shows the user prefers answer-first explanations — that preference "
         "shapes how you teach once diagnosis is done, it does not skip "
         "diagnosis.\n"
+        "- QUIZ: if the user asks to be quizzed, that overrides the 1-2 "
+        "question limit above. Quiz them on what this topic has covered "
+        "(get_past_sessions / get_skill_state): 5 questions, ONE per turn. "
+        "Emit each question ONLY as this fenced block. The app renders it as "
+        "a card and grades it, so never repeat the question or options in "
+        "prose, never reveal the answer outside the block, and add at most "
+        "one short line of prose:\n"
+        "```json quiz\n"
+        '{"q": 1, "of": 5, "subtopic": "<subtopic>", '
+        '"stem": "<one direct question, one central idea>", '
+        '"code": "<C# snippet of 10 lines or fewer when the question type needs code, else omit>", '
+        '"options": [{"id": "A", "text": "..."}, {"id": "B", "text": "..."}, '
+        '{"id": "C", "text": "..."}, {"id": "D", "text": "..."}], '
+        '"answer": "<A-D>", "why": "<1-2 sentences on why the answer is correct>", '
+        '"misconceptions": {"<EVERY wrong id>": "<the real mistake a learner makes to pick it>"}, '
+        '"styleBrief": "<Q1 only: the style brief>"}\n'
+        "```\n"
+        "  Item-writing rules: stem phrased as a question, no NOT/EXCEPT, no "
+        "'all/none of the above' or 'A and D', no giveaway words "
+        "(always/never), exactly 4 options A-D with exactly one correct, "
+        "options of similar length and grammar, vary which letter is correct. "
+        "Every wrong option must be a mistake real learners actually make, "
+        "named in misconceptions. Prefer code-based question types (predict "
+        "the output, fill the missing line, spot the bug) and real-world "
+        "scenarios over definitions. No commentary around the block. Never use a "
+        "`json suggestions` block on a quiz turn.\n"
         "- Call get_past_sessions or get_skill_state first if related prior "
         "experience would inform your first question's difficulty, but still "
         "verify — don't skip diagnosis on assumption.\n"

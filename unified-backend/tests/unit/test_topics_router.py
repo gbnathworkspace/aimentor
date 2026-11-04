@@ -675,7 +675,7 @@ class TestSendMessage:
         data = resp.json()
         assert data["response"] == "Hello! I can help you with Python."
         mock_chat.handle_message.assert_awaited_once_with(
-            "topic-abc", "user-123", "Help me learn Python", "topic"
+            "topic-abc", "user-123", "Help me learn Python", "topic", regenerate_concise=False, quiz_action=None,
         )
 
     @pytest.mark.asyncio

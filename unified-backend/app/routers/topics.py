@@ -42,7 +42,8 @@ _chat_service = MentorAgent()
 class CreateTopicRequest(BaseModel):
     """Request body for creating a new topic."""
 
-    title: str = Field(..., min_length=1, max_length=100)
+    # Omitted → topic starts unnamed and is named at its first session end.
+    title: str | None = Field(None, min_length=1, max_length=100)
 
 
 class UpdateTopicRequest(BaseModel):
@@ -64,6 +65,16 @@ class SendMessageRequest(BaseModel):
 
     content: str = Field(..., min_length=1, max_length=50000)
     mode: MentorMode = Field(default="topic")
+    # True → replace the latest reply with a 2-3 sentence re-answer of the
+    # question before it (content is ignored).
+    regenerate_concise: bool = False
+    # Set by the quiz Next bar (.kiro/specs/mcq-quiz Req 3).
+    quiz_action: Literal["next", "finish"] | None = None
+
+
+class QuizAnswerRequest(BaseModel):
+    message_id: str
+    picked: Literal["A", "B", "C", "D", "skip"]
 
 
 class ResolveL1ScopeRequest(BaseModel):
@@ -312,8 +323,17 @@ async def send_message(
     Triggers the full chat flow: appends user message, assembles context,
     calls LLM, appends assistant response, and checks for compaction.
     """
-    result = await _chat_service.handle_message(topic_id, user_id, body.content, body.mode)
+    result = await _chat_service.handle_message(
+        topic_id, user_id, body.content, body.mode, regenerate_concise=body.regenerate_concise,
+        quiz_action=body.quiz_action,
+    )
     return result
+
+
+@router.post("/topic/{topic_id}/quiz-answer")
+async def quiz_answer(topic_id: str, body: QuizAnswerRequest, user_id: str = Depends(require_auth)):
+    """Record the learner's pick on a quiz card — no LLM call; the card grades itself."""
+    return await _topic_service.record_quiz_answer(topic_id, user_id, body.message_id, body.picked)
 
 
 @router.post("/topic/{topic_id}/close-session")

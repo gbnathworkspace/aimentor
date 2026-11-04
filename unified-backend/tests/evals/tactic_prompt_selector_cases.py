@@ -30,6 +30,22 @@ EVAL_CASES = [
         "category": "rule1_cold_start",
     },
 
+    # --- quiz_request: explicit "quiz me" routes to DIAGNOSTIC, not SOCRATIC ---
+    {
+        "query": "Quiz me on what I have learned so far",
+        "skill": {"subtopic_mastery": {"General": 50}},
+        "recent_messages": [],
+        "expected_mode": "DIAGNOSTIC",
+        "category": "quiz_request",
+    },
+    {
+        "query": "test me on dependency injection",
+        "skill": {"subtopic_mastery": {"General": 50}},
+        "recent_messages": [],
+        "expected_mode": "DIAGNOSTIC",
+        "category": "quiz_request",
+    },
+
     # --- rule2_urgency_direct: explicit direct-answer or factual lookup ---
     {
         "query": "just tell me the answer, what's the time complexity of quicksort worst case?",

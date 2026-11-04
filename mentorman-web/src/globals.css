@@ -2521,6 +2521,7 @@ body {
   color: var(--muted); text-transform: uppercase;
 }
 .welcome-error { margin-top: 14px; color: var(--danger); font-size: 12.5px; text-align: center; }
+.welcome-hint { margin-top: 12px; color: var(--muted-2); font-size: 12.5px; text-align: center; }
 
 /* Topic picker menu — the onboarding option list, re-anchored as a dropdown
    under the pill. max-height caps it once the topic list grows past a screenful. */

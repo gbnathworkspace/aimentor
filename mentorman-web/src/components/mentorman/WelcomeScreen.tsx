@@ -10,8 +10,9 @@ type IconName = 'spark' | 'code' | 'target' | 'chart';
 type Suggestion = { icon: IconName; title: string; desc: string; prompt: string };
 
 /** Starter prompts. Clicking one loads it into the composer rather than sending
- *  it outright — the prompts are open-ended because the selected topic supplies
- *  the subject. */
+ *  it outright. Each prompt is an open-ended prefix ("Quiz me on ") whose subject
+ *  is the picked topic's title — filled in when a topic is chosen, in either
+ *  order — or, with no topic, whatever the user types to finish it. */
 const SUGGESTIONS: Suggestion[] = [
   { icon: 'spark', title: 'Explain a concept', desc: 'Break down a topic step by step', prompt: 'Explain ' },
   { icon: 'code', title: 'Review my code', desc: 'Get feedback on what you wrote', prompt: 'Review my code for ' },
@@ -23,6 +24,15 @@ const SUGGESTIONS: Suggestion[] = [
 type Pick = { id: string | null; title: string };
 
 const NEW_TOPIC: Pick = { id: null, title: 'New topic' };
+
+/** True when `text` is still just a starter prefix with no subject typed after it. */
+const isBarePrefix = (text: string) =>
+  SUGGESTIONS.some((s) => s.prompt.trim() === text.trim());
+
+/** Composer text for a starter prompt aimed at `pick` — the topic title becomes
+ *  the subject when an existing topic is picked; otherwise the bare prefix. */
+const fillPrompt = (prompt: string, pick: Pick | null) =>
+  pick?.id ? `${prompt}${pick.title}` : prompt;
 
 export interface WelcomeScreenProps {
   /** Display name for the greeting; falls back to a plain "Welcome" when absent. */
@@ -57,6 +67,10 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
   const [ambiguous, setAmbiguous] = useState<TopicListItem[] | null>(null);
   const [routing, setRouting] = useState(false);
   const [topics, setTopics] = useState<TopicListItem[]>([]);
+  // The starter prompt last loaded into the composer and the exact text it
+  // produced. While the composer still holds that text untouched, picking a
+  // different topic re-targets the prompt instead of leaving a stale subject.
+  const [starter, setStarter] = useState<{ prompt: string; filled: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -66,7 +80,11 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
       .catch(() => {});
   }, []);
 
-  const canSend = text.trim().length > 0 && !busy && !routing;
+  // A bare prefix like "Quiz me on" has no subject — sending it would hand the
+  // mentor (or, with no topic picked, the topic router and the new topic's
+  // title) a dangling sentence. Hold the send until a subject exists.
+  const needsSubject = isBarePrefix(text);
+  const canSend = text.trim().length > 0 && !needsSubject && !busy && !routing;
 
   const submit = async () => {
     if (!canSend) return;
@@ -110,23 +128,37 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
 
   const choose = (p: Pick) => {
     setPicked(p);
+    if (starter && text === starter.filled) {
+      const filled = fillPrompt(starter.prompt, p);
+      setText(filled);
+      setStarter({ prompt: starter.prompt, filled });
+      parkCaretAtEnd();
+    }
     setMenuOpen(false);
     setDetected(null);
     setAmbiguous(null);
     ref.current?.focus();
   };
 
-  const pickSuggestion = (s: Suggestion) => {
-    setText(s.prompt);
+  // Focus after the value lands so the caret can be parked at the end — the
+  // prompts are prefixes the user is meant to finish (or extend).
+  const parkCaretAtEnd = () => {
     setFocus(true);
-    // Focus after the value lands so the caret can be parked at the end — the
-    // prompts are prefixes the user is meant to finish.
     requestAnimationFrame(() => {
       const el = ref.current;
       if (!el) return;
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
     });
+  };
+
+  const pickSuggestion = (s: Suggestion) => {
+    const filled = fillPrompt(s.prompt, picked);
+    setText(filled);
+    setStarter({ prompt: s.prompt, filled });
+    setDetected(null);
+    setAmbiguous(null);
+    parkCaretAtEnd();
   };
 
   return (
@@ -137,7 +169,7 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
             className="btn btn-sm btn-ghost"
             type="button"
             style={{ whiteSpace: 'nowrap' }}
-            onClick={() => { setText(''); setDetected(null); setAmbiguous(null); setPicked(NEW_TOPIC); ref.current?.focus(); }}
+            onClick={() => { setText(''); setStarter(null); setDetected(null); setAmbiguous(null); setPicked(NEW_TOPIC); ref.current?.focus(); }}
           >
             <Icon name="edit" size={13} /> New Topic
           </button>
@@ -236,7 +268,7 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
                 type="button"
                 onClick={submit}
                 disabled={!canSend}
-                title={busy ? 'Starting…' : routing ? 'Finding the right topic…' : 'Send'}
+                title={busy ? 'Starting…' : routing ? 'Finding the right topic…' : needsSubject ? 'Choose a topic or finish the prompt' : 'Send'}
                 aria-label="Send"
               >
                 <Icon name="arrowUp" size={16} />
@@ -262,6 +294,11 @@ export function WelcomeScreen({ userName, busy, error, onStart, onNav }: Welcome
             ))}
           </div>
 
+          {needsSubject && !error && (
+            <div className="welcome-hint" role="status">
+              Choose a topic above, or finish the prompt with what you want to cover.
+            </div>
+          )}
           {error && <div className="welcome-error" role="alert">{error}</div>}
 
           <div className="welcome-foot">

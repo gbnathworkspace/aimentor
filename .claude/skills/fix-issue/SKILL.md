@@ -16,7 +16,8 @@ verification.
 
 `/fix-issue [ship] <issue description>`
 
-- `ship` as the first word → merge automatically once all checks pass.
+- `ship` as the first word → merge automatically once all checks pass
+  (the issue/label confirmation in Step 0.5 still happens).
 - Otherwise (default) → stop at "PR ready" and wait for the user to say
   "ship it" / "merge" before merging.
 
@@ -52,17 +53,34 @@ Classify the issue and pick exactly one label from each group:
 
 Always add `auto-fix` as well, so these issues are easy to filter.
 
+### Confirm before going further (always — even in `ship` mode)
+
+Show the user this and **stop until they reply**:
+
+```
+**Issue:** <1–2 line restatement>
+**Labels:** bug · area:web · sev:high · auto-fix
+**Why:** <one line on the type/area/severity choice>
+
+Proceed with these labels? (yes / change labels / edit issue)
+```
+
+- **yes** → continue below.
+- **change labels** or **edit issue** → apply their changes, show the block
+  again, and wait for another yes.
+- Anything else / no reply → do nothing further. Do not create or label an
+  issue, and do not touch code, until the user has said yes.
+
 Then, on `gbnathworkspace/aimentor`:
 - **Existing issue given** → add the labels to it with `mcp__github__issue_write`
   (keep any labels already on it).
 - **Issue only described in chat** → create a GitHub issue with
   `mcp__github__issue_write`: title = the 1-line restatement, body = the
-  intake fields, labels = the chosen labels. Note its number `#N`.
+  intake fields, labels = the confirmed labels. Note its number `#N` and
+  share the link.
 
-GitHub creates a label the first time it's used. Tell the user the labels in
-one line (e.g. `bug · area:web · sev:high`) and continue — don't wait for
-approval unless they object. If the area or severity changes after Step 1,
-update the labels on the issue.
+GitHub creates a label the first time it's used. If the area or severity
+changes after Step 1, tell the user the new labels and update the issue.
 
 ## Step 1 — Locate
 

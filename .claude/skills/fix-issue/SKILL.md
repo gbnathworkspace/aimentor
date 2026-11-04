@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: Take a bug/issue description, fix it in the MentorMan codebase, verify with tests and build, open a PR into master, and (after confirmation) merge it so the Fly.io deploy publishes it live to mentorman.co.in. Use when the user says "/fix-issue", "fix this issue", "fix and deploy", "fix and ship", or pastes a bug report and wants it fixed and published.
+description: Take a bug/issue description (or a GitHub issue number), label it by type, area and severity, fix it in the MentorMan codebase, verify with tests and build, open a PR into master, and (after confirmation) merge it so the Fly.io deploy publishes it live to mentorman.co.in. Use when the user says "/fix-issue", "fix this issue", "fix and deploy", "fix and ship", or pastes a bug report and wants it fixed and published.
 ---
 
 # fix-issue
@@ -36,6 +36,33 @@ ONE message and wait:
 
 Then restate the issue in 1–2 lines as a checklist item. Do not start
 coding until the problem is clear enough to write a test for.
+
+If the argument is an existing GitHub issue (`#12` or an issue URL), read it
+with `mcp__github__issue_read` and use its title/body as the description.
+
+## Step 0.5 — Label the issue
+
+Classify the issue and pick exactly one label from each group:
+
+| Group | Labels | How to choose |
+|---|---|---|
+| Type | `bug`, `ui`, `performance`, `security`, `enhancement` | What kind of problem it is. Wrong behaviour/crash = `bug`; visual/layout/copy = `ui`; slow = `performance`; auth/data exposure = `security`; "should also do X" = `enhancement` |
+| Area | `area:backend`, `area:web`, `area:both`, `area:infra` | Where the fix will land (`unified-backend/`, `mentorman-web/`, both, or deploy/config). Revisit after Step 1 if the code says otherwise |
+| Severity | `sev:critical`, `sev:high`, `sev:medium`, `sev:low` | critical = site down / data loss / security hole; high = core flow (login, chat, topics) broken for users; medium = feature broken with a workaround; low = cosmetic |
+
+Always add `auto-fix` as well, so these issues are easy to filter.
+
+Then, on `gbnathworkspace/aimentor`:
+- **Existing issue given** → add the labels to it with `mcp__github__issue_write`
+  (keep any labels already on it).
+- **Issue only described in chat** → create a GitHub issue with
+  `mcp__github__issue_write`: title = the 1-line restatement, body = the
+  intake fields, labels = the chosen labels. Note its number `#N`.
+
+GitHub creates a label the first time it's used. Tell the user the labels in
+one line (e.g. `bug · area:web · sev:high`) and continue — don't wait for
+approval unless they object. If the area or severity changes after Step 1,
+update the labels on the issue.
 
 ## Step 1 — Locate
 
@@ -93,7 +120,8 @@ cd mentorman-web && npm ci && npm test && npm run build
 3. Open a PR into `master` with the GitHub MCP tool
    (`mcp__github__create_pull_request`, repo `gbnathworkspace/aimentor`).
    Body sections: **Issue**, **Root cause**, **Fix**, **Verification**
-   (commands + results), **Risk / rollback**.
+   (commands + results), **Risk / rollback**. Put `Fixes #N` at the top of
+   the body so merging closes the issue, and add the issue's labels to the PR.
 
 ## Step 6 — Ship
 
@@ -111,7 +139,7 @@ cd mentorman-web && npm ci && npm test && npm run build
 2. Once it finishes, `curl -sS https://mentorman.co.in/health` (the app
    scales to zero, so the first request may be slow — retry a few times).
 3. Final report:
-   - Issue (one line)
+   - Issue (one line), issue link `#N` and its labels
    - Root cause → fix (files changed)
    - Tests run and results (and anything not run)
    - PR link, deploy status, health check result

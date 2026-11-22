@@ -248,3 +248,15 @@ class TestVideosRouter:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 resp = await client.get("/api/videos/aircAruvnKk", headers=headers)
         assert resp.status_code == 404
+
+
+class TestSparseCaptions:
+    def test_dense_captions_are_not_sparse(self):
+        from app.services.youtube_transcript import is_sparse
+        assert not is_sparse(Transcript(_segments(300), "en", "captions"))
+
+    def test_garbage_captions_are_sparse(self):
+        from app.services.youtube_transcript import is_sparse
+        # ~1,270 chars over 21 minutes, like the English auto-captions on a Tamil video.
+        segs = [Segment("x" * 127, start=i * 126.0, duration=126.0) for i in range(10)]
+        assert is_sparse(Transcript(segs, "en", "auto_captions"))

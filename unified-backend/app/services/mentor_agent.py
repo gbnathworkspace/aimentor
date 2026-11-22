@@ -348,8 +348,11 @@ class MentorAgent:
         try:
             lc_messages = self._to_langchain_messages(system_prompt, messages, summary_blocks)
 
-            for round_idx in range(_MAX_LOOP_ROUNDS):
-                is_final_round = round_idx == _MAX_LOOP_ROUNDS - 1
+            max_rounds = _MAX_LOOP_ROUNDS
+            round_idx = -1
+            while round_idx + 1 < max_rounds:
+                round_idx += 1
+                is_final_round = round_idx == max_rounds - 1
                 llm = ChatAnthropic(
                     model=_MENTOR_MODEL,
                     max_tokens=8192,
@@ -395,6 +398,11 @@ class MentorAgent:
                 # Execute the requested lookups locally, feed results back,
                 # and continue to the next round for the real answer.
                 lc_messages.append(accumulated)
+                # A video ingest uses up the lookup round, and the model
+                # still wants its usual first lookups (e.g. get_skill_state)
+                # before answering: give it one extra round, once.
+                if max_rounds == _MAX_LOOP_ROUNDS and any(tc["name"] == "add_youtube_video" for tc in loop_calls):
+                    max_rounds += 1
                 for tc in loop_calls:
                     yield _TOOL_MARKER + json.dumps({"phase": "start", "name": tc["name"]}) + "\n"
                     # Confirmed by direct wire measurement: for search_documents/

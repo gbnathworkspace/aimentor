@@ -36,6 +36,7 @@ from app.services.youtube_transcript import (
     canonical_url,
     fetch_title,
     fetch_transcript,
+    is_sparse,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ _SUMMARY_INPUT_CHARS = 160_000
 _PUBLIC_FIELDS = {
     "_id": 0, "video_id": 1, "topic_id": 1, "url": 1, "title": 1, "status": 1,
     "transcript_source": 1, "language": 1, "duration_seconds": 1,
-    "chunk_count": 1, "summary": 1, "error": 1, "created_at": 1, "updated_at": 1,
+    "chunk_count": 1, "summary": 1, "sparse": 1, "error": 1, "created_at": 1, "updated_at": 1,
 }
 
 
@@ -164,6 +165,7 @@ async def run_video_ingest(user_id: str, topic_id: str, video_id: str) -> None:
         await _set(
             user_id, video_id, title=title, transcript_source=transcript.source,
             language=transcript.language, duration_seconds=round(last.start + last.duration),
+            sparse=is_sparse(transcript),
         )
 
         chunks = build_timed_chunks(transcript.segments)

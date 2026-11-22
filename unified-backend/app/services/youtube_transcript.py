@@ -129,20 +129,33 @@ def fetch_captions(video_id: str) -> Transcript | None:
         is_english = t.language_code.split("-")[0] == "en"
         return (0 if is_english else 1, 1 if t.is_generated else 0)
 
-    chosen = sorted(listing, key=rank)[0]
-    fetched = chosen.fetch()
-    segments = [
-        Segment(text=s.text.replace("\n", " ").strip(), start=float(s.start), duration=float(s.duration))
-        for s in fetched.snippets
-        if s.text and s.text.strip()
-    ]
-    if not segments:
-        return None
-    return Transcript(
-        segments=segments,
-        language=chosen.language_code,
-        source="auto_captions" if chosen.is_generated else "captions",
-    )
+    best: Transcript | None = None
+    # Usually the first track is the answer. When it is sparse (e.g. English
+    # auto-captions on a Tamil video), try up to two other tracks and keep
+    # the one with the most text.
+    for chosen in sorted(listing, key=rank)[:3]:
+        try:
+            fetched = chosen.fetch()
+        except Exception as e:
+            logger.warning("Caption track %s failed for %s: %s", chosen.language_code, video_id, e)
+            continue
+        segments = [
+            Segment(text=s.text.replace("\n", " ").strip(), start=float(s.start), duration=float(s.duration))
+            for s in fetched.snippets
+            if s.text and s.text.strip()
+        ]
+        if not segments:
+            continue
+        candidate = Transcript(
+            segments=segments,
+            language=chosen.language_code,
+            source="auto_captions" if chosen.is_generated else "captions",
+        )
+        if best is None or transcript_chars(candidate) > transcript_chars(best):
+            best = candidate
+        if not is_sparse(best):
+            break
+    return best
 
 
 def transcribe_audio(video_id: str) -> Transcript:
@@ -203,10 +216,33 @@ def transcribe_audio(video_id: str) -> Transcript:
     return Transcript(segments=segments, language=body.get("language", ""), source="whisper")
 
 
+# Speech runs ~800-1000 characters a minute; far below this the captions
+# are mostly missing or garbage (wrong-language auto-captions).
+_SPARSE_CHARS_PER_MINUTE = 250
+
+
+def transcript_chars(transcript: Transcript) -> int:
+    return sum(len(s.text) for s in transcript.segments)
+
+
+def is_sparse(transcript: Transcript) -> bool:
+    last = transcript.segments[-1]
+    minutes = max((last.start + last.duration) / 60, 1)
+    return transcript_chars(transcript) / minutes < _SPARSE_CHARS_PER_MINUTE
+
+
 def fetch_transcript(video_id: str) -> Transcript:
-    """Captions if the video has any, otherwise the Whisper fallback."""
+    """Captions if the video has any, otherwise the Whisper fallback.
+    Sparse captions also try Whisper when it is set up, keeping the captions
+    if that fails."""
     transcript = fetch_captions(video_id)
     if transcript is not None:
+        if is_sparse(transcript) and get_settings().OPENAI_API_KEY:
+            logger.info("Captions for %s look sparse, trying audio transcription", video_id)
+            try:
+                return transcribe_audio(video_id)
+            except TranscriptUnavailable as e:
+                logger.warning("Whisper fallback failed for %s: %s", video_id, e)
         return transcript
     logger.info("No captions for %s, falling back to audio transcription", video_id)
     return transcribe_audio(video_id)

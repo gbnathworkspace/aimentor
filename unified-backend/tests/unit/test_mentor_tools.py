@@ -385,3 +385,11 @@ class TestAddYoutubeVideo:
     async def test_bad_link(self):
         result = await run_tool("add_youtube_video", {"url": "https://example.com"}, TurnState("u1", "ML", topic_id="t1"))
         assert "isn't a valid YouTube" in result
+
+    @pytest.mark.asyncio
+    async def test_sparse_transcript_warns_the_model(self):
+        turn = TurnState(user_id="u1", topic_title="ML", topic_id="t1")
+        sparse = {**self._DONE, "sparse": True}
+        with patch("app.services.mentor_tools.get_video", AsyncMock(return_value=sparse)):
+            result = await run_tool("add_youtube_video", {"url": "2tPQaOZPpUw"}, turn)
+        assert "WARNING" in result and "do not guess" in result

@@ -157,6 +157,12 @@ def _describe_video(video: dict) -> str:
         f"Length: {format_timestamp(duration) if duration else 'unknown'}",
         f"Transcript chunks stored: {video.get('chunk_count') or 0}",
     ]
+    if video.get("sparse"):
+        lines.append(
+            "WARNING: the video's captions are sparse or unreliable (often the "
+            "wrong language), so the transcript is incomplete. Tell the user "
+            "this and do not guess at what the video says."
+        )
     if video.get("summary"):
         lines.append(f"Summary: {video['summary']}")
     lines.append("Use search_documents for specific details from this video.")

@@ -93,6 +93,10 @@ def document_upload_jobs_col():
     return get_db()["document_upload_jobs"]
 
 
+def videos_col():
+    return get_db()["videos"]
+
+
 def llm_traces_col():
     return get_db()["llm_traces"]
 
@@ -118,6 +122,8 @@ async def _ensure_indexes() -> None:
     await sessions_col().create_index("session_id", unique=True)
     await sessions_col().create_index("user_id")
     await ingestion_jobs_col().create_index("job_id", unique=True)
+    await videos_col().create_index([("user_id", 1), ("video_id", 1)], unique=True)
+    await videos_col().create_index([("user_id", 1), ("topic_id", 1)])
     await ingestion_jobs_col().create_index("user_id")
     await immediate_contexts_col().create_index("session_id")
     await subtopic_lists_col().create_index("topic", unique=True)

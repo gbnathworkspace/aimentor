@@ -28,6 +28,7 @@ from app.routers import (
     sessions,
     skills,
     topics,
+    videos,
 )
 from app.services.file_cleanup import file_cleanup_loop
 from app.services.session_manager import SessionManager
@@ -124,6 +125,7 @@ app.include_router(ingest.router)
 app.include_router(documents.router)
 app.include_router(memory.router)
 app.include_router(topics.router)
+app.include_router(videos.router)
 
 
 @app.get("/health")

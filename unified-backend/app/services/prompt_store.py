@@ -180,10 +180,10 @@ def format_learning_context(profile: dict[str, Any], l1_scope: list[dict] | None
     list is used as-is, even if every entry is irrelevant — that's the
     filter doing its job, not a failure to fall back from.
 
-    "uncertain" entries are included (not dropped) — an interim policy,
-    pending a real "ask the user" resolution flow (not built yet): missing
-    a genuinely relevant item silently is worse than including a borderline
-    one until that item gets a real answer.
+    "uncertain" entries are included (not dropped): the user is never asked
+    about them, and missing a genuinely relevant item silently is worse than
+    including a borderline one. The user can still override any verdict by
+    hand from the L1 memory view.
     """
     situations = extract_situations(profile)
 

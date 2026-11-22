@@ -12,7 +12,7 @@ export interface L1MemoryModalProps {
    *  the mentor prompt does (see prompt_store._format_style_notes). */
   profile: CoreProfile | null | undefined;
   /** Reclassify one entry — drag-drop between Relevant/Not relevant calls
-   *  this the same way UncertainRelevanceModal's onAnswer does. */
+   *  this via the topic's l1-scope/resolve endpoint. */
   onResolve: (situation: string, relevant: boolean) => void;
   onClose: () => void;
 }
@@ -38,7 +38,7 @@ const DRAG_MIME = 'application/x-l1-situation';
  * cards. This shows the full l1_scope list classify_relevance produced.
  *
  * Drag a row onto "Relevant" or "Not relevant" to override the classifier's
- * call — same resolve endpoint UncertainRelevanceModal uses
+ * call — the l1-scope/resolve endpoint
  * (POST /topic/{id}/l1-scope/resolve), so a manual move survives a later
  * profile-triggered recompute (TopicService._merge_l1_scope). "Not relevant"
  * starts collapsed — it's the group least likely to need attention.

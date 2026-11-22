@@ -8,7 +8,6 @@ import { TopicRenameInput } from './TopicCreation';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SummaryBlockIndicator } from './SummaryBlockIndicator';
 import { SubtopicWeightsModal, buildGoalCards } from './SubtopicWeightsModal';
-import { UncertainRelevanceModal, type UncertainL1ScopeItem } from './UncertainRelevanceModal';
 import { L1MemoryModal } from './L1MemoryModal';
 import { MentorQuestionCard, QuickReplyOptions, QuizCard, QuizSummaryCard, looksLikeQuestion, type QuickReplyOption, type Quiz, type QuizSummary } from './QuestionCard';
 import { TopicContextPanel } from './TopicContextPanel';
@@ -310,22 +309,15 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   const [suggestions, setSuggestions] = useState<QuickReplyOption[]>([]);
   const [topicTitle, setTopicTitle] = useState<string>('New Topic');
   // Full l1_scope for the current topic (facts about you, see
-  // .kiro/specs/topic-scoping) — source of truth for both the topic-open
-  // uncertain-items modal and SubtopicWeightsModal's goal-card filtering.
+  // .kiro/specs/topic-scoping) — source of truth for SubtopicWeightsModal's
+  // goal-card filtering and the L1 memory view. "uncertain" entries are never
+  // asked about: they're kept, same as the backend prompt does.
   const [l1Scope, setL1Scope] = useState<L1ScopeEntry[]>([]);
-  // l1_scope entries the classifier judged "uncertain" and the user hasn't
-  // resolved yet — surfaced via UncertainRelevanceModal on topic open.
-  const [uncertainItems, setUncertainItems] = useState<UncertainL1ScopeItem[]>([]);
-  const [showUncertainModal, setShowUncertainModal] = useState(false);
   // One entry per closed-and-compacted session (topic.summaryBlocks,
   // lastMergedAt — the moment that sitting's messages were summarized on
   // close). Used only to place a subtle "session ended" divider among the
   // loaded messages; see insertSessionDividers.
   const [sessionEndTimes, setSessionEndTimes] = useState<string[]>([]);
-  // Same modal, reused to gate opening the weights picker specifically on
-  // uncertain situations/context that its goal cards would otherwise use.
-  const [weightsGateItems, setWeightsGateItems] = useState<UncertainL1ScopeItem[]>([]);
-  const [showWeightsGate, setShowWeightsGate] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const greetedRef = useRef(false);
 
@@ -366,8 +358,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     setBusy(true);
     greetedRef.current = true;
 
-    // Fetch topic metadata for title + surface any unresolved uncertain
-    // l1_scope entries (see .kiro/specs/topic-scoping).
+    // Fetch topic metadata for title + l1_scope (see .kiro/specs/topic-scoping).
     fetch(`/api/topic/${topicId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -377,9 +368,6 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
         setSessionEndTimes(blocks.map(b => b.lastMergedAt).filter((t): t is string => !!t));
         const scope: L1ScopeEntry[] = data?.l1_scope || [];
         setL1Scope(scope);
-        const uncertain = scope.filter(e => e.verdict === 'uncertain' && !e.userResolved);
-        setUncertainItems(uncertain);
-        setShowUncertainModal(uncertain.length > 0);
       })
       .catch(() => {});
 
@@ -684,11 +672,8 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     send(text);
   }, [topicId, pendingFirst, loadedFor, send]);
 
-  // Persist the user's answer for one uncertain l1_scope entry. Updates local
-  // state optimistically so the weights-modal gate (below) and any later
-  // reopen within this session see the resolved verdict immediately, without
-  // waiting on the network round trip. The POST itself is fire-and-forget —
-  // a failure just means it gets asked again next topic open, same as skipping.
+  // Persist a manual relevance override from the L1 memory view (drag-drop).
+  // Updates local state optimistically; the POST is fire-and-forget.
   const resolveUncertain = useCallback((situation: string, relevant: boolean) => {
     if (!topicId) return;
     setL1Scope(prev => prev.map(e => e.situation === situation
@@ -708,10 +693,6 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
   const [showWeights, setShowWeights] = useState(false);
   const [showL1Memory, setShowL1Memory] = useState(false);
 
-  // Opening the weights picker: if any situation/context text its goal
-  // cards would use is still "uncertain" and unresolved, resolve those
-  // right here first — same modal as topic-open, scoped to just this
-  // subset — instead of silently proceeding with a stale/unfiltered card.
   // Whether opening the weights modal will auto-run from real scoped L1
   // memory (vs. falling back to the generic "Just revising" option) — drives
   // the small indicator dot on the chart icon below.
@@ -720,18 +701,7 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
     [profile, topicTitle, l1Scope]
   );
 
-  const openWeights = useCallback(() => {
-    const cardTexts = new Set(
-      [...(profile?.learning_context_detail?.situations ?? []), profile?.learning_context_detail?.label].filter(Boolean) as string[]
-    );
-    const pending = l1Scope.filter(e => e.verdict === 'uncertain' && !e.userResolved && cardTexts.has(e.situation));
-    if (pending.length > 0) {
-      setWeightsGateItems(pending);
-      setShowWeightsGate(true);
-    } else {
-      setShowWeights(true);
-    }
-  }, [profile, l1Scope]);
+  const openWeights = useCallback(() => setShowWeights(true), []);
   const exportTranscript = useCallback(async () => {
     if (!topicId || exporting) return;
     setExporting(true);
@@ -865,22 +835,6 @@ export function ChatPanel({ topicId, tone, setTone, onNav, onTopicUpdated, onTop
         profile={profile}
         onResolve={resolveUncertain}
         onClose={() => setShowL1Memory(false)}
-      />
-
-      <UncertainRelevanceModal
-        open={showUncertainModal}
-        topicTitle={topicTitle}
-        items={uncertainItems}
-        onAnswer={resolveUncertain}
-        onClose={() => setShowUncertainModal(false)}
-      />
-
-      <UncertainRelevanceModal
-        open={showWeightsGate}
-        topicTitle={topicTitle}
-        items={weightsGateItems}
-        onAnswer={resolveUncertain}
-        onClose={() => { setShowWeightsGate(false); setShowWeights(true); }}
       />
 
       <AlertStack topics={topics} onReview={() => onNav('dashboard')} />

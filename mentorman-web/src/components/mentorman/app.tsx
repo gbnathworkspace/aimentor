@@ -10,6 +10,7 @@ import { Dashboard } from './dashboard';
 import { Onboarding, Settings, AdminUsers, TraceLog } from './screens';
 import { DEFAULT_TONE, type ToneId, type Topic } from './data';
 import type { CoreProfile } from '@/lib/mentorman-api';
+import { trackScreen, identifyUser } from '@/lib/analytics';
 
 type View = 'chat' | 'topics' | 'dashboard' | 'settings' | 'admin' | 'analytics' | 'onboarding';
 
@@ -33,6 +34,9 @@ export function MentorManApp() {
   // closing the modal returns there instead of always landing on chat.
   const [lastMainView, setLastMainView] = useState<'chat' | 'topics' | 'dashboard' | 'admin' | 'analytics'>('chat');
   useEffect(() => {
+    trackScreen(view);
+  }, [view]);
+  useEffect(() => {
     if (view === 'chat' || view === 'topics' || view === 'dashboard' || view === 'admin' || view === 'analytics') setLastMainView(view);
   }, [view]);
 
@@ -43,6 +47,7 @@ export function MentorManApp() {
       .then(data => {
         if (data?.name) setUserName(data.name);
         setIsAdmin(!!data?.is_admin);
+        if (data?.user_id) identifyUser(data.user_id, { email: data.email, name: data.name });
       })
       .catch(() => {});
   }, []);

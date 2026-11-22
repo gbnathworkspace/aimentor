@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { setTokenSource, setAuthHandlers } from '../api/client';
 import { configureApiClient } from './api-client';
+import { resetAnalytics } from '../lib/analytics';
 
 const BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
@@ -55,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     setAccessToken(null);
+    resetAnalytics();
     try {
       await fetch(`${BASE}/api/auth/logout`, {
         method: 'POST',

@@ -4,6 +4,7 @@ import React, { Fragment, useState, useEffect, useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { useAuth } from '../../auth/useAuth';
 import { Icon } from './icons';
+import { findYouTubeLinks, stripYouTubeLinks, youTubeThumbnail } from '@/lib/youtube';
 import { SpeakButton } from './SpeakButton';
 import { type Session } from './data';
 import { truncateFilename, formatFileSize } from '@/lib/chat-upload/utils';
@@ -331,6 +332,9 @@ export function Bubble({ who, item, delay, onShorten }: {
   delay?: number;
 }) {
   const time = item.timestamp && formatBubbleTime(item.timestamp);
+  // Your own pasted YouTube links show as a thumbnail card, not a raw URL.
+  const videos = who === 'user' ? findYouTubeLinks(item.text) : [];
+  const bodyText = videos.length ? stripYouTubeLinks(item.text) : item.text;
   return (
     <Msg who={who} delay={delay} modeLabel={item.label}>
       {/* tabIndex makes the timestamp reachable via keyboard/touch focus, not
@@ -350,7 +354,20 @@ export function Bubble({ who, item, delay, onShorten }: {
               ))}
             </div>
           )}
-          {fmt(item.text)}
+          {videos.map(v => (
+            <a
+              key={v.id}
+              className="video-card"
+              href={v.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open the YouTube video"
+            >
+              <img src={youTubeThumbnail(v.id)} alt="YouTube video thumbnail" loading="lazy" />
+              <span className="video-card-play" aria-hidden="true">▶</span>
+            </a>
+          ))}
+          {bodyText && fmt(bodyText)}
           {item.nudge && (
             <div className="nudge">
               <div className="label">Nudge</div>

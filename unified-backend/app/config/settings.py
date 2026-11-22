@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # Embeddings
     VOYAGE_API_KEY: str
 
+    # YouTube video ingest. OPENAI_API_KEY enables the Whisper fallback for
+    # videos with no captions. YOUTUBE_PROXY_URL (e.g. http://user:pass@host:port)
+    # works around YouTube blocking transcript requests from cloud IPs.
+    OPENAI_API_KEY: Optional[str] = None
+    YOUTUBE_PROXY_URL: Optional[str] = None
+
     # Storage
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
     S3_BUCKET_NAME: Optional[str] = None

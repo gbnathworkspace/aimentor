@@ -28,7 +28,8 @@ GOLDEN_TOOLS = [
         "name": "search_documents",
         "description": (
             "Semantically search the user's uploaded documents (résumé, notes, "
-            "problem lists) for a specific query. Use this when you need a "
+            "problem lists) and the transcripts of YouTube videos they added, for a "
+            "specific query. Video results start with the video title and timestamp. Use this when you need a "
             "detail that isn't already in the Uploaded Documents section — the "
             "default injection is a small unranked sample, not the full set."
         ),
@@ -143,7 +144,7 @@ class TestInjection:
                 {"query": "salary", "user_id": "attacker", "turn": attacker},
                 turn,
             )
-        mock_search.assert_awaited_once_with("salary", "u1", source="ingestion", limit=5)
+        mock_search.assert_awaited_once_with("salary", "u1", source=["ingestion", "video_transcript"], limit=5)
 
     @pytest.mark.asyncio
     async def test_concurrent_turns_stay_isolated(self):
@@ -165,8 +166,27 @@ class TestSearchTools:
         hits = [{"text": "résumé line"}, {"text": "notes line"}]
         with patch("app.services.mentor_tools.vector_search", AsyncMock(return_value=hits)) as mock_search:
             result = await run_tool("search_documents", {"query": "experience"}, turn)
-        mock_search.assert_awaited_once_with("experience", "u1", source="ingestion", limit=5)
+        mock_search.assert_awaited_once_with(
+            "experience", "u1", source=["ingestion", "video_transcript"], limit=5
+        )
         assert result == "résumé line\n\nnotes line"
+
+    @pytest.mark.asyncio
+    async def test_search_documents_labels_video_chunks_with_title_and_timestamp(self, turn):
+        hits = [{
+            "text": "gradient descent steps downhill",
+            "metadata": {
+                "source": "video_transcript", "title": "Neural nets",
+                "url": "https://www.youtube.com/watch?v=aircAruvnKk",
+                "start_seconds": 75.4, "end_seconds": 130.0,
+            },
+        }]
+        with patch("app.services.mentor_tools.vector_search", AsyncMock(return_value=hits)):
+            result = await run_tool("search_documents", {"query": "descent"}, turn)
+        assert result == (
+            "[Video: Neural nets @ 1:15-2:10 https://www.youtube.com/watch?v=aircAruvnKk&t=75s]\n"
+            "gradient descent steps downhill"
+        )
 
     @pytest.mark.asyncio
     async def test_search_other_topics_uses_summary_block_source(self, turn):

@@ -124,17 +124,18 @@ async def delete_topic_document(topic_id: str, user_id: str, filename: str) -> i
 
 
 async def vector_search(
-    query: str, user_id: str, source: str, limit: int = 5, topic_id: str | None = None
+    query: str, user_id: str, source: str | list[str], limit: int = 5, topic_id: str | None = None
 ) -> list[dict]:
     """Semantic search over embeddings_col, filtered to this user and source
-    (and optionally one topic). Returns [] on any failure — retrieval is
+    (one source, or any of a list) and optionally one topic. Returns [] on any failure — retrieval is
     always a best-effort enhancement, never a hard dependency for a turn.
     """
     query_vector = await embed_text(query)
     if not query_vector:
         return []
 
-    filter_clause: dict = {"user_id": user_id, "metadata.source": source}
+    source_filter = {"$in": source} if isinstance(source, list) else source
+    filter_clause: dict = {"user_id": user_id, "metadata.source": source_filter}
     if topic_id is not None:
         filter_clause["metadata.topic_id"] = topic_id
 

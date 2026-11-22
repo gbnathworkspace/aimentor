@@ -23,6 +23,7 @@ from app.services.llm_trace import write_trace
 from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.topic_service import UNNAMED_TITLE
 from app.services.vector_search import vector_search
+from app.services.video_ingest import VIDEO_SOURCE, format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class TurnState:
 
 _SEARCH_DOCUMENTS_DESCRIPTION = (
     "Semantically search the user's uploaded documents (résumé, notes, "
-    "problem lists) for a specific query. Use this when you need a "
+    "problem lists) and the transcripts of YouTube videos they added, for a "
+    "specific query. Video results start with the video title and timestamp. Use this when you need a "
     "detail that isn't already in the Uploaded Documents section — the "
     "default injection is a small unranked sample, not the full set."
 )
@@ -99,15 +101,29 @@ _RECORD_DIAGNOSTIC_VERDICT_SCHEMA = {
 }
 
 
+def _format_result(result: dict) -> str:
+    text = result.get("text", "")
+    meta = result.get("metadata") or {}
+    if meta.get("source") != VIDEO_SOURCE:
+        return text
+    start = meta.get("start_seconds") or 0
+    header = (
+        f"[Video: {meta.get('title') or meta.get('url')} @ "
+        f"{format_timestamp(start)}-{format_timestamp(meta.get('end_seconds') or start)} "
+        f"{meta.get('url')}&t={int(start)}s]"
+    )
+    return f"{header}\n{text}"
+
+
 def _format_search_results(results: list[dict], empty_msg: str) -> str:
     if not results:
         return empty_msg
-    return "\n\n".join(r.get("text", "") for r in results)
+    return "\n\n".join(_format_result(r) for r in results)
 
 
 @tool("search_documents", description=_SEARCH_DOCUMENTS_DESCRIPTION)
 async def search_documents(query: str, turn: Annotated[TurnState, InjectedToolArg]) -> str:
-    results = await vector_search(query, turn.user_id, source="ingestion", limit=5)
+    results = await vector_search(query, turn.user_id, source=["ingestion", VIDEO_SOURCE], limit=5)
     return _format_search_results(results, "No matching documents found.")
 
 

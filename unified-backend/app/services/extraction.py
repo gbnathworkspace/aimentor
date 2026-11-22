@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pypdf import PdfReader
 
 from app.config.database import ingestion_jobs_col
+from app.services.storage import open_for_read
 from app.services.vector_search import embed_and_upsert
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,47 @@ def extract_text_from_csv(file_path: str) -> str:
     return "\n".join(rows_text)
 
 
+def chunk_spans(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[tuple[int, int]]:
+    """Return the (start, end) character offsets of each chunk chunk_text makes.
+
+    Same walk as chunk_text, but keeps positions so callers can map a chunk
+    back to where it came from (e.g. a video transcript's timestamps).
+    Offsets are of the raw slice; chunk_text strips it.
+    """
+    if not text or not text.strip():
+        return []
+
+    # Ensure overlap is less than chunk_size to avoid infinite loops
+    if overlap >= chunk_size:
+        overlap = chunk_size // 2
+
+    spans: list[tuple[int, int]] = []
+    start = 0
+    text_len = len(text)
+
+    while start < text_len:
+        end = start + chunk_size
+
+        # If this isn't the last chunk, try to break at a whitespace boundary
+        if end < text_len:
+            # Look for the last whitespace within the chunk
+            last_space = text.rfind(" ", start, end)
+            if last_space > start:
+                end = last_space
+
+        if text[start:end].strip():
+            spans.append((start, min(end, text_len)))
+
+        # Move forward by chunk_size - overlap
+        start = start + chunk_size - overlap
+
+        # Avoid infinite loop if overlap >= chunk_size
+        if start <= (end - chunk_size + overlap) and spans:
+            start = end
+
+    return spans
+
+
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
     """Split text into overlapping chunks.
 
@@ -85,39 +127,7 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
     Returns:
         A list of text chunks.
     """
-    if not text or not text.strip():
-        return []
-
-    # Ensure overlap is less than chunk_size to avoid infinite loops
-    if overlap >= chunk_size:
-        overlap = chunk_size // 2
-
-    chunks: list[str] = []
-    start = 0
-    text_len = len(text)
-
-    while start < text_len:
-        end = start + chunk_size
-
-        # If this isn't the last chunk, try to break at a whitespace boundary
-        if end < text_len:
-            # Look for the last whitespace within the chunk
-            last_space = text.rfind(" ", start, end)
-            if last_space > start:
-                end = last_space
-
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-
-        # Move forward by chunk_size - overlap
-        start = start + chunk_size - overlap
-
-        # Avoid infinite loop if overlap >= chunk_size
-        if start <= (end - chunk_size + overlap) and chunks:
-            start = end
-
-    return chunks
+    return [text[s:e].strip() for s, e in chunk_spans(text, chunk_size, overlap)]
 
 
 async def process_extraction(
@@ -146,12 +156,14 @@ async def process_extraction(
             ext = os.path.splitext(file_path)[1].lower()
             filename = os.path.basename(file_path)
 
-            if ext == ".pdf":
-                text = extract_text_from_pdf(file_path)
-            elif ext == ".csv":
-                text = extract_text_from_csv(file_path)
-            else:
+            if ext not in (".pdf", ".csv"):
                 raise ValueError(f"Unsupported file type: {ext}")
+            # S3 key in prod, local path in dev (see storage.open_for_read).
+            with open_for_read(file_path) as local_path:
+                if ext == ".pdf":
+                    text = extract_text_from_pdf(local_path)
+                else:
+                    text = extract_text_from_csv(local_path)
 
             if not text or not text.strip():
                 logger.warning(
@@ -224,13 +236,16 @@ async def process_topic_document(
     for file_path, filename in file_paths:
         ext = os.path.splitext(file_path)[1].lower()
         try:
-            if ext == ".pdf":
-                text = extract_text_from_pdf(file_path)
-            elif ext == ".csv":
-                text = extract_text_from_csv(file_path)
-            else:
+            if ext not in (".pdf", ".csv"):
                 logger.warning("Unsupported file type %s for topic=%s", ext, topic_id)
                 continue
+            # In prod (STORAGE_BACKEND=s3) file_path is an S3 key, not a
+            # local path: open_for_read downloads it to a temp file first.
+            with open_for_read(file_path) as local_path:
+                if ext == ".pdf":
+                    text = extract_text_from_pdf(local_path)
+                else:
+                    text = extract_text_from_csv(local_path)
 
             if not text or not text.strip():
                 logger.warning("No text extracted from %s for topic=%s", filename, topic_id)

@@ -11,6 +11,11 @@ COPY mentorman-web/ .
 # Baked into the SPA bundle at build time (non-secret, public value)
 ARG VITE_CLERK_PUBLISHABLE_KEY
 ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+# PostHog analytics (public project key, set in fly.toml [build.args]); empty = off
+ARG VITE_POSTHOG_KEY=""
+ARG VITE_POSTHOG_HOST=""
+ENV VITE_POSTHOG_KEY=$VITE_POSTHOG_KEY
+ENV VITE_POSTHOG_HOST=$VITE_POSTHOG_HOST
 # Same-origin in prod — no cross-origin base URL needed
 ENV VITE_API_BASE=""
 

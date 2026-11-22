@@ -10,6 +10,13 @@ import {
   uploadTopicDocuments,
   type TopicDocument,
 } from '@/lib/topic-documents-api';
+import {
+  deleteTopicVideo,
+  isVideoInProgress,
+  listTopicVideos,
+  type TopicVideo,
+} from '@/lib/topic-videos-api';
+import { youTubeThumbnail } from '@/lib/youtube';
 
 const SUPPORTED_ACCEPT = '.pdf,.csv';
 
@@ -105,6 +112,7 @@ function WorkingOnReply({ events, onDismiss }: { events: ToolEvent[]; onDismiss:
  */
 export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { topicId: string | null; toolEvents?: ToolEvent[]; onDismissWorking?: () => void }) {
   const [documents, setDocuments] = useState<TopicDocument[]>([]);
+  const [videos, setVideos] = useState<TopicVideo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -117,6 +125,34 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
   }, [topicId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const refreshVideos = useCallback(() => {
+    if (!topicId) { setVideos([]); return; }
+    listTopicVideos(topicId).then(setVideos);
+  }, [topicId]);
+
+  useEffect(() => { refreshVideos(); }, [refreshVideos]);
+
+  // The mentor adds a video mid-reply (add_youtube_video): re-read the list
+  // when that tool starts and again when it ends.
+  const videoToolSignature = (toolEvents ?? [])
+    .filter(e => e.name === 'add_youtube_video')
+    .map(e => `${e.startedAt}:${e.endedAt ?? ''}`)
+    .join(',');
+  useEffect(() => { if (videoToolSignature) refreshVideos(); }, [videoToolSignature, refreshVideos]);
+
+  // A video still processing in the background: poll until it settles.
+  const hasPendingVideo = videos.some(isVideoInProgress);
+  useEffect(() => {
+    if (!hasPendingVideo) return;
+    const id = setInterval(refreshVideos, 3000);
+    return () => clearInterval(id);
+  }, [hasPendingVideo, refreshVideos]);
+
+  const onRemoveVideo = useCallback((videoId: string) => {
+    setVideos(vs => vs.filter(v => v.video_id !== videoId));
+    deleteTopicVideo(videoId).catch(() => refreshVideos());
+  }, [refreshVideos]);
 
   const onSelect = useCallback((fileList: FileList | null) => {
     if (!topicId || !fileList || fileList.length === 0) return;
@@ -173,7 +209,7 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
           </button>
           <span className="context-panel-title-group">
             <span className="context-panel-title">Context</span>
-            {documents.length > 0 && <span className="context-panel-count">{documents.length}</span>}
+            {documents.length + videos.length > 0 && <span className="context-panel-count">{documents.length + videos.length}</span>}
           </span>
           <button
             type="button"
@@ -206,6 +242,37 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
 
         {contentOpen && error && <div className="context-panel-error">{error}</div>}
 
+        {contentOpen && videos.length > 0 && (
+          <div className="context-panel-list">
+            {videos.map(v => (
+              <div key={v.video_id} className="context-video-card">
+                <a href={v.url} target="_blank" rel="noopener noreferrer" className="context-video-thumb" aria-label="Open the YouTube video">
+                  <img src={youTubeThumbnail(v.video_id)} alt="" loading="lazy" />
+                </a>
+                <div className="context-video-info">
+                  <span className="context-video-title" title={v.title || v.url}>{v.title || v.url}</span>
+                  <span className={`context-video-status${v.status === 'failed' ? ' failed' : ''}`}>
+                    {v.status === 'completed'
+                      ? 'Transcript ready'
+                      : v.status === 'failed'
+                      ? (v.error || 'Could not read this video')
+                      : 'Reading transcript…'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="context-doc-remove"
+                  title="Remove video"
+                  aria-label="Remove video"
+                  onClick={() => onRemoveVideo(v.video_id)}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {contentOpen && documents.length > 0 && (
           <div className="context-panel-list">
             {documents.map(doc => (
@@ -230,8 +297,8 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
 
         {contentOpen && (
           <button type="button" className="context-panel-dropzone" onClick={() => inputRef.current?.click()} disabled={loading}>
-            {documents.length === 0
-              ? 'No documents yet — add notes, syllabi, or problem sets.'
+            {documents.length === 0 && videos.length === 0
+              ? 'No documents yet — add notes, syllabi, or problem sets, or paste a YouTube link in chat.'
               : '+ Add a document'}
           </button>
         )}

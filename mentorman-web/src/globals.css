@@ -209,20 +209,102 @@ body {
 .sb-nav-item .label { flex: 1; }
 .sidebar.collapsed .sb-nav-item { justify-content: center; padding: 0; }
 
-/* Topics page — the old sidebar list, widened for the main area.
-   One full-width column: the "All topics" header, group heads and rows share
-   the same 37px outer gutter, so labels, counts and dates line up. */
-.dash > .sb-section { padding: 22px 37px 8px; }
-/* .session-list (declared below) would otherwise win and shrink this to 8px. */
-.session-list.topics-page-list { padding: 0 26px 40px; }
-.topics-page-list .session .s-title { max-width: none; }
-/* No second row here, so drop the gap that kept titles off-centre. Dates sit
-   on the right edge and give way to the edit/delete buttons on hover. */
-.topics-page-list .session .s-row1 { margin-bottom: 0; padding-right: 0; }
-.topics-page-list .session:hover .s-date,
-.topics-page-list .session:focus-within .s-date { visibility: hidden; }
-.topics-page-list .session .s-date,
-.topics-page-list .count { font-size: 10px; }
+/* Topics page — subjects on the left, the selected subject's topics as a
+   card grid on the right. The two panes stack at narrow widths. */
+.topics-layout { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; overflow-y: auto; }
+.topics-subjects {
+  flex: 1 1 200px; max-width: 240px; box-sizing: border-box;
+  padding: 20px 12px; border-right: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.topics-eyebrow {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.topics-subjects > .topics-eyebrow { padding: 0 11px 10px; }
+.topics-subject {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 38px; padding: 0 11px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: none; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 550; color: var(--fg-dim); text-align: left;
+  transition: background .14s, color .14s, border-color .14s;
+}
+.topics-subject:hover { background: var(--card); color: var(--fg); }
+.topics-subject.on { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }
+.topics-subject-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topics-subject .count { flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.topics-subjects-hint { padding: 12px 11px 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+
+.topics-main { flex: 999 1 420px; min-width: 0; padding: 20px 28px 40px; }
+.topics-main-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 18px;
+}
+.topics-main-title { margin: 0; font-size: 17px; font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+.topics-search {
+  height: 38px; width: 260px; max-width: 100%; box-sizing: border-box;
+  padding: 0 13px; border-radius: var(--r); border: 1px solid var(--border);
+  background: var(--card); color: var(--fg); font-family: inherit; font-size: 12.5px;
+}
+.topics-search::placeholder { color: var(--muted); }
+.topics-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
+.topics-error { margin-bottom: 12px; font-size: 12px; color: var(--danger); }
+.topics-empty {
+  padding: 40px 12px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  font-size: 12.5px; line-height: 1.5; color: var(--muted); text-align: center;
+}
+
+.tp-section + .tp-section { margin-top: 26px; }
+.tp-section-head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.tp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.tp-card {
+  position: relative; min-height: 92px; border-radius: var(--r);
+  border: 1px solid var(--border-soft); background: var(--card);
+  display: flex; flex-direction: column;
+  transition: background .14s, border-color .14s, box-shadow .14s;
+}
+.tp-card:hover { background: var(--card-2); border-color: var(--border); box-shadow: var(--sh-1); }
+.tp-card.active { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-weak); }
+.tp-card[draggable='true']:active { cursor: grabbing; }
+.tp-card.skeleton { pointer-events: none; opacity: .45; background: var(--card-2); }
+.tp-card-main {
+  flex: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 14px;
+  padding: 14px 15px; border: none; background: none; border-radius: inherit;
+  color: inherit; font-family: inherit; text-align: left; cursor: pointer;
+}
+.tp-card-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tp-card-title {
+  font-size: 13.5px; font-weight: 550; color: var(--fg-dim); line-height: 1.35;
+  padding-right: 52px; overflow-wrap: anywhere;
+}
+.tp-card:hover .tp-card-title, .tp-card.active .tp-card-title { color: var(--fg); }
+.tp-card-date { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.tp-card .subject-input { margin: 0 15px 12px; width: auto; }
+/* Edit / delete — revealed on hover or keyboard focus. */
+.tp-card-actions {
+  position: absolute; top: 8px; right: 8px; display: flex; gap: 2px;
+  opacity: 0; transition: opacity .12s;
+}
+.tp-card:hover .tp-card-actions,
+.tp-card:focus-within .tp-card-actions { opacity: 1; }
+.tp-card-btn {
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: var(--r-sm); border: 1px solid transparent; background: transparent;
+  color: var(--muted); cursor: pointer;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.tp-card-btn:hover { color: var(--fg); background: var(--card-3); }
+.tp-card-btn.danger:hover { color: var(--danger); background: var(--danger-weak); border-color: var(--danger-line); }
+@media (hover: none) { .tp-card-actions { opacity: 1; } }
+@media (max-width: 720px) {
+  .topics-subjects {
+    max-width: none; flex-basis: 100%;
+    flex-direction: row; flex-wrap: wrap; gap: 6px;
+    border-right: none; border-bottom: 1px solid var(--border-soft); padding: 14px 16px;
+  }
+  .topics-subjects > .topics-eyebrow, .topics-subjects-hint { display: none; }
+  .topics-main { padding: 16px; }
+}
 
 .sb-section {
   padding: 16px 16px 8px;

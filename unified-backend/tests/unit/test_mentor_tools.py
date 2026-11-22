@@ -75,6 +75,17 @@ GOLDEN_TOOLS = [
         "input_schema": _NO_INPUT_SCHEMA,
     },
     {
+        "name": "add_youtube_video",
+        "description": (
+            "Add a YouTube video to the user's knowledge: fetches its full "
+            "transcript, stores it for search_documents, and returns the title, "
+            "length and a short summary. Call this whenever the user shares a "
+            "YouTube link and wants to learn from or discuss it, then use "
+            "search_documents for details from the video."
+        ),
+        "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    },
+    {
         "name": "record_diagnostic_verdict",
         "description": (
             "Record mastery for the specific subtopics the user's answers gave enough "
@@ -130,6 +141,7 @@ class TestSchemaParity:
         assert LOOP_TOOL_NAMES == {
             "search_documents", "search_other_topics",
             "get_user_profile", "get_skill_state", "get_past_sessions",
+            "add_youtube_video",
         }
         assert DIAGNOSTIC_VERDICT_TOOL.name not in LOOP_TOOL_NAMES
 
@@ -325,3 +337,51 @@ class TestTracing:
         prompt = trace.call_args.args[3]
         assert prompt == "{}"
         assert "SECRET-FACT" not in prompt
+
+
+class TestAddYoutubeVideo:
+    _DONE = {
+        "status": "completed", "title": "Neural nets", "duration_seconds": 1105,
+        "chunk_count": 24, "summary": "Explains neurons and layers.",
+    }
+
+    @pytest.mark.asyncio
+    async def test_ingests_new_video_and_returns_summary(self):
+        turn = TurnState(user_id="u1", topic_title="ML", topic_id="t1")
+        with (
+            patch("app.services.mentor_tools.get_video", AsyncMock(side_effect=[None, self._DONE])),
+            patch("app.services.mentor_tools.create_video_job", AsyncMock()) as create,
+            patch("app.services.mentor_tools.run_video_ingest", AsyncMock()) as ingest,
+        ):
+            result = await run_tool("add_youtube_video", {"url": "https://youtu.be/2tPQaOZPpUw?si=x"}, turn)
+        create.assert_awaited_once_with("u1", "t1", "2tPQaOZPpUw")
+        ingest.assert_awaited_once_with("u1", "t1", "2tPQaOZPpUw")
+        assert "Neural nets" in result and "18:25" in result and "Explains neurons" in result
+
+    @pytest.mark.asyncio
+    async def test_already_ingested_video_is_not_refetched(self):
+        turn = TurnState(user_id="u1", topic_title="ML", topic_id="t1")
+        with (
+            patch("app.services.mentor_tools.get_video", AsyncMock(return_value=self._DONE)),
+            patch("app.services.mentor_tools.run_video_ingest", AsyncMock()) as ingest,
+        ):
+            result = await run_tool("add_youtube_video", {"url": "2tPQaOZPpUw"}, turn)
+        ingest.assert_not_awaited()
+        assert "24" in result
+
+    @pytest.mark.asyncio
+    async def test_failure_reason_is_returned(self):
+        turn = TurnState(user_id="u1", topic_title="ML", topic_id="t1")
+        failed = {"status": "failed", "error": "YouTube blocked the transcript request"}
+        with (
+            patch("app.services.mentor_tools.get_video", AsyncMock(side_effect=[None, failed])),
+            patch("app.services.mentor_tools.create_video_job", AsyncMock()),
+            patch("app.services.mentor_tools.run_video_ingest", AsyncMock()),
+        ):
+            result = await run_tool("add_youtube_video", {"url": "2tPQaOZPpUw"}, turn)
+        assert "YouTube blocked" in result
+
+    @pytest.mark.asyncio
+    async def test_bad_link(self):
+        result = await run_tool("add_youtube_video", {"url": "https://example.com"}, TurnState("u1", "ML", topic_id="t1"))
+        assert "isn't a valid YouTube" in result

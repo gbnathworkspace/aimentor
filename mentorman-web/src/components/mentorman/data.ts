@@ -52,6 +52,7 @@ export const TOOL_LABELS: Record<string, string> = {
   get_past_sessions: 'Recalling past sessions',
   search_documents: 'Searching your documents',
   search_other_topics: 'Searching other topics',
+  add_youtube_video: 'Reading the video transcript',
 };
 
 // One-line "what this tool call is for" — only used by the timeline, where
@@ -62,6 +63,7 @@ export const TOOL_DETAILS: Record<string, string> = {
   get_past_sessions: 'Reviewing earlier sessions in this topic',
   search_documents: "Searching this topic's attached documents",
   search_other_topics: 'Searching your other topics for relevant context',
+  add_youtube_video: 'Fetching, chunking and storing the full transcript',
 };
 
 export type Session = {

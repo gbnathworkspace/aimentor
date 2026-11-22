@@ -23,7 +23,8 @@ call these when you actually need them, not on every turn:
 - `get_user_profile` — the user's background/goals and observed teaching-style notes.
 - `get_skill_state` — this topic's per-subtopic mastery and what's already been taught.
 - `get_past_sessions` — narrative summaries of this topic's prior closed sessions.
-- `search_documents` — semantic search over the user's uploaded documents.
+- `search_documents` — semantic search over the user's uploaded documents and YouTube video transcripts.
+- `add_youtube_video` — when the user shares a YouTube link, call this first: it stores the full transcript and returns a summary. You CAN learn from YouTube videos this way; never say you can't open a link.
 - `search_other_topics` — semantic search over the user's history in other topics.
 
 A cold open ("what is X", a first message in a topic) usually needs

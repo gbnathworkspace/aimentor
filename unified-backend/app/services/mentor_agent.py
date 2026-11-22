@@ -334,7 +334,9 @@ class MentorAgent:
         final_tool_calls: list[dict] = []
         start = time.monotonic()
 
-        turn = mentor_tools.TurnState(user_id=user_id, topic_title=topic_title, context=context)
+        turn = mentor_tools.TurnState(
+            user_id=user_id, topic_title=topic_title, context=context, topic_id=topic_id
+        )
         # Final round drops the loop tools so the model has to answer instead
         # of asking for more. Bind order matches the pre-toolkit order, which
         # keeps the prompt-cache prefix stable.

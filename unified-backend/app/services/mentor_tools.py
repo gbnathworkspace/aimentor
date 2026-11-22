@@ -10,6 +10,7 @@ prompt-injected document tells it to.
 See .kiro/specs/mentor-langchain-tools/design.md.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -23,7 +24,14 @@ from app.services.llm_trace import write_trace
 from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.topic_service import UNNAMED_TITLE
 from app.services.vector_search import vector_search
-from app.services.video_ingest import VIDEO_SOURCE, format_timestamp
+from app.services.video_ingest import (
+    VIDEO_SOURCE,
+    create_video_job,
+    format_timestamp,
+    get_video,
+    run_video_ingest,
+)
+from app.services.youtube_transcript import parse_video_id
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +41,7 @@ class TurnState:
     user_id: str
     topic_title: str
     context: dict[str, Any] = field(default_factory=dict)
+    topic_id: str | None = None
 
 
 _SEARCH_DOCUMENTS_DESCRIPTION = (
@@ -41,6 +50,14 @@ _SEARCH_DOCUMENTS_DESCRIPTION = (
     "specific query. Video results start with the video title and timestamp. Use this when you need a "
     "detail that isn't already in the Uploaded Documents section — the "
     "default injection is a small unranked sample, not the full set."
+)
+
+_ADD_YOUTUBE_VIDEO_DESCRIPTION = (
+    "Add a YouTube video to the user's knowledge: fetches its full "
+    "transcript, stores it for search_documents, and returns the title, "
+    "length and a short summary. Call this whenever the user shares a "
+    "YouTube link and wants to learn from or discuss it, then use "
+    "search_documents for details from the video."
 )
 
 _SEARCH_OTHER_TOPICS_DESCRIPTION = (
@@ -127,6 +144,57 @@ async def search_documents(query: str, turn: Annotated[TurnState, InjectedToolAr
     return _format_search_results(results, "No matching documents found.")
 
 
+# How long a turn waits for a video ingest before telling the model it's
+# still running (it carries on in the background either way). A 2-hour
+# video with captions takes well under this.
+_VIDEO_WAIT_SECONDS = 90
+
+
+def _describe_video(video: dict) -> str:
+    duration = video.get("duration_seconds")
+    lines = [
+        f"Video: {video.get('title') or video.get('url')}",
+        f"Length: {format_timestamp(duration) if duration else 'unknown'}",
+        f"Transcript chunks stored: {video.get('chunk_count') or 0}",
+    ]
+    if video.get("summary"):
+        lines.append(f"Summary: {video['summary']}")
+    lines.append("Use search_documents for specific details from this video.")
+    return "\n".join(lines)
+
+
+@tool("add_youtube_video", description=_ADD_YOUTUBE_VIDEO_DESCRIPTION)
+async def add_youtube_video(url: str, turn: Annotated[TurnState, InjectedToolArg]) -> str:
+    video_id = parse_video_id(url)
+    if not video_id:
+        return "That isn't a valid YouTube video link."
+    if not turn.topic_id:
+        return "Videos can only be added inside a topic."
+
+    existing = await get_video(turn.user_id, video_id)
+    if existing and existing.get("status") == "completed":
+        return _describe_video(existing)
+    if not existing or existing.get("status") == "failed":
+        await create_video_job(turn.user_id, turn.topic_id, video_id)
+        job = asyncio.create_task(run_video_ingest(turn.user_id, turn.topic_id, video_id))
+        try:
+            # shield: a timeout stops the wait, not the ingest.
+            await asyncio.wait_for(asyncio.shield(job), _VIDEO_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+
+    video = await get_video(turn.user_id, video_id) or {}
+    status = video.get("status")
+    if status == "completed":
+        return _describe_video(video)
+    if status == "failed":
+        return f"Could not add the video: {video.get('error') or 'unknown error'}"
+    return (
+        "The video is still being processed (long video). Tell the user it "
+        "will be searchable in a minute or two."
+    )
+
+
 # Cross-topic only: this topic's own history goes through get_past_sessions.
 # The model has to choose to look, so nothing crosses topics silently.
 @tool("search_other_topics", description=_SEARCH_OTHER_TOPICS_DESCRIPTION)
@@ -177,6 +245,7 @@ async def record_diagnostic_verdict(
 
 LOOP_TOOLS: list[BaseTool] = [
     search_documents, search_other_topics, get_user_profile, get_skill_state, get_past_sessions,
+    add_youtube_video,
 ]
 LOOP_TOOL_NAMES = frozenset(t.name for t in LOOP_TOOLS)
 DIAGNOSTIC_VERDICT_TOOL: BaseTool = record_diagnostic_verdict

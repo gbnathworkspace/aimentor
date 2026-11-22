@@ -6,9 +6,12 @@ import { truncateFilename } from '@/lib/chat-upload/utils';
 import { TOOL_LABELS, TOOL_DETAILS, type ToolEvent } from './data';
 import {
   deleteTopicDocument,
+  deleteTopicVideo,
   listTopicDocuments,
+  listTopicVideos,
   uploadTopicDocuments,
   type TopicDocument,
+  type TopicVideo,
 } from '@/lib/topic-documents-api';
 
 const SUPPORTED_ACCEPT = '.pdf,.csv';
@@ -105,6 +108,7 @@ function WorkingOnReply({ events, onDismiss }: { events: ToolEvent[]; onDismiss:
  */
 export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { topicId: string | null; toolEvents?: ToolEvent[]; onDismissWorking?: () => void }) {
   const [documents, setDocuments] = useState<TopicDocument[]>([]);
+  const [videos, setVideos] = useState<TopicVideo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -112,11 +116,17 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
-    if (!topicId) { setDocuments([]); return; }
+    if (!topicId) { setDocuments([]); setVideos([]); return; }
     listTopicDocuments(topicId).then(setDocuments);
+    listTopicVideos(topicId).then(setVideos);
   }, [topicId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // A YouTube link pasted in chat is ingested by the mentor's
+  // add_youtube_video tool mid-reply — reload once each such call finishes.
+  const videoToolsDone = (toolEvents ?? []).filter(e => e.name === 'add_youtube_video' && e.endedAt).length;
+  useEffect(() => { if (videoToolsDone) refresh(); }, [videoToolsDone, refresh]);
 
   const onSelect = useCallback((fileList: FileList | null) => {
     if (!topicId || !fileList || fileList.length === 0) return;
@@ -139,7 +149,13 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
     deleteTopicDocument(topicId, filename).catch(() => refresh());
   }, [topicId, refresh]);
 
+  const onRemoveVideo = useCallback((videoId: string) => {
+    setVideos(vs => vs.filter(v => v.video_id !== videoId));
+    deleteTopicVideo(videoId).catch(() => refresh());
+  }, [refresh]);
+
   if (!topicId) return null;
+  const itemCount = documents.length + videos.length;
 
   if (collapsed) {
     return (
@@ -173,7 +189,7 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
           </button>
           <span className="context-panel-title-group">
             <span className="context-panel-title">Context</span>
-            {documents.length > 0 && <span className="context-panel-count">{documents.length}</span>}
+            {itemCount > 0 && <span className="context-panel-count">{itemCount}</span>}
           </span>
           <button
             type="button"
@@ -206,8 +222,32 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
 
         {contentOpen && error && <div className="context-panel-error">{error}</div>}
 
-        {contentOpen && documents.length > 0 && (
+        {contentOpen && itemCount > 0 && (
           <div className="context-panel-list">
+            {videos.map(v => (
+              <div key={v.video_id} className="context-doc-card context-video-card">
+                <a href={v.url} target="_blank" rel="noopener noreferrer" className="context-video-link" title={v.title ?? v.url}>
+                  <img src={`https://i.ytimg.com/vi/${v.video_id}/mqdefault.jpg`} alt="" className="context-video-thumb" loading="lazy" />
+                  <span className="context-video-text">
+                    <span className="context-doc-name">{v.title ?? v.url}</span>
+                    {v.status === 'failed'
+                      ? <span className="context-video-status context-video-status--bad">{v.error || 'Could not read this video'}</span>
+                      : v.status !== 'completed'
+                        ? <span className="context-video-status">Reading transcript…</span>
+                        : v.sparse && <span className="context-video-status context-video-status--bad">Captions incomplete</span>}
+                  </span>
+                </a>
+                <button
+                  type="button"
+                  className="context-doc-remove"
+                  title="Remove video"
+                  aria-label={`Remove ${v.title ?? 'video'}`}
+                  onClick={() => onRemoveVideo(v.video_id)}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+            ))}
             {documents.map(doc => (
               <div key={doc.filename} className="context-doc-card">
                 <Icon name="doc" size={14} />
@@ -230,8 +270,8 @@ export function TopicContextPanel({ topicId, toolEvents, onDismissWorking }: { t
 
         {contentOpen && (
           <button type="button" className="context-panel-dropzone" onClick={() => inputRef.current?.click()} disabled={loading}>
-            {documents.length === 0
-              ? 'No documents yet — add notes, syllabi, or problem sets.'
+            {itemCount === 0
+              ? 'No documents yet — add notes, syllabi, or problem sets, or paste a YouTube link in chat.'
               : '+ Add a document'}
           </button>
         )}

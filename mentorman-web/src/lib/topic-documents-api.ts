@@ -40,3 +40,24 @@ export async function deleteTopicDocument(topicId: string, filename: string): Pr
     method: 'DELETE',
   });
 }
+
+/** A YouTube video added to the topic (unified-backend/app/routers/videos.py). */
+export interface TopicVideo {
+  video_id: string;
+  url: string;
+  title: string | null;
+  status: 'queued' | 'fetching' | 'embedding' | 'summarizing' | 'completed' | 'failed';
+  sparse?: boolean;
+  error?: string | null;
+}
+
+export async function listTopicVideos(topicId: string): Promise<TopicVideo[]> {
+  const res = await fetch(`/api/topic/${topicId}/videos`, { cache: 'no-store' });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.videos ?? [];
+}
+
+export async function deleteTopicVideo(videoId: string): Promise<void> {
+  await fetch(`/api/videos/${encodeURIComponent(videoId)}`, { method: 'DELETE' });
+}

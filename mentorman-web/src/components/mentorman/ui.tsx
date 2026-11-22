@@ -323,6 +323,22 @@ export function formatBubbleTime(iso: string): string {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(d);
 }
 
+const YOUTUBE_RE = /https?:\/\/(?:www\.|m\.)?(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:\S*?&)?v=|shorts\/|embed\/|live\/))([\w-]{11})\S*/g;
+
+/** YouTube video ids in `text`, deduped, in order. */
+export function youtubeIds(text: string): string[] {
+  return [...new Set([...text.matchAll(YOUTUBE_RE)].map(m => m[1]))];
+}
+
+function YoutubeThumb({ id }: { id: string }) {
+  return (
+    <a className="yt-thumb" href={`https://www.youtube.com/watch?v=${id}`} target="_blank" rel="noopener noreferrer" aria-label="Open video on YouTube">
+      <img src={`https://i.ytimg.com/vi/${id}/hqdefault.jpg`} alt="YouTube video thumbnail" loading="lazy" />
+      <span className="yt-play" aria-hidden="true" />
+    </a>
+  );
+}
+
 export function Bubble({ who, item, delay, onShorten }: {
   who: 'mentor' | 'user';
   /** Latest unanswered mentor reply only: regenerate it in 2-3 sentences. */
@@ -331,6 +347,9 @@ export function Bubble({ who, item, delay, onShorten }: {
   delay?: number;
 }) {
   const time = item.timestamp && formatBubbleTime(item.timestamp);
+  const videos = who === 'user' ? youtubeIds(item.text) : [];
+  // A message that is only the link(s) shows just the thumbnail(s).
+  const text = videos.length ? item.text.replace(YOUTUBE_RE, '').trim() : item.text;
   return (
     <Msg who={who} delay={delay} modeLabel={item.label}>
       {/* tabIndex makes the timestamp reachable via keyboard/touch focus, not
@@ -350,7 +369,8 @@ export function Bubble({ who, item, delay, onShorten }: {
               ))}
             </div>
           )}
-          {fmt(item.text)}
+          {videos.map(id => <YoutubeThumb key={id} id={id} />)}
+          {text && fmt(text)}
           {item.nudge && (
             <div className="nudge">
               <div className="label">Nudge</div>

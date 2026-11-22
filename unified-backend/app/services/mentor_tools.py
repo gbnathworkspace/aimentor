@@ -23,7 +23,10 @@ from app.services.llm_trace import write_trace
 from app.services.subtopic_weights import validate_subtopic_updates
 from app.services.topic_service import UNNAMED_TITLE
 from app.services.vector_search import vector_search
-from app.services.video_ingest import VIDEO_SOURCE, format_timestamp
+from app.services.video_ingest import (
+    VIDEO_SOURCE, create_video_job, format_timestamp, get_video, run_video_ingest,
+)
+from app.services.youtube_transcript import parse_video_id
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class TurnState:
     user_id: str
     topic_title: str
     context: dict[str, Any] = field(default_factory=dict)
+    topic_id: str = ""
 
 
 _SEARCH_DOCUMENTS_DESCRIPTION = (
@@ -68,6 +72,15 @@ _GET_PAST_SESSIONS_DESCRIPTION = (
     "Get narrative summaries of this topic's own prior closed sessions. "
     "Call this if the user references something discussed before in "
     "this topic, or you need continuity with earlier sessions here."
+)
+
+_ADD_YOUTUBE_VIDEO_DESCRIPTION = (
+    "Watch a YouTube video the user shared: fetches its full transcript, "
+    "stores it so search_documents can find any part of it (with "
+    "timestamps), and returns the title, length and a summary. Call this "
+    "whenever the user's message contains a YouTube link (youtube.com or "
+    "youtu.be) — you CAN read YouTube videos through this tool. Takes a few "
+    "seconds; a video already added is returned instantly."
 )
 
 _RECORD_DIAGNOSTIC_VERDICT_DESCRIPTION = (
@@ -127,6 +140,26 @@ async def search_documents(query: str, turn: Annotated[TurnState, InjectedToolAr
     return _format_search_results(results, "No matching documents found.")
 
 
+@tool("add_youtube_video", description=_ADD_YOUTUBE_VIDEO_DESCRIPTION)
+async def add_youtube_video(url: str, turn: Annotated[TurnState, InjectedToolArg]) -> str:
+    video_id = parse_video_id(url)
+    if not video_id:
+        return "That isn't a valid YouTube video link."
+    video = await get_video(turn.user_id, video_id)
+    if not video or video.get("status") != "completed":
+        await create_video_job(turn.user_id, turn.topic_id, video_id)
+        await run_video_ingest(turn.user_id, turn.topic_id, video_id)  # never raises; status says how it went
+        video = await get_video(turn.user_id, video_id) or {}
+    if video.get("status") != "completed":
+        return f"Couldn't read this video: {video.get('error') or 'unknown error'}"
+    return (
+        f"Video added: \"{video.get('title') or video.get('url')}\" "
+        f"({format_timestamp(video.get('duration_seconds') or 0)}, {video.get('chunk_count')} transcript chunks).\n"
+        f"Summary: {video.get('summary') or '(none)'}\n"
+        "The full transcript is now searchable — use search_documents for specific parts."
+    )
+
+
 # Cross-topic only: this topic's own history goes through get_past_sessions.
 # The model has to choose to look, so nothing crosses topics silently.
 @tool("search_other_topics", description=_SEARCH_OTHER_TOPICS_DESCRIPTION)
@@ -177,6 +210,7 @@ async def record_diagnostic_verdict(
 
 LOOP_TOOLS: list[BaseTool] = [
     search_documents, search_other_topics, get_user_profile, get_skill_state, get_past_sessions,
+    add_youtube_video,
 ]
 LOOP_TOOL_NAMES = frozenset(t.name for t in LOOP_TOOLS)
 DIAGNOSTIC_VERDICT_TOOL: BaseTool = record_diagnostic_verdict

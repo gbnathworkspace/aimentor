@@ -8,6 +8,7 @@ import pytest
 from langchain_anthropic.chat_models import convert_to_anthropic_tool
 
 from app.models.skill import SubtopicMasteryUpdate
+from app.services import mentor_tools
 from app.services.mentor_tools import (
     DIAGNOSTIC_VERDICT_TOOL,
     LOOP_TOOL_NAMES,
@@ -75,6 +76,11 @@ GOLDEN_TOOLS = [
         "input_schema": _NO_INPUT_SCHEMA,
     },
     {
+        "name": "add_youtube_video",
+        "description": mentor_tools._ADD_YOUTUBE_VIDEO_DESCRIPTION,
+        "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    },
+    {
         "name": "record_diagnostic_verdict",
         "description": (
             "Record mastery for the specific subtopics the user's answers gave enough "
@@ -130,6 +136,7 @@ class TestSchemaParity:
         assert LOOP_TOOL_NAMES == {
             "search_documents", "search_other_topics",
             "get_user_profile", "get_skill_state", "get_past_sessions",
+            "add_youtube_video",
         }
         assert DIAGNOSTIC_VERDICT_TOOL.name not in LOOP_TOOL_NAMES
 
@@ -325,3 +332,32 @@ class TestTracing:
         prompt = trace.call_args.args[3]
         assert prompt == "{}"
         assert "SECRET-FACT" not in prompt
+
+
+class TestAddYoutubeVideo:
+    @pytest.mark.asyncio
+    async def test_bad_link(self):
+        out = await mentor_tools.add_youtube_video.ainvoke({"url": "not a link", "turn": TurnState("u1", "JS")})
+        assert "isn't a valid YouTube" in out
+
+    @pytest.mark.asyncio
+    async def test_ingests_new_video_under_this_topic(self):
+        turn = TurnState("u1", "JS", topic_id="t1")
+        done = {"status": "completed", "title": "Neural nets", "duration_seconds": 1105,
+                "chunk_count": 24, "summary": "Digits from pixels."}
+        with patch.object(mentor_tools, "get_video", AsyncMock(side_effect=[None, done])), \
+             patch.object(mentor_tools, "create_video_job", AsyncMock()) as create, \
+             patch.object(mentor_tools, "run_video_ingest", AsyncMock()) as run:
+            out = await mentor_tools.add_youtube_video.ainvoke({"url": "https://youtu.be/aircAruvnKk?si=x", "turn": turn})
+        create.assert_awaited_once_with("u1", "t1", "aircAruvnKk")
+        run.assert_awaited_once_with("u1", "t1", "aircAruvnKk")
+        assert "Neural nets" in out and "18:25" in out and "Digits from pixels." in out
+
+    @pytest.mark.asyncio
+    async def test_reports_failure(self):
+        failed = {"status": "failed", "error": "No transcript"}
+        with patch.object(mentor_tools, "get_video", AsyncMock(side_effect=[None, failed])), \
+             patch.object(mentor_tools, "create_video_job", AsyncMock()), \
+             patch.object(mentor_tools, "run_video_ingest", AsyncMock()):
+            out = await mentor_tools.add_youtube_video.ainvoke({"url": "aircAruvnKk", "turn": TurnState("u1", "JS")})
+        assert "No transcript" in out

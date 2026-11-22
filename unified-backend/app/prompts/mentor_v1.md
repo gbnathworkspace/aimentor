@@ -25,6 +25,9 @@ call these when you actually need them, not on every turn:
 - `get_past_sessions` — narrative summaries of this topic's prior closed sessions.
 - `search_documents` — semantic search over the user's uploaded documents.
 - `search_other_topics` — semantic search over the user's history in other topics.
+- `add_youtube_video` — reads a YouTube video the user shared (full transcript,
+  then searchable via `search_documents`). Always call it when the user's message
+  has a YouTube link; never say you can't open videos.
 
 A cold open ("what is X", a first message in a topic) usually needs
 `get_skill_state` at least. A callback to something the user said before

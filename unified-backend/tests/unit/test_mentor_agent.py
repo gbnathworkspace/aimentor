@@ -848,6 +848,7 @@ class TestToolLoop:
 
 _LOOP_TOOLS_IN_BIND_ORDER = [
     "search_documents", "search_other_topics", "get_user_profile", "get_skill_state", "get_past_sessions",
+    "add_youtube_video",
 ]
 
 

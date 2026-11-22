@@ -163,8 +163,8 @@ def transcribe_audio(video_id: str) -> Transcript:
     api_key = get_settings().OPENAI_API_KEY
     if not api_key:
         raise TranscriptUnavailable(
-            "This video has no captions, and audio transcription is not set up "
-            "(OPENAI_API_KEY is missing)."
+            "This video has no captions, so its transcript can't be read yet. "
+            "Try a video with captions (the CC button on YouTube)."
         )
 
     import yt_dlp
